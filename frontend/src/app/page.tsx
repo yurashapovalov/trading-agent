@@ -71,7 +71,7 @@ export default function Chat() {
           {messages.length === 0 && (
             <div className="text-center text-muted-foreground py-12">
               <Bot className="w-12 h-12 mx-auto mb-4 opacity-50" />
-              <p>Спроси что-нибудь о торговых данных</p>
+              <p>Спроси что-нибудь о торговых данных 🚀</p>
               <p className="text-sm mt-2">
                 Например: &quot;Найди SHORT входы на CL с winrate больше 70%&quot;
               </p>

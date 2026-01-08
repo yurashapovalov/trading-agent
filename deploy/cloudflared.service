@@ -1,0 +1,10 @@
+[Unit]
+Description=Cloudflare Tunnel
+After=trading-api.service
+
+[Service]
+ExecStart=/usr/bin/cloudflared tunnel --url http://localhost:8000
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
