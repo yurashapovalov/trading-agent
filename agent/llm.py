@@ -157,7 +157,7 @@ The database is DuckDB, so you can use DuckDB-specific SQL syntax including wind
 aggregations, and date/time functions. Always include a LIMIT clause to avoid returning too much data.
 
 Example queries:
-- "SELECT * FROM ohlcv_1min WHERE symbol = 'CL' AND timestamp >= '2025-12-01' LIMIT 100"
+- "SELECT * FROM ohlcv_1min WHERE symbol = 'NQ' AND timestamp >= '2025-12-01' LIMIT 100"
 - "SELECT DATE(timestamp) as date, MAX(high) - MIN(low) as range FROM ohlcv_1min GROUP BY date"
 """,
         input_schema={
@@ -183,14 +183,14 @@ risk/reward parameters. It scans through all available data, simulates entries a
 and returns the times that meet your criteria for stop loss, take profit, and win rate.
 
 Use this tool when the user asks questions like:
-- "When is the best time to enter a short position on CL?"
+- "When is the best time to enter a short position on NQ?"
 - "Find entry times with at least 70% win rate"
 - "What times have good risk/reward for long trades?"
 
 The tool returns a table with columns: hour, minute, direction, stop_loss, winrate, avg_profit, total_trades.
 Results are sorted by win rate descending. Only times with sufficient sample size (at least 5 trades) are included.
 
-Important: The tool tests entries at each minute within the specified hour range. For CL (Crude Oil),
+Important: The tool tests entries at each minute within the specified hour range. For NQ (Nasdaq),
 the most volatile and tradeable hours are typically 9:00-11:00 and 13:00-14:30 ET.
 """,
         input_schema={
@@ -198,7 +198,7 @@ the most volatile and tradeable hours are typically 9:00-11:00 and 13:00-14:30 E
             "properties": {
                 "symbol": {
                     "type": "string",
-                    "description": "Trading symbol to analyze. Currently supported: 'CL' (Crude Oil), 'NQ' (Nasdaq), 'ES' (S&P 500)"
+                    "description": "Trading symbol to analyze. Currently supported: 'NQ' (Nasdaq), 'ES' (S&P 500)"
                 },
                 "direction": {
                     "type": "string",
@@ -211,7 +211,7 @@ the most volatile and tradeable hours are typically 9:00-11:00 and 13:00-14:30 E
                 },
                 "max_stop_loss": {
                     "type": "number",
-                    "description": "Maximum stop loss in ticks. For CL: 1 tick = $0.01 = $10. Typical range: 10-30 ticks"
+                    "description": "Maximum stop loss in ticks. For NQ: 1 tick = $0.01 = $10. Typical range: 10-30 ticks"
                 },
                 "min_winrate": {
                     "type": "number",
@@ -276,7 +276,7 @@ Returns a detailed report with:
             "properties": {
                 "symbol": {
                     "type": "string",
-                    "description": "Trading symbol: 'CL' (Crude Oil, tick=$10), 'NQ' (Nasdaq, tick=$5), 'ES' (S&P 500, tick=$12.50)"
+                    "description": "Trading symbol: 'NQ' (Nasdaq, tick=$5)"
                 },
                 "entry_hour": {
                     "type": "integer",
@@ -293,11 +293,11 @@ Returns a detailed report with:
                 },
                 "stop_loss": {
                     "type": "number",
-                    "description": "Stop loss distance in ticks from entry price. For CL: 20 ticks = $0.20 = $200 risk per contract"
+                    "description": "Stop loss distance in ticks from entry price. For NQ: 20 ticks = $0.20 = $200 risk per contract"
                 },
                 "take_profit": {
                     "type": "number",
-                    "description": "Take profit distance in ticks from entry price. For CL: 30 ticks = $0.30 = $300 target per contract"
+                    "description": "Take profit distance in ticks from entry price. For NQ: 30 ticks = $0.30 = $300 target per contract"
                 },
                 "start_date": {
                     "type": "string",
@@ -323,7 +323,7 @@ Use it to analyze volatility patterns, volume distribution, and price ranges bef
 trading strategies.
 
 Use this tool when the user asks:
-- "What's the average daily range for CL?"
+- "What's the average daily range for NQ?"
 - "Show me volatility by hour"
 - "What's the typical volume distribution?"
 - "Give me an overview of the market data"
@@ -346,7 +346,7 @@ The volatility_by_hour data is particularly useful for identifying:
             "properties": {
                 "symbol": {
                     "type": "string",
-                    "description": "Trading symbol to analyze: 'CL', 'NQ', 'ES'"
+                    "description": "Trading symbol to analyze: 'NQ'"
                 },
                 "group_by": {
                     "type": "string",
@@ -376,7 +376,7 @@ The volatility_by_hour data is particularly useful for identifying:
 This tool automatically handles date calculations - you don't need to calculate dates yourself!
 
 Parameters:
-- symbol: Trading symbol (NQ, ES, CL)
+- symbol: Trading symbol (NQ)
 - period: Time period in natural language:
   - "today", "yesterday" - single day
   - "last_week", "last_month", "last_3_months", "last_year" - relative periods
@@ -407,7 +407,7 @@ Example uses:
             "properties": {
                 "symbol": {
                     "type": "string",
-                    "description": "Trading symbol: NQ, ES, CL"
+                    "description": "Trading symbol: NQ"
                 },
                 "period": {
                     "type": "string",
@@ -462,7 +462,7 @@ to build strategies specific to market conditions.
             "properties": {
                 "symbol": {
                     "type": "string",
-                    "description": "Trading symbol: NQ, ES, CL"
+                    "description": "Trading symbol: NQ"
                 },
                 "condition": {
                     "type": "string",
@@ -609,7 +609,7 @@ Format them EXACTLY like this (on separate lines at the very end):
 
 These should be contextual to what was just discussed, not generic.
 
-Tick values: NQ=0.25 ($5), ES=0.25 ($12.50), CL=0.01 ($10)"""
+Tick values: NQ=0.25 ($5), ES=0.25 ($12.50), NQ=0.25 ($5)"""
 
     def chat(self, user_message: str) -> dict:
         """Send message and get response, handling tool calls.
