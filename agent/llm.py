@@ -494,7 +494,7 @@ Rules:
         """Stream chat response with tool events.
 
         Yields:
-            dict events: {type: 'tool_start'|'tool_end'|'text'|'done', ...}
+            dict events: {type: 'tool_start'|'tool_end'|'text_delta'|'done', ...}
         """
         self.messages.append({
             "role": "user",
@@ -502,65 +502,90 @@ Rules:
         })
 
         while True:
-            response = self.client.messages.create(
+            # Use streaming API
+            assistant_content = []
+            text_response = ""
+            tool_uses = []
+            current_tool = None
+
+            with self.client.messages.stream(
                 model=self.model,
                 max_tokens=4096,
                 system=self.system_prompt,
                 tools=self.registry.get_all_definitions(),
                 messages=self.messages
-            )
+            ) as stream:
+                for event in stream:
+                    if event.type == "content_block_start":
+                        if event.content_block.type == "tool_use":
+                            current_tool = {
+                                "id": event.content_block.id,
+                                "name": event.content_block.name,
+                                "input": ""
+                            }
+                    elif event.type == "content_block_delta":
+                        if event.delta.type == "text_delta":
+                            text_response += event.delta.text
+                            yield {"type": "text_delta", "content": event.delta.text}
+                        elif event.delta.type == "input_json_delta":
+                            if current_tool:
+                                current_tool["input"] += event.delta.partial_json
+                    elif event.type == "content_block_stop":
+                        if current_tool:
+                            try:
+                                current_tool["input"] = json.loads(current_tool["input"])
+                            except:
+                                current_tool["input"] = {}
+                            tool_uses.append(current_tool)
+                            current_tool = None
 
-            # Collect assistant response
-            assistant_content = []
-            text_response = ""
-            tool_uses = []
-
-            for block in response.content:
-                if block.type == "text":
-                    text_response += block.text
-                    assistant_content.append(block)
-                elif block.type == "tool_use":
-                    tool_uses.append(block)
-                    assistant_content.append(block)
+            # Build assistant content for message history
+            if text_response:
+                assistant_content.append({"type": "text", "text": text_response})
+            for tool in tool_uses:
+                assistant_content.append({
+                    "type": "tool_use",
+                    "id": tool["id"],
+                    "name": tool["name"],
+                    "input": tool["input"]
+                })
 
             self.messages.append({
                 "role": "assistant",
                 "content": assistant_content
             })
 
-            # If no tool calls, yield text and done
+            # If no tool calls, we're done
             if not tool_uses:
-                if text_response:
-                    yield {"type": "text", "content": text_response}
                 yield {"type": "done"}
                 return
 
             # Execute tools with events
             tool_results = []
-            for tool_use in tool_uses:
+            for tool in tool_uses:
                 # Emit tool_start
                 yield {
                     "type": "tool_start",
-                    "name": tool_use.name,
-                    "input": tool_use.input
+                    "name": tool["name"],
+                    "input": tool["input"]
                 }
 
                 start_time = datetime.now()
-                result = self.registry.execute(tool_use.name, tool_use.input)
+                result = self.registry.execute(tool["name"], tool["input"])
                 duration_ms = (datetime.now() - start_time).total_seconds() * 1000
 
                 # Emit tool_end
                 yield {
                     "type": "tool_end",
-                    "name": tool_use.name,
-                    "input": tool_use.input,
+                    "name": tool["name"],
+                    "input": tool["input"],
                     "result": result,
                     "duration_ms": duration_ms
                 }
 
                 tool_results.append({
                     "type": "tool_result",
-                    "tool_use_id": tool_use.id,
+                    "tool_use_id": tool["id"],
                     "content": json.dumps(result, default=str)
                 })
 

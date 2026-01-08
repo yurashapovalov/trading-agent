@@ -50,6 +50,7 @@ export default function Chat() {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [currentTools, setCurrentTools] = useState<ToolUsage[]>([])
+  const [streamingText, setStreamingText] = useState("")
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   const scrollToBottom = () => {
@@ -58,7 +59,7 @@ export default function Chat() {
 
   useEffect(() => {
     scrollToBottom()
-  }, [messages, currentTools])
+  }, [messages, currentTools, streamingText])
 
   const sendMessage = async (text: string) => {
     if (!text.trim() || isLoading) return
@@ -67,6 +68,7 @@ export default function Chat() {
     setMessages((prev) => [...prev, { role: "user", content: text }])
     setIsLoading(true)
     setCurrentTools([])
+    setStreamingText("")
 
     try {
       const response = await fetch(`${API_URL}/chat/stream`, {
@@ -123,8 +125,9 @@ export default function Chat() {
                       : t
                   )
                 )
-              } else if (event.type === "text") {
-                finalText = event.content
+              } else if (event.type === "text_delta") {
+                finalText += event.content
+                setStreamingText((prev) => prev + event.content)
               } else if (event.type === "done") {
                 // Add final message
                 setMessages((prev) => [
@@ -136,6 +139,7 @@ export default function Chat() {
                   },
                 ])
                 setCurrentTools([])
+                setStreamingText("")
               } else if (event.type === "error") {
                 setMessages((prev) => [
                   ...prev,
@@ -161,7 +165,7 @@ export default function Chat() {
   }
 
   const handleSuggestionClick = (suggestion: string) => {
-    sendMessage(suggestion)
+    setInput(suggestion)
   }
 
   const getToolState = (status: "running" | "completed") => {
@@ -232,7 +236,16 @@ export default function Chat() {
             </div>
           )}
 
-          {isLoading && currentTools.length === 0 && (
+          {/* Streaming text */}
+          {streamingText && (
+            <Message from="assistant">
+              <MessageContent>
+                <MessageResponse>{streamingText}</MessageResponse>
+              </MessageContent>
+            </Message>
+          )}
+
+          {isLoading && currentTools.length === 0 && !streamingText && (
             <div className="flex items-center gap-2 text-muted-foreground">
               <Loader size={16} />
               <span className="text-sm">Думаю...</span>
