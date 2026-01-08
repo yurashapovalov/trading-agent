@@ -739,8 +739,13 @@ Tick values: NQ=0.25 ($5), ES=0.25 ($12.50), CL=0.01 ($10)"""
                     if final_msg and final_msg.usage:
                         input_tokens = final_msg.usage.input_tokens
                         output_tokens = final_msg.usage.output_tokens
-                        # Claude Sonnet pricing: $3/1M input, $15/1M output
-                        cost = (input_tokens * 3 + output_tokens * 15) / 1_000_000
+                        # Dynamic pricing based on model
+                        if "haiku" in self.model.lower():
+                            # Haiku 4.5: $1/1M input, $5/1M output
+                            cost = (input_tokens * 1 + output_tokens * 5) / 1_000_000
+                        else:
+                            # Sonnet: $3/1M input, $15/1M output
+                            cost = (input_tokens * 3 + output_tokens * 15) / 1_000_000
                         usage_data = {
                             "input_tokens": input_tokens,
                             "output_tokens": output_tokens,
