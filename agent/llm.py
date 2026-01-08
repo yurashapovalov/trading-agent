@@ -134,7 +134,8 @@ def register_default_tools():
         query_ohlcv,
         find_optimal_entries,
         backtest_strategy,
-        get_statistics
+        get_statistics,
+        analyze_data
     )
 
     # query_ohlcv
@@ -360,6 +361,70 @@ The volatility_by_hour data is particularly useful for identifying:
         function=get_statistics
     )
 
+    # analyze_data - PRIMARY TOOL for data analysis
+    REGISTRY.register(
+        name="analyze_data",
+        description="""PRIMARY TOOL for analyzing trading data. Use this tool FIRST for any data analysis questions.
+
+This tool automatically handles date calculations - you don't need to calculate dates yourself!
+
+Parameters:
+- symbol: Trading symbol (NQ, ES, CL)
+- period: Time period in natural language:
+  - "today", "yesterday" - single day
+  - "last_week", "last_month", "last_3_months", "last_year" - relative periods
+  - "all" - entire available data range
+  - "2025-01-01 to 2025-01-31" - exact date range
+  - "30" or "30d" - last N days
+- analysis: Type of analysis to perform:
+  - "summary" - key statistics overview
+  - "daily" - day-by-day breakdown with OHLCV
+  - "anomalies" - find unusual days (high volatility/volume)
+  - "hourly" - volatility pattern by hour
+  - "trend" - price trend and momentum
+
+The tool returns:
+- actual_range: The actual dates used (resolved from your period)
+- Relevant analysis data based on analysis type
+
+IMPORTANT: Always use this tool instead of query_ohlcv for standard analysis.
+The tool automatically determines correct dates based on available data.
+
+Example uses:
+- User asks "what happened last month?" → analyze_data(symbol="NQ", period="last_month", analysis="summary")
+- User asks "any anomalies recently?" → analyze_data(symbol="NQ", period="last_month", analysis="anomalies")
+- User asks "daily breakdown" → analyze_data(symbol="NQ", period="last_week", analysis="daily")
+""",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "symbol": {
+                    "type": "string",
+                    "description": "Trading symbol: NQ, ES, CL"
+                },
+                "period": {
+                    "type": "string",
+                    "description": "Time period: today, yesterday, last_week, last_month, last_3_months, last_year, all, or 'YYYY-MM-DD to YYYY-MM-DD'",
+                    "default": "last_month"
+                },
+                "analysis": {
+                    "type": "string",
+                    "enum": ["summary", "daily", "anomalies", "hourly", "trend"],
+                    "description": "Type of analysis: summary, daily, anomalies, hourly, trend",
+                    "default": "summary"
+                },
+                "group_by": {
+                    "type": "string",
+                    "enum": ["hour", "day", "week"],
+                    "description": "Grouping for breakdown analysis",
+                    "default": "day"
+                }
+            },
+            "required": ["symbol"]
+        },
+        function=analyze_data
+    )
+
 
 class TradingAgent:
     """Trading analytics agent powered by Claude."""
@@ -404,19 +469,27 @@ Available data:
 Available symbols: {symbols_str}
 ONLY use symbols that are listed above. Do not mention or suggest symbols without data.
 
-Tools:
-- query_ohlcv: custom SQL queries on OHLCV data
-- find_optimal_entries: find best entry times by criteria
-- backtest_strategy: test a strategy with statistics
-- get_statistics: market stats (volatility, volume, ranges)
+TOOLS (in order of preference):
 
-Tick values: NQ=0.25 ($5), ES=0.25 ($12.50), CL=0.01 ($10)
+1. analyze_data - PRIMARY TOOL for any data analysis!
+   - Automatically handles date calculations
+   - Use period: "last_month", "last_week", "yesterday", "today", "all"
+   - Use analysis: "summary", "daily", "anomalies", "hourly", "trend"
+   - NEVER calculate dates yourself - the tool does it automatically!
 
-Rules:
-- Be concise, no long introductions
-- Use markdown tables for results
-- Mention sample size when showing statistics
-- Respond in user's language (English/Russian)"""
+2. find_optimal_entries - find best entry times by criteria
+3. backtest_strategy - test a strategy with statistics
+4. get_statistics - detailed market stats by time period
+5. query_ohlcv - ONLY for complex custom queries not covered by other tools
+
+IMPORTANT RULES:
+- For questions like "what happened last month?" or "any anomalies?" → use analyze_data
+- NEVER write SQL with hardcoded dates - use analyze_data with period parameter
+- The tool automatically determines the correct date range from available data
+- Be concise, use markdown tables for results
+- Respond in user's language (English/Russian)
+
+Tick values: NQ=0.25 ($5), ES=0.25 ($12.50), CL=0.01 ($10)"""
 
     def chat(self, user_message: str) -> dict:
         """Send message and get response, handling tool calls.
