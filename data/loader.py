@@ -33,8 +33,17 @@ def load_csv(
     # Initialize database if needed
     init_database(db_path)
 
-    # Read CSV
-    df = pd.read_csv(file_path)
+    # Read CSV (with or without headers)
+    # Try to detect if file has headers
+    with open(file_path, 'r') as f:
+        first_line = f.readline()
+
+    if 'timestamp' in first_line.lower() or 'date' in first_line.lower():
+        df = pd.read_csv(file_path)
+    else:
+        # No headers - assume format: timestamp,open,high,low,close,volume
+        df = pd.read_csv(file_path, names=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+
     df['timestamp'] = pd.to_datetime(df['timestamp'])
     df['symbol'] = symbol
 
