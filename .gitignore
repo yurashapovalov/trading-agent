@@ -36,3 +36,4 @@ data/*.csv
 !data/.gitkeep
 data/*.txt
 .vercel
+.env*.local
