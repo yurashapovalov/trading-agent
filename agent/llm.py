@@ -135,7 +135,8 @@ def register_default_tools():
         find_optimal_entries,
         backtest_strategy,
         get_statistics,
-        analyze_data
+        analyze_data,
+        find_market_periods
     )
 
     # query_ohlcv
@@ -226,11 +227,13 @@ the most volatile and tradeable hours are typically 9:00-11:00 and 13:00-14:30 E
                     "description": "End of hour range to analyze (0-23, in exchange timezone). Default: 23",
                     "default": 23
                 },
-                "dataset": {
+                "start_date": {
                     "type": "string",
-                    "enum": ["train", "test"],
-                    "description": "Which dataset to use. ALWAYS use 'train' for finding strategies! Never optimize on 'test' data - that's only for validation.",
-                    "default": "train"
+                    "description": "Start date for analysis (YYYY-MM-DD). Use this to limit data to training period."
+                },
+                "end_date": {
+                    "type": "string",
+                    "description": "End date for analysis (YYYY-MM-DD). Use this to limit data to training period."
                 }
             },
             "required": ["symbol", "direction", "risk_reward", "max_stop_loss", "min_winrate"]
@@ -296,11 +299,13 @@ Returns a detailed report with:
                     "type": "number",
                     "description": "Take profit distance in ticks from entry price. For CL: 30 ticks = $0.30 = $300 target per contract"
                 },
-                "dataset": {
+                "start_date": {
                     "type": "string",
-                    "enum": ["train", "test"],
-                    "description": "Which dataset to use: 'train' for in-sample (strategy development), 'test' for out-of-sample (validation). IMPORTANT: Always validate on 'test' after finding strategies on 'train'!",
-                    "default": "train"
+                    "description": "Start date for backtest (YYYY-MM-DD). Use to test on specific period."
+                },
+                "end_date": {
+                    "type": "string",
+                    "description": "End date for backtest (YYYY-MM-DD). Use to test on specific period."
                 }
             },
             "required": ["symbol", "entry_hour", "entry_minute", "direction", "stop_loss", "take_profit"]
@@ -349,11 +354,13 @@ The volatility_by_hour data is particularly useful for identifying:
                     "description": "Time period for grouping statistics. 'hour' shows intraday patterns, 'day' shows daily stats, etc.",
                     "default": "hour"
                 },
-                "dataset": {
+                "start_date": {
                     "type": "string",
-                    "enum": ["train", "test"],
-                    "description": "Which dataset to use: 'train' or 'test'",
-                    "default": "train"
+                    "description": "Start date filter (YYYY-MM-DD)"
+                },
+                "end_date": {
+                    "type": "string",
+                    "description": "End date filter (YYYY-MM-DD)"
                 }
             },
             "required": ["symbol"]
@@ -425,6 +432,54 @@ Example uses:
         function=analyze_data
     )
 
+    # find_market_periods - Find market periods by condition
+    REGISTRY.register(
+        name="find_market_periods",
+        description="""Find periods in the market that match specific conditions (trend, volatility, etc.).
+
+Use this tool when:
+- User asks to find trending periods ("find uptrend periods")
+- User wants to build strategies for specific market conditions
+- Need to identify volatile or calm market phases
+
+Available conditions:
+- "uptrend": Consecutive days where price closes higher than opens
+- "downtrend": Consecutive days where price closes lower than opens
+- "sideways": Days with minimal directional movement (<0.3% change)
+- "high_volatility": Days with above-average daily ranges
+- "low_volatility": Days with below-average daily ranges
+
+Returns list of periods with:
+- start_date, end_date: Period boundaries
+- days: Number of consecutive days
+- metrics: price_change, price_change_pct, avg_daily_range, total_volume
+
+Use these periods as date ranges for find_optimal_entries or backtest_strategy
+to build strategies specific to market conditions.
+""",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "symbol": {
+                    "type": "string",
+                    "description": "Trading symbol: NQ, ES, CL"
+                },
+                "condition": {
+                    "type": "string",
+                    "enum": ["uptrend", "downtrend", "sideways", "high_volatility", "low_volatility"],
+                    "description": "Market condition to find"
+                },
+                "min_days": {
+                    "type": "integer",
+                    "description": "Minimum consecutive days for a period (default: 5)",
+                    "default": 5
+                }
+            },
+            "required": ["symbol", "condition"]
+        },
+        function=find_market_periods
+    )
+
 
 class TradingAgent:
     """Trading analytics agent powered by Claude."""
@@ -442,20 +497,35 @@ class TradingAgent:
         self.system_prompt = self._build_system_prompt()
 
     def _build_system_prompt(self) -> str:
-        """Build system prompt with dynamic data info."""
+        """Build system prompt with dynamic data info and train/test periods."""
         from data import get_data_info
+        from datetime import timedelta
 
         # Get loaded data info
         data_info = "No data loaded."
         symbols_list = []
+        train_test_info = ""
         try:
             df = get_data_info()
             if not df.empty:
                 data_lines = []
+                train_test_lines = []
                 for _, row in df.iterrows():
                     symbols_list.append(row['symbol'])
-                    data_lines.append(f"- {row['symbol']}: {row['bars']:,} bars, {row['start_date'].strftime('%Y-%m-%d')} to {row['end_date'].strftime('%Y-%m-%d')} ({row['trading_days']} days)")
+                    start = row['start_date']
+                    end = row['end_date']
+                    total_days = row['trading_days']
+
+                    # Calculate 80/20 split
+                    train_days = int(total_days * 0.8)
+                    train_end = start + timedelta(days=int((end - start).days * 0.8))
+                    test_start = train_end + timedelta(days=1)
+
+                    data_lines.append(f"- {row['symbol']}: {row['bars']:,} bars, {start.strftime('%Y-%m-%d')} to {end.strftime('%Y-%m-%d')} ({total_days} days)")
+                    train_test_lines.append(f"- {row['symbol']}: TRAIN {start.strftime('%Y-%m-%d')} to {train_end.strftime('%Y-%m-%d')} (~{train_days} days) | TEST {test_start.strftime('%Y-%m-%d')} to {end.strftime('%Y-%m-%d')} (~{total_days - train_days} days)")
+
                 data_info = "\n".join(data_lines)
+                train_test_info = "\n".join(train_test_lines)
         except:
             pass
 
@@ -463,31 +533,81 @@ class TradingAgent:
 
         return f"""You are a trading data analyst. You help analyze historical futures data.
 
-Available data:
+## Available Data
 {data_info}
+
+## Train/Test Split (80/20)
+{train_test_info}
 
 Available symbols: {symbols_str}
 ONLY use symbols that are listed above. Do not mention or suggest symbols without data.
 
-TOOLS (in order of preference):
+## Strategy Development Workflow
 
-1. analyze_data - PRIMARY TOOL for any data analysis!
+When building trading strategies, follow this process:
+
+1. **Find patterns on TRAIN data** - use start_date/end_date to limit to training period
+   - find_optimal_entries with start_date/end_date from TRAIN period
+   - Identify promising entry times and parameters
+
+2. **Validate on TEST data** - backtest on unseen data
+   - backtest_strategy with start_date/end_date from TEST period
+   - Compare metrics to training results (watch for overfitting)
+
+3. **Final validation on ALL data** - if test results are good
+   - backtest_strategy without date filters to see full picture
+
+## Market Condition Analysis
+
+Use find_market_periods to find specific market conditions:
+- "uptrend" - rising market periods
+- "downtrend" - falling market periods
+- "high_volatility" - volatile periods
+- "low_volatility" - calm periods
+
+Then use those periods as start_date/end_date for other tools.
+Example: User asks "build strategy for rising market" →
+1. find_market_periods(symbol, "uptrend") → get periods
+2. find_optimal_entries with those date ranges
+
+## Tools (in order of preference)
+
+1. **analyze_data** - PRIMARY for data analysis
    - Automatically handles date calculations
-   - Use period: "last_month", "last_week", "yesterday", "today", "all"
-   - Use analysis: "summary", "daily", "anomalies", "hourly", "trend"
-   - NEVER calculate dates yourself - the tool does it automatically!
+   - period: "last_month", "last_week", "yesterday", "today", "all"
+   - analysis: "summary", "daily", "anomalies", "hourly", "trend"
 
-2. find_optimal_entries - find best entry times by criteria
-3. backtest_strategy - test a strategy with statistics
-4. get_statistics - detailed market stats by time period
-5. query_ohlcv - ONLY for complex custom queries not covered by other tools
+2. **find_market_periods** - find periods by market condition
+   - Use to identify trending, volatile, or calm periods
+   - Returns date ranges you can use in other tools
 
-IMPORTANT RULES:
-- For questions like "what happened last month?" or "any anomalies?" → use analyze_data
-- NEVER write SQL with hardcoded dates - use analyze_data with period parameter
-- The tool automatically determines the correct date range from available data
+3. **find_optimal_entries** - find best entry times
+   - Use start_date/end_date for train/test separation
+   - Always specify date range for reproducible results
+
+4. **backtest_strategy** - test strategy with full stats
+   - Use start_date/end_date for train/test separation
+   - Compare train vs test results to detect overfitting
+
+5. **get_statistics** - detailed market stats
+6. **query_ohlcv** - ONLY for complex custom queries
+
+## Important Rules
+- Use train/test split when developing strategies
 - Be concise, use markdown tables for results
 - Respond in user's language (English/Russian)
+- Always mention which period (train/test) you're analyzing
+
+## Follow-up Suggestions
+At the END of EVERY response, add 2-3 relevant follow-up questions the user might want to ask.
+Format them EXACTLY like this (on separate lines at the very end):
+[SUGGESTIONS]
+Вопрос 1?
+Вопрос 2?
+Вопрос 3?
+[/SUGGESTIONS]
+
+These should be contextual to what was just discussed, not generic.
 
 Tick values: NQ=0.25 ($5), ES=0.25 ($12.50), CL=0.01 ($10)"""
 
@@ -581,6 +701,7 @@ Tick values: NQ=0.25 ($5), ES=0.25 ($12.50), CL=0.01 ($10)"""
             tool_uses = []
             current_tool = None
 
+            usage_data = None
             with self.client.messages.stream(
                 model=self.model,
                 max_tokens=4096,
@@ -612,6 +733,22 @@ Tick values: NQ=0.25 ($5), ES=0.25 ($12.50), CL=0.01 ($10)"""
                             tool_uses.append(current_tool)
                             current_tool = None
 
+                # Get usage from final message
+                try:
+                    final_msg = stream.get_final_message()
+                    if final_msg and final_msg.usage:
+                        input_tokens = final_msg.usage.input_tokens
+                        output_tokens = final_msg.usage.output_tokens
+                        # Claude Sonnet pricing: $3/1M input, $15/1M output
+                        cost = (input_tokens * 3 + output_tokens * 15) / 1_000_000
+                        usage_data = {
+                            "input_tokens": input_tokens,
+                            "output_tokens": output_tokens,
+                            "cost": cost
+                        }
+                except:
+                    pass
+
             # Build assistant content for message history
             if text_response:
                 assistant_content.append({"type": "text", "text": text_response})
@@ -630,6 +767,13 @@ Tick values: NQ=0.25 ($5), ES=0.25 ($12.50), CL=0.01 ($10)"""
 
             # If no tool calls, we're done
             if not tool_uses:
+                # Parse suggestions from response
+                suggestions = self._parse_suggestions(text_response)
+                if suggestions:
+                    yield {"type": "suggestions", "suggestions": suggestions}
+                # Send usage data
+                if usage_data:
+                    yield {"type": "usage", **usage_data}
                 yield {"type": "done"}
                 return
 
@@ -666,6 +810,18 @@ Tick values: NQ=0.25 ($5), ES=0.25 ($12.50), CL=0.01 ($10)"""
                 "role": "user",
                 "content": tool_results
             })
+
+    def _parse_suggestions(self, text: str) -> list[str]:
+        """Parse [SUGGESTIONS]...[/SUGGESTIONS] block from response."""
+        import re
+        pattern = r'\[SUGGESTIONS\]\s*(.*?)\s*\[/SUGGESTIONS\]'
+        match = re.search(pattern, text, re.DOTALL)
+        if match:
+            suggestions_text = match.group(1).strip()
+            # Split by newlines and clean up
+            suggestions = [s.strip() for s in suggestions_text.split('\n') if s.strip()]
+            return suggestions[:4]  # Max 4 suggestions
+        return []
 
     def reset(self):
         """Reset conversation history."""

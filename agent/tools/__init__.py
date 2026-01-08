@@ -5,6 +5,7 @@ from .entries import find_optimal_entries
 from .backtest import backtest_strategy
 from .stats import get_statistics
 from .analyze import analyze_data
+from .periods import find_market_periods
 
 __all__ = [
     "query_ohlcv",
@@ -12,4 +13,5 @@ __all__ = [
     "backtest_strategy",
     "get_statistics",
     "analyze_data",
+    "find_market_periods",
 ]

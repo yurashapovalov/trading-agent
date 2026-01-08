@@ -20,16 +20,22 @@ import {
   PromptInputFooter,
   PromptInputSubmit,
 } from "@/components/ai-elements/prompt-input"
+import { Actions } from "@/components/ui/shadcn-io/ai/actions"
 import { useState, useRef, useEffect } from "react"
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
 
-const SUGGESTIONS = [
+const DEFAULT_SUGGESTIONS = [
   "Покажи статистику по NQ",
   "Найди лучшие точки входа для лонга",
   "Какая волатильность по часам?",
   "Сделай бэктест на 9:30 шорт",
 ]
+
+// Strip [SUGGESTIONS] block from text
+function stripSuggestions(text: string): string {
+  return text.replace(/\[SUGGESTIONS\][\s\S]*?\[\/SUGGESTIONS\]/g, '').trim()
+}
 
 type ToolUsage = {
   name: string
@@ -39,10 +45,17 @@ type ToolUsage = {
   status: "running" | "completed"
 }
 
+type Usage = {
+  input_tokens: number
+  output_tokens: number
+  cost: number
+}
+
 type ChatMessage = {
   role: "user" | "assistant"
   content: string
   tools_used?: ToolUsage[]
+  usage?: Usage
 }
 
 export default function Chat() {
@@ -51,6 +64,7 @@ export default function Chat() {
   const [isLoading, setIsLoading] = useState(false)
   const [currentTools, setCurrentTools] = useState<ToolUsage[]>([])
   const [streamingText, setStreamingText] = useState("")
+  const [suggestions, setSuggestions] = useState<string[]>(DEFAULT_SUGGESTIONS)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const abortControllerRef = useRef<AbortController | null>(null)
 
@@ -93,6 +107,7 @@ export default function Chat() {
       let buffer = ""
       const toolsCollected: ToolUsage[] = []
       let finalText = ""
+      let usageData: Usage | undefined
 
       while (true) {
         const { done, value } = await reader.read()
@@ -133,14 +148,27 @@ export default function Chat() {
               } else if (event.type === "text_delta") {
                 finalText += event.content
                 setStreamingText((prev) => prev + event.content)
+              } else if (event.type === "suggestions") {
+                // Update suggestions with contextual ones
+                if (event.suggestions && event.suggestions.length > 0) {
+                  setSuggestions(event.suggestions)
+                }
+              } else if (event.type === "usage") {
+                // Track token usage and cost
+                usageData = {
+                  input_tokens: event.input_tokens,
+                  output_tokens: event.output_tokens,
+                  cost: event.cost,
+                }
               } else if (event.type === "done") {
-                // Add final message
+                // Add final message (strip suggestions block)
                 setMessages((prev) => [
                   ...prev,
                   {
                     role: "assistant",
-                    content: finalText,
+                    content: stripSuggestions(finalText),
                     tools_used: toolsCollected,
+                    usage: usageData,
                   },
                 ])
                 setCurrentTools([])
@@ -203,12 +231,6 @@ export default function Chat() {
       {/* Messages */}
       <div className="flex-1 overflow-y-auto">
         <div className="max-w-2xl mx-auto px-4 py-6 space-y-6">
-          {messages.length === 0 && currentTools.length === 0 && (
-            <div className="text-center text-muted-foreground py-12">
-              <h2 className="text-xl font-medium mb-2">Trading Analytics</h2>
-              <p className="text-sm">Задай вопрос о торговых данных NQ</p>
-            </div>
-          )}
 
           {messages.map((message, index) => (
             <div key={index}>
@@ -233,6 +255,13 @@ export default function Chat() {
                 <MessageContent>
                   <MessageResponse>{message.content}</MessageResponse>
                 </MessageContent>
+                {message.role === "assistant" && message.usage && (
+                  <Actions className="mt-2">
+                    <span className="text-xs text-muted-foreground">
+                      ↑{message.usage.input_tokens.toLocaleString()} · ↓{message.usage.output_tokens.toLocaleString()} · ${message.usage.cost.toFixed(4)}
+                    </span>
+                  </Actions>
+                )}
               </Message>
             </div>
           ))}
@@ -283,12 +312,12 @@ export default function Chat() {
       </div>
 
       {/* Suggestions + Input */}
-      <div className="border-t">
+      <div>
         <div className="max-w-2xl mx-auto px-4 py-4 space-y-3">
           {/* Suggestions */}
-          {messages.length === 0 && (
+          {!isLoading && suggestions.length > 0 && (
             <Suggestions className="mb-3">
-              {SUGGESTIONS.map((suggestion) => (
+              {suggestions.map((suggestion: string) => (
                 <Suggestion
                   key={suggestion}
                   suggestion={suggestion}

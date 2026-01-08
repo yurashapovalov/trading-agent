@@ -7,7 +7,6 @@ from typing import Optional
 
 def get_statistics(
     symbol: str,
-    dataset: str = "train",
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
     group_by: str = 'hour',
@@ -17,8 +16,7 @@ def get_statistics(
     Get comprehensive statistics for a trading symbol.
 
     Args:
-        symbol: Trading symbol (e.g. 'CL')
-        dataset: 'train' for training data, 'test' for validation data
+        symbol: Trading symbol (e.g. 'NQ', 'CL')
         start_date: Optional start date filter (YYYY-MM-DD)
         end_date: Optional end date filter (YYYY-MM-DD)
         group_by: Grouping period ('hour', 'day', 'week', 'month')
@@ -27,8 +25,7 @@ def get_statistics(
     Returns:
         Dictionary with market statistics
     """
-    # Map dataset to actual symbol in database
-    db_symbol = f"{symbol}_test" if dataset == "test" else symbol
+    db_symbol = symbol
 
     with duckdb.connect(db_path, read_only=True) as conn:
         # Build date filter

@@ -27,7 +27,6 @@ def find_optimal_entries(
     risk_reward: float,
     max_stop_loss: float,
     min_winrate: float,
-    dataset: str = "train",
     start_hour: int = 0,
     end_hour: int = 23,
     start_date: Optional[str] = None,
@@ -37,8 +36,10 @@ def find_optimal_entries(
     """
     Find optimal entry times based on criteria.
     Optimized version using pure SQL for 100x faster execution on large datasets.
+
+    Use start_date/end_date to filter data period (e.g., for train/test splits).
     """
-    db_symbol = f"{symbol}_test" if dataset == "test" else symbol
+    db_symbol = symbol
     tick_size = 0.01
     min_trades = 5
 
@@ -67,7 +68,7 @@ def find_optimal_entries(
         """).fetchone()[0]
 
         if count == 0:
-            return [{"error": f"No data found for {symbol} (dataset={dataset})"}]
+            return [{"error": f"No data found for {symbol}"}]
 
         # Process each direction and stop loss combination
         for dir in directions:

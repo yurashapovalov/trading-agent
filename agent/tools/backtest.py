@@ -49,7 +49,6 @@ def backtest_strategy(
     direction: str,
     stop_loss: float,
     take_profit: float,
-    dataset: str = "train",
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
     db_path: str = "data/trading.duckdb"
@@ -57,8 +56,10 @@ def backtest_strategy(
     """
     Backtest a specific strategy on historical data.
     Optimized version using pure SQL for 100x faster execution on large datasets.
+
+    Use start_date/end_date to filter data period (e.g., for train/test splits).
     """
-    db_symbol = f"{symbol}_test" if dataset == "test" else symbol
+    db_symbol = symbol
     tick_size = 0.01
     tick_value = 10.0
 
@@ -205,7 +206,7 @@ def backtest_strategy(
         result_df = conn.execute(query).df()
 
     if result_df.empty:
-        return {"error": f"No trades executed for {symbol} (dataset={dataset})"}
+        return {"error": f"No trades executed for {symbol}"}
 
     # Convert to list of Trade objects
     trades = [
