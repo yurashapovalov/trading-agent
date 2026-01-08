@@ -68,16 +68,7 @@ export default function Chat() {
       {/* Messages */}
       <div className="flex-1 overflow-y-auto px-4 py-6">
         <div className="max-w-2xl mx-auto space-y-6">
-          {messages.length === 0 && (
-            <div className="text-center text-muted-foreground py-12">
-              <Bot className="w-12 h-12 mx-auto mb-4 opacity-50" />
-              <p>Спроси что-нибудь о торговых данных 🚀</p>
-              <p className="text-sm mt-2">
-                Например: &quot;Найди SHORT входы на CL с winrate больше 70%&quot;
-              </p>
-            </div>
-          )}
-
+          
           {messages.map((message, index) => (
             <div
               key={index}
