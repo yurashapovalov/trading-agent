@@ -1,0 +1,36 @@
+# Environment
+.env
+.env.local
+.env.server
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+.venv/
+env/
+.eggs/
+*.egg-info/
+
+# Database
+*.duckdb
+*.duckdb.wal
+*.db
+*.sqlite
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Data (keep structure, ignore large files)
+data/*.csv
+!data/.gitkeep
