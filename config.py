@@ -14,7 +14,7 @@ DATABASE_PATH = os.getenv("DATABASE_PATH", "data/trading.duckdb")
 
 # API
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
-MODEL_NAME = os.getenv("MODEL_NAME", "claude-haiku-4-5-20250514")
+MODEL_NAME = os.getenv("MODEL_NAME", "claude-haiku-4-5-20251001")
 
 # Trading symbols config
 SYMBOLS = {
