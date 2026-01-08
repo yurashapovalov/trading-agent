@@ -52,6 +52,7 @@ export default function Chat() {
   const [currentTools, setCurrentTools] = useState<ToolUsage[]>([])
   const [streamingText, setStreamingText] = useState("")
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const abortControllerRef = useRef<AbortController | null>(null)
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
@@ -70,6 +71,9 @@ export default function Chat() {
     setCurrentTools([])
     setStreamingText("")
 
+    // Create abort controller for this request
+    abortControllerRef.current = new AbortController()
+
     try {
       const response = await fetch(`${API_URL}/chat/stream`, {
         method: "POST",
@@ -77,6 +81,7 @@ export default function Chat() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({ message: text }),
+        signal: abortControllerRef.current.signal,
       })
 
       if (!response.body) {
@@ -154,14 +159,35 @@ export default function Chat() {
         }
       }
     } catch (error) {
+      // Don't show error if it was aborted by user
+      if (error instanceof Error && error.name === "AbortError") {
+        return
+      }
       setMessages((prev) => [
         ...prev,
         { role: "assistant", content: "Ошибка подключения к серверу" },
       ])
       setCurrentTools([])
+      setStreamingText("")
     } finally {
       setIsLoading(false)
+      abortControllerRef.current = null
     }
+  }
+
+  const stopGeneration = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort()
+      abortControllerRef.current = null
+    }
+    setIsLoading(false)
+    setCurrentTools([])
+    setStreamingText("")
+    // Add message that generation was stopped
+    setMessages((prev) => [
+      ...prev,
+      { role: "assistant", content: "Остановлено пользователем" },
+    ])
   }
 
   const handleSuggestionClick = (suggestion: string) => {
@@ -281,10 +307,19 @@ export default function Chat() {
             />
             <PromptInputFooter>
               <div />
-              <PromptInputSubmit
-                disabled={!input.trim() || isLoading}
-                status={isLoading ? "submitted" : undefined}
-              />
+              {isLoading ? (
+                <button
+                  type="button"
+                  onClick={stopGeneration}
+                  className="inline-flex items-center justify-center rounded-md bg-destructive px-3 py-1.5 text-sm font-medium text-destructive-foreground hover:bg-destructive/90"
+                >
+                  Stop
+                </button>
+              ) : (
+                <PromptInputSubmit
+                  disabled={!input.trim()}
+                />
+              )}
             </PromptInputFooter>
           </PromptInput>
         </div>
