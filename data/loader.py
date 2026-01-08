@@ -72,8 +72,11 @@ def load_csv(
     return result[0]
 
 
-def get_data_info(db_path: str = "data/trading.duckdb") -> pd.DataFrame:
+def get_data_info(db_path: str = None) -> pd.DataFrame:
     """Get summary of loaded data."""
+    import config
+    if db_path is None:
+        db_path = config.DATABASE_PATH
 
     with get_connection(db_path, read_only=True) as conn:
         return conn.execute("""

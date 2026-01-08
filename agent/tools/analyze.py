@@ -7,8 +7,11 @@ from typing import Optional, List, Literal
 from data import get_data_info
 
 
-def _get_data_boundaries(symbol: str, db_path: str = "data/trading.duckdb") -> dict:
+def _get_data_boundaries(symbol: str, db_path: str = None) -> dict:
     """Get min/max dates for a symbol in the database."""
+    import config
+    if db_path is None:
+        db_path = config.DATABASE_PATH
     with duckdb.connect(db_path, read_only=True) as conn:
         result = conn.execute("""
             SELECT
@@ -28,12 +31,15 @@ def _get_data_boundaries(symbol: str, db_path: str = "data/trading.duckdb") -> d
         return {"min_date": None, "max_date": None, "total_bars": 0}
 
 
-def _resolve_period(period: str, symbol: str, db_path: str = "data/trading.duckdb") -> tuple:
+def _resolve_period(period: str, symbol: str, db_path: str = None) -> tuple:
     """
     Resolve period string to actual date range based on available data.
 
     Returns (start_date, end_date) as datetime objects.
     """
+    import config
+    if db_path is None:
+        db_path = config.DATABASE_PATH
     boundaries = _get_data_boundaries(symbol, db_path)
 
     if not boundaries["max_date"]:
@@ -97,7 +103,7 @@ def analyze_data(
     period: str = "last_month",
     analysis: str = "summary",
     group_by: str = "day",
-    db_path: str = "data/trading.duckdb"
+    db_path: str = None
 ) -> dict:
     """
     Analyze trading data with automatic date handling.
@@ -118,6 +124,9 @@ def analyze_data(
     Returns:
         dict with analysis results and metadata
     """
+    import config
+    if db_path is None:
+        db_path = config.DATABASE_PATH
     # Resolve period to actual dates
     start_date, end_date = _resolve_period(period, symbol, db_path)
 
@@ -186,7 +195,16 @@ def analyze_data(
             }
 
         elif analysis == "daily":
-            # Daily breakdown
+            # Get total count first
+            total_days = conn.execute("""
+                SELECT COUNT(DISTINCT DATE(timestamp))
+                FROM ohlcv_1min
+                WHERE symbol = ?
+                    AND timestamp >= ?
+                    AND timestamp <= ?
+            """, [symbol, start_date, end_date]).fetchone()[0]
+
+            # Daily breakdown - limit to last 30 days to save tokens
             df = conn.execute("""
                 SELECT
                     DATE(timestamp) as date,
@@ -195,17 +213,21 @@ def analyze_data(
                     MIN(low) as low,
                     LAST(close) as close,
                     MAX(high) - MIN(low) as range,
-                    SUM(volume) as volume,
-                    COUNT(*) as bars
+                    SUM(volume) as volume
                 FROM ohlcv_1min
                 WHERE symbol = ?
                     AND timestamp >= ?
                     AND timestamp <= ?
                 GROUP BY DATE(timestamp)
                 ORDER BY date DESC
+                LIMIT 30
             """, [symbol, start_date, end_date]).df()
 
+            result["total_days_in_period"] = total_days
+            result["showing"] = len(df)
             result["data"] = df.to_dict('records')
+            if total_days > 30:
+                result["hint"] = f"Показаны последние 30 из {total_days} дней. Укажи конкретный период 'YYYY-MM-DD to YYYY-MM-DD' для других дат."
 
         elif analysis == "anomalies":
             # Find anomalies - days with unusual range or volume
@@ -235,14 +257,10 @@ def analyze_data(
             range_threshold = avg_range + 2 * std_range if std_range else avg_range * 2
             volume_threshold = avg_volume + 2 * std_volume if std_volume else avg_volume * 2
 
-            # Find anomaly days
+            # Find anomaly days - limit to top 15 most significant
             df = conn.execute("""
                 SELECT
                     DATE(timestamp) as date,
-                    FIRST(open) as open,
-                    MAX(high) as high,
-                    MIN(low) as low,
-                    LAST(close) as close,
                     MAX(high) - MIN(low) as range,
                     SUM(volume) as volume,
                     CASE
@@ -257,17 +275,30 @@ def analyze_data(
                 GROUP BY DATE(timestamp)
                 HAVING anomaly_type != 'normal'
                 ORDER BY range DESC
+                LIMIT 15
             """, [range_threshold, volume_threshold, symbol, start_date, end_date]).df()
+
+            # Get total count of anomalies
+            total_anomalies = conn.execute("""
+                SELECT COUNT(*) FROM (
+                    SELECT DATE(timestamp) as date
+                    FROM ohlcv_1min
+                    WHERE symbol = ?
+                        AND timestamp >= ?
+                        AND timestamp <= ?
+                    GROUP BY DATE(timestamp)
+                    HAVING MAX(high) - MIN(low) > ? OR SUM(volume) > ?
+                )
+            """, [symbol, start_date, end_date, range_threshold, volume_threshold]).fetchone()[0]
 
             result["baseline"] = {
                 "avg_daily_range": round(avg_range, 2) if avg_range else 0,
-                "std_daily_range": round(std_range, 2) if std_range else 0,
                 "range_threshold": round(range_threshold, 2) if range_threshold else 0,
-                "avg_daily_volume": round(avg_volume, 0) if avg_volume else 0,
-                "volume_threshold": round(volume_threshold, 0) if volume_threshold else 0
+                "avg_daily_volume": round(avg_volume, 0) if avg_volume else 0
             }
+            result["total_anomalies"] = total_anomalies
+            result["showing"] = len(df)
             result["anomalies"] = df.to_dict('records')
-            result["anomaly_count"] = len(df)
 
         elif analysis == "hourly":
             # Hourly volatility pattern

@@ -4,8 +4,11 @@ import duckdb
 from pathlib import Path
 
 
-def init_database(db_path: str = "data/trading.duckdb") -> None:
+def init_database(db_path: str = None) -> None:
     """Initialize database with required tables."""
+    import config
+    if db_path is None:
+        db_path = config.DATABASE_PATH
 
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
 
@@ -43,6 +46,9 @@ def init_database(db_path: str = "data/trading.duckdb") -> None:
         """)
 
 
-def get_connection(db_path: str = "data/trading.duckdb", read_only: bool = False):
+def get_connection(db_path: str = None, read_only: bool = False):
     """Get database connection."""
+    import config
+    if db_path is None:
+        db_path = config.DATABASE_PATH
     return duckdb.connect(db_path, read_only=read_only)

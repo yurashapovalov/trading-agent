@@ -20,7 +20,7 @@ def find_market_periods(
     symbol: str,
     condition: str,
     min_days: int = 5,
-    db_path: str = "data/trading.duckdb"
+    db_path: str = None
 ) -> List[dict]:
     """
     Find periods in the market that match a specific condition.
@@ -39,6 +39,9 @@ def find_market_periods(
     Returns:
         List of periods matching the condition with start/end dates and metrics
     """
+    import config
+    if db_path is None:
+        db_path = config.DATABASE_PATH
     with duckdb.connect(db_path, read_only=True) as conn:
         # Get daily data
         daily_df = conn.execute(f"""

@@ -36,7 +36,8 @@ class BacktestResult:
     profit_factor: float
     avg_win_ticks: float
     avg_loss_ticks: float
-    trades: List[dict]
+    best_trades: List[dict]  # Top 5 winning trades
+    worst_trades: List[dict]  # Top 5 losing trades
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -51,7 +52,7 @@ def backtest_strategy(
     take_profit: float,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
-    db_path: str = "data/trading.duckdb"
+    db_path: str = None
 ) -> dict:
     """
     Backtest a specific strategy on historical data.
@@ -59,6 +60,9 @@ def backtest_strategy(
 
     Use start_date/end_date to filter data period (e.g., for train/test splits).
     """
+    import config
+    if db_path is None:
+        db_path = config.DATABASE_PATH
     db_symbol = symbol
     tick_size = 0.01
     tick_value = 10.0
@@ -256,6 +260,11 @@ def backtest_strategy(
         if dd > max_dd:
             max_dd = dd
 
+    # Get top 5 best and worst trades for context
+    sorted_by_pnl = sorted(trades, key=lambda x: x.pnl_ticks, reverse=True)
+    best_trades = [asdict(t) for t in sorted_by_pnl[:5] if t.pnl_ticks > 0]
+    worst_trades = [asdict(t) for t in sorted_by_pnl[-5:] if t.pnl_ticks < 0]
+
     result = BacktestResult(
         total_trades=len(trades),
         wins=len(wins),
@@ -269,7 +278,8 @@ def backtest_strategy(
         profit_factor=round(profit_factor, 2) if profit_factor != float('inf') else 999.0,
         avg_win_ticks=round(avg_win, 1),
         avg_loss_ticks=round(avg_loss, 1),
-        trades=[asdict(t) for t in trades]
+        best_trades=best_trades,
+        worst_trades=worst_trades
     )
 
     return result.to_dict()

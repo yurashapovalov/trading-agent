@@ -58,9 +58,6 @@ type ChatMessage = {
   usage?: Usage
 }
 
-// Generate unique session ID per page load
-const SESSION_ID = `session_${Date.now()}_${Math.random().toString(36).slice(2)}`
-
 export default function Chat() {
   const [input, setInput] = useState("")
   const [messages, setMessages] = useState<ChatMessage[]>([])
@@ -70,6 +67,12 @@ export default function Chat() {
   const [suggestions, setSuggestions] = useState<string[]>(DEFAULT_SUGGESTIONS)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const abortControllerRef = useRef<AbortController | null>(null)
+
+  // Generate session ID only on client side
+  const sessionIdRef = useRef<string>("")
+  if (typeof window !== "undefined" && !sessionIdRef.current) {
+    sessionIdRef.current = `session_${Date.now()}_${Math.random().toString(36).slice(2)}`
+  }
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
@@ -97,7 +100,7 @@ export default function Chat() {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ message: text, session_id: SESSION_ID }),
+        body: JSON.stringify({ message: text, session_id: sessionIdRef.current }),
         signal: abortControllerRef.current.signal,
       })
 

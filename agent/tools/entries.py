@@ -31,7 +31,7 @@ def find_optimal_entries(
     end_hour: int = 23,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
-    db_path: str = "data/trading.duckdb"
+    db_path: str = None
 ) -> List[dict]:
     """
     Find optimal entry times based on criteria.
@@ -39,6 +39,9 @@ def find_optimal_entries(
 
     Use start_date/end_date to filter data period (e.g., for train/test splits).
     """
+    import config
+    if db_path is None:
+        db_path = config.DATABASE_PATH
     db_symbol = symbol
     tick_size = 0.01
     min_trades = 5

@@ -10,7 +10,7 @@ def get_statistics(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
     group_by: str = 'hour',
-    db_path: str = "data/trading.duckdb"
+    db_path: str = None
 ) -> dict:
     """
     Get comprehensive statistics for a trading symbol.
@@ -25,6 +25,9 @@ def get_statistics(
     Returns:
         Dictionary with market statistics
     """
+    import config
+    if db_path is None:
+        db_path = config.DATABASE_PATH
     db_symbol = symbol
 
     with duckdb.connect(db_path, read_only=True) as conn:
@@ -136,14 +139,6 @@ def get_statistics(
                 "down_days": direction_counts.get('down', 0),
                 "flat_days": direction_counts.get('flat', 0),
                 "avg_move_ticks": avg_move_ticks
-            },
-            "daily_breakdown": [
-                {
-                    "date": str(row['date']),
-                    "range_ticks": int(row['daily_range_ticks']),
-                    "direction": row['direction'],
-                    "volume": int(row['day_volume'])
-                }
-                for _, row in daily_stats.iterrows()
-            ]
+            }
+            # Note: daily_breakdown removed to save tokens - use analyze_data for daily details
         }
