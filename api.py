@@ -90,14 +90,16 @@ def chat(request: ChatRequest):
 
 
 @app.post("/chat/stream")
-def chat_stream(request: ChatRequest):
+async def chat_stream(request: ChatRequest):
     """Stream chat response with SSE events."""
+    import asyncio
 
-    def generate():
+    async def generate():
         try:
             agent = get_agent(request.session_id)
             for event in agent.chat_stream(request.message):
                 yield f"data: {json.dumps(event, default=str)}\n\n"
+                await asyncio.sleep(0)  # Force flush
         except Exception as e:
             yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
 
@@ -107,6 +109,7 @@ def chat_stream(request: ChatRequest):
         headers={
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",  # Disable nginx buffering
         }
     )
 
