@@ -201,8 +201,8 @@ export default function Chat() {
   return (
     <div className="flex flex-col h-screen bg-background">
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-4 py-6">
-        <div className="max-w-2xl mx-auto space-y-6">
+      <div className="flex-1 overflow-y-auto">
+        <div className="max-w-2xl mx-auto px-4 py-6 space-y-6">
           {messages.length === 0 && currentTools.length === 0 && (
             <div className="text-center text-muted-foreground py-12">
               <h2 className="text-xl font-medium mb-2">Trading Analytics</h2>
@@ -283,8 +283,8 @@ export default function Chat() {
       </div>
 
       {/* Suggestions + Input */}
-      <div className="px-4 py-4 space-y-3">
-        <div className="max-w-2xl mx-auto">
+      <div className="border-t">
+        <div className="max-w-2xl mx-auto px-4 py-4 space-y-3">
           {/* Suggestions */}
           {messages.length === 0 && (
             <Suggestions className="mb-3">
