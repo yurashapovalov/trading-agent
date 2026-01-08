@@ -490,6 +490,85 @@ Rules:
                 "content": tool_results
             })
 
+    def chat_stream(self, user_message: str):
+        """Stream chat response with tool events.
+
+        Yields:
+            dict events: {type: 'tool_start'|'tool_end'|'text'|'done', ...}
+        """
+        self.messages.append({
+            "role": "user",
+            "content": user_message
+        })
+
+        while True:
+            response = self.client.messages.create(
+                model=self.model,
+                max_tokens=4096,
+                system=self.system_prompt,
+                tools=self.registry.get_all_definitions(),
+                messages=self.messages
+            )
+
+            # Collect assistant response
+            assistant_content = []
+            text_response = ""
+            tool_uses = []
+
+            for block in response.content:
+                if block.type == "text":
+                    text_response += block.text
+                    assistant_content.append(block)
+                elif block.type == "tool_use":
+                    tool_uses.append(block)
+                    assistant_content.append(block)
+
+            self.messages.append({
+                "role": "assistant",
+                "content": assistant_content
+            })
+
+            # If no tool calls, yield text and done
+            if not tool_uses:
+                if text_response:
+                    yield {"type": "text", "content": text_response}
+                yield {"type": "done"}
+                return
+
+            # Execute tools with events
+            tool_results = []
+            for tool_use in tool_uses:
+                # Emit tool_start
+                yield {
+                    "type": "tool_start",
+                    "name": tool_use.name,
+                    "input": tool_use.input
+                }
+
+                start_time = datetime.now()
+                result = self.registry.execute(tool_use.name, tool_use.input)
+                duration_ms = (datetime.now() - start_time).total_seconds() * 1000
+
+                # Emit tool_end
+                yield {
+                    "type": "tool_end",
+                    "name": tool_use.name,
+                    "input": tool_use.input,
+                    "result": result,
+                    "duration_ms": duration_ms
+                }
+
+                tool_results.append({
+                    "type": "tool_result",
+                    "tool_use_id": tool_use.id,
+                    "content": json.dumps(result, default=str)
+                })
+
+            self.messages.append({
+                "role": "user",
+                "content": tool_results
+            })
+
     def reset(self):
         """Reset conversation history."""
         self.messages = []

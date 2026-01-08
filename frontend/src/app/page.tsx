@@ -34,8 +34,9 @@ const SUGGESTIONS = [
 type ToolUsage = {
   name: string
   input: Record<string, unknown>
-  result: unknown
-  duration_ms: number
+  result?: unknown
+  duration_ms?: number
+  status: "running" | "completed"
 }
 
 type ChatMessage = {
@@ -48,6 +49,7 @@ export default function Chat() {
   const [input, setInput] = useState("")
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [isLoading, setIsLoading] = useState(false)
+  const [currentTools, setCurrentTools] = useState<ToolUsage[]>([])
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   const scrollToBottom = () => {
@@ -56,7 +58,7 @@ export default function Chat() {
 
   useEffect(() => {
     scrollToBottom()
-  }, [messages])
+  }, [messages, currentTools])
 
   const sendMessage = async (text: string) => {
     if (!text.trim() || isLoading) return
@@ -64,9 +66,10 @@ export default function Chat() {
     setInput("")
     setMessages((prev) => [...prev, { role: "user", content: text }])
     setIsLoading(true)
+    setCurrentTools([])
 
     try {
-      const response = await fetch(`${API_URL}/chat`, {
+      const response = await fetch(`${API_URL}/chat/stream`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -74,20 +77,84 @@ export default function Chat() {
         body: JSON.stringify({ message: text }),
       })
 
-      const data = await response.json()
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "assistant",
-          content: data.response,
-          tools_used: data.tools_used,
-        },
-      ])
+      if (!response.body) {
+        throw new Error("No response body")
+      }
+
+      const reader = response.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ""
+      const toolsCollected: ToolUsage[] = []
+      let finalText = ""
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split("\n")
+        buffer = lines.pop() || ""
+
+        for (const line of lines) {
+          if (line.startsWith("data: ")) {
+            try {
+              const event = JSON.parse(line.slice(6))
+
+              if (event.type === "tool_start") {
+                const newTool: ToolUsage = {
+                  name: event.name,
+                  input: event.input,
+                  status: "running",
+                }
+                setCurrentTools((prev) => [...prev, newTool])
+              } else if (event.type === "tool_end") {
+                const completedTool: ToolUsage = {
+                  name: event.name,
+                  input: event.input,
+                  result: event.result,
+                  duration_ms: event.duration_ms,
+                  status: "completed",
+                }
+                toolsCollected.push(completedTool)
+                setCurrentTools((prev) =>
+                  prev.map((t) =>
+                    t.name === event.name && t.status === "running"
+                      ? completedTool
+                      : t
+                  )
+                )
+              } else if (event.type === "text") {
+                finalText = event.content
+              } else if (event.type === "done") {
+                // Add final message
+                setMessages((prev) => [
+                  ...prev,
+                  {
+                    role: "assistant",
+                    content: finalText,
+                    tools_used: toolsCollected,
+                  },
+                ])
+                setCurrentTools([])
+              } else if (event.type === "error") {
+                setMessages((prev) => [
+                  ...prev,
+                  { role: "assistant", content: `Ошибка: ${event.message}` },
+                ])
+                setCurrentTools([])
+              }
+            } catch (e) {
+              console.error("Failed to parse SSE event:", e)
+            }
+          }
+        }
+      }
     } catch (error) {
       setMessages((prev) => [
         ...prev,
         { role: "assistant", content: "Ошибка подключения к серверу" },
       ])
+      setCurrentTools([])
     } finally {
       setIsLoading(false)
     }
@@ -97,12 +164,16 @@ export default function Chat() {
     sendMessage(suggestion)
   }
 
+  const getToolState = (status: "running" | "completed") => {
+    return status === "running" ? "input-available" : "output-available"
+  }
+
   return (
     <div className="flex flex-col h-screen bg-background">
       {/* Messages */}
       <div className="flex-1 overflow-y-auto px-4 py-6">
         <div className="max-w-2xl mx-auto space-y-6">
-          {messages.length === 0 && (
+          {messages.length === 0 && currentTools.length === 0 && (
             <div className="text-center text-muted-foreground py-12">
               <h2 className="text-xl font-medium mb-2">Trading Analytics</h2>
               <p className="text-sm">Задай вопрос о торговых данных NQ</p>
@@ -112,19 +183,20 @@ export default function Chat() {
           {messages.map((message, index) => (
             <div key={index}>
               {/* Tool calls before assistant response */}
-              {message.role === "assistant" && message.tools_used?.map((tool, i) => (
-                <Tool key={i} className="mb-4">
-                  <ToolHeader
-                    title={`${tool.name} (${tool.duration_ms.toFixed(0)}ms)`}
-                    type="tool-invocation"
-                    state="output-available"
-                  />
-                  <ToolContent>
-                    <ToolInput input={tool.input} />
-                    <ToolOutput output={tool.result} errorText={undefined} />
-                  </ToolContent>
-                </Tool>
-              ))}
+              {message.role === "assistant" &&
+                message.tools_used?.map((tool, i) => (
+                  <Tool key={i} className="mb-4">
+                    <ToolHeader
+                      title={`${tool.name} (${tool.duration_ms?.toFixed(0)}ms)`}
+                      type="tool-invocation"
+                      state="output-available"
+                    />
+                    <ToolContent>
+                      <ToolInput input={tool.input} />
+                      <ToolOutput output={tool.result} errorText={undefined} />
+                    </ToolContent>
+                  </Tool>
+                ))}
 
               {/* Message */}
               <Message from={message.role}>
@@ -135,7 +207,32 @@ export default function Chat() {
             </div>
           ))}
 
-          {isLoading && (
+          {/* Currently running tools */}
+          {currentTools.length > 0 && (
+            <div>
+              {currentTools.map((tool, i) => (
+                <Tool key={i} className="mb-4">
+                  <ToolHeader
+                    title={
+                      tool.status === "running"
+                        ? tool.name
+                        : `${tool.name} (${tool.duration_ms?.toFixed(0)}ms)`
+                    }
+                    type="tool-invocation"
+                    state={getToolState(tool.status)}
+                  />
+                  <ToolContent>
+                    <ToolInput input={tool.input} />
+                    {tool.status === "completed" && (
+                      <ToolOutput output={tool.result} errorText={undefined} />
+                    )}
+                  </ToolContent>
+                </Tool>
+              ))}
+            </div>
+          )}
+
+          {isLoading && currentTools.length === 0 && (
             <div className="flex items-center gap-2 text-muted-foreground">
               <Loader size={16} />
               <span className="text-sm">Думаю...</span>
@@ -163,9 +260,7 @@ export default function Chat() {
           )}
 
           {/* Input */}
-          <PromptInput
-            onSubmit={({ text }) => sendMessage(text)}
-          >
+          <PromptInput onSubmit={({ text }) => sendMessage(text)}>
             <PromptInputTextarea
               value={input}
               onChange={(e) => setInput(e.target.value)}

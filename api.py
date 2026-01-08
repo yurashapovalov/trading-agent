@@ -1,7 +1,9 @@
 """FastAPI server for Trading Agent"""
 
+import json
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import Any, Optional
 
@@ -85,6 +87,28 @@ def chat(request: ChatRequest):
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/chat/stream")
+def chat_stream(request: ChatRequest):
+    """Stream chat response with SSE events."""
+
+    def generate():
+        try:
+            agent = get_agent(request.session_id)
+            for event in agent.chat_stream(request.message):
+                yield f"data: {json.dumps(event, default=str)}\n\n"
+        except Exception as e:
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+        }
+    )
 
 
 @app.post("/reset")
