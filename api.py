@@ -27,6 +27,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"],  # Required for streaming
 )
 
 # Store agents per session (simple in-memory, for production use Redis)
