@@ -30,15 +30,6 @@ app.add_middleware(
     expose_headers=["*"],  # Required for streaming
 )
 
-# Store agents per session (simple in-memory, for production use Redis)
-agents: dict[str, TradingAgent] = {}
-
-
-def get_agent(session_id: str = "default") -> TradingAgent:
-    """Get or create agent for session."""
-    if session_id not in agents:
-        agents[session_id] = TradingAgent()
-    return agents[session_id]
 
 
 # Request/Response models
@@ -79,11 +70,11 @@ def root():
 def chat(request: ChatRequest):
     """Send a message to the trading agent."""
     try:
-        agent = get_agent(request.session_id)
+        agent = TradingAgent()  # Fresh agent each request
         result = agent.chat(request.message)
         return ChatResponse(
             response=result["response"],
-            session_id=request.session_id,
+            session_id=request.session_id or "none",
             tools_used=result.get("tools_used", [])
         )
     except Exception as e:
@@ -97,7 +88,7 @@ async def chat_stream(request: ChatRequest):
 
     async def generate():
         try:
-            agent = get_agent(request.session_id)
+            agent = TradingAgent()  # Fresh agent each request
             for event in agent.chat_stream(request.message):
                 yield f"data: {json.dumps(event, default=str)}\n\n"
                 await asyncio.sleep(0)  # Force flush
@@ -116,11 +107,9 @@ async def chat_stream(request: ChatRequest):
 
 
 @app.post("/reset")
-def reset(session_id: str = "default"):
-    """Reset conversation history."""
-    if session_id in agents:
-        agents[session_id].reset()
-    return {"status": "ok", "message": "Conversation reset"}
+def reset():
+    """Reset endpoint (no-op, agents are fresh each request)."""
+    return {"status": "ok", "message": "Agents are fresh each request, no reset needed"}
 
 
 @app.get("/data", response_model=list[DataInfo])
