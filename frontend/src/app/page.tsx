@@ -13,17 +13,23 @@ import {
   ToolOutput,
 } from "@/components/ai-elements/tool"
 import { Loader } from "@/components/ai-elements/loader"
+import { Suggestions, Suggestion } from "@/components/ai-elements/suggestion"
 import {
   PromptInput,
-  PromptInputAction,
-  PromptInputActions,
   PromptInputTextarea,
-} from "@/components/ui/prompt-input"
-import { Button } from "@/components/ui/button"
-import { ArrowUp, Square } from "lucide-react"
+  PromptInputFooter,
+  PromptInputSubmit,
+} from "@/components/ai-elements/prompt-input"
 import { useState, useRef, useEffect } from "react"
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+
+const SUGGESTIONS = [
+  "Покажи статистику по NQ",
+  "Найди лучшие точки входа для лонга",
+  "Какая волатильность по часам?",
+  "Сделай бэктест на 9:30 шорт",
+]
 
 type ToolUsage = {
   name: string
@@ -52,12 +58,11 @@ export default function Chat() {
     scrollToBottom()
   }, [messages])
 
-  const handleSubmit = async () => {
-    if (!input.trim() || isLoading) return
+  const sendMessage = async (text: string) => {
+    if (!text.trim() || isLoading) return
 
-    const userMessage = input.trim()
     setInput("")
-    setMessages((prev) => [...prev, { role: "user", content: userMessage }])
+    setMessages((prev) => [...prev, { role: "user", content: text }])
     setIsLoading(true)
 
     try {
@@ -66,7 +71,7 @@ export default function Chat() {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ message: userMessage }),
+        body: JSON.stringify({ message: text }),
       })
 
       const data = await response.json()
@@ -88,11 +93,22 @@ export default function Chat() {
     }
   }
 
+  const handleSuggestionClick = (suggestion: string) => {
+    sendMessage(suggestion)
+  }
+
   return (
     <div className="flex flex-col h-screen bg-background">
       {/* Messages */}
       <div className="flex-1 overflow-y-auto px-4 py-6">
         <div className="max-w-2xl mx-auto space-y-6">
+          {messages.length === 0 && (
+            <div className="text-center text-muted-foreground py-12">
+              <h2 className="text-xl font-medium mb-2">Trading Analytics</h2>
+              <p className="text-sm">Задай вопрос о торговых данных NQ</p>
+            </div>
+          )}
+
           {messages.map((message, index) => (
             <div key={index}>
               {/* Tool calls before assistant response */}
@@ -130,35 +146,38 @@ export default function Chat() {
         </div>
       </div>
 
-      {/* Input */}
-      <div className="px-4 py-4">
+      {/* Suggestions + Input */}
+      <div className="px-4 py-4 space-y-3">
         <div className="max-w-2xl mx-auto">
+          {/* Suggestions */}
+          {messages.length === 0 && (
+            <Suggestions className="mb-3">
+              {SUGGESTIONS.map((suggestion) => (
+                <Suggestion
+                  key={suggestion}
+                  suggestion={suggestion}
+                  onClick={handleSuggestionClick}
+                />
+              ))}
+            </Suggestions>
+          )}
+
+          {/* Input */}
           <PromptInput
-            value={input}
-            onValueChange={setInput}
-            isLoading={isLoading}
-            onSubmit={handleSubmit}
+            onSubmit={({ text }) => sendMessage(text)}
           >
-            <PromptInputTextarea placeholder="Спроси о торговых данных..." />
-            <PromptInputActions className="justify-end pt-2">
-              <PromptInputAction
-                tooltip={isLoading ? "Остановить" : "Отправить"}
-              >
-                <Button
-                  variant="default"
-                  size="icon"
-                  className="h-8 w-8 rounded-full"
-                  onClick={handleSubmit}
-                  disabled={!input.trim() && !isLoading}
-                >
-                  {isLoading ? (
-                    <Square className="size-4 fill-current" />
-                  ) : (
-                    <ArrowUp className="size-4" />
-                  )}
-                </Button>
-              </PromptInputAction>
-            </PromptInputActions>
+            <PromptInputTextarea
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              placeholder="Спроси о торговых данных..."
+            />
+            <PromptInputFooter>
+              <div />
+              <PromptInputSubmit
+                disabled={!input.trim() || isLoading}
+                status={isLoading ? "submitted" : undefined}
+              />
+            </PromptInputFooter>
           </PromptInput>
         </div>
       </div>
