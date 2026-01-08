@@ -3,7 +3,7 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import Optional
+from typing import Any, Optional
 
 from agent.llm import TradingAgent
 from data import get_data_info, init_database
@@ -44,9 +44,17 @@ class ChatRequest(BaseModel):
     session_id: Optional[str] = "default"
 
 
+class ToolUsage(BaseModel):
+    name: str
+    input: dict
+    result: Any
+    duration_ms: float
+
+
 class ChatResponse(BaseModel):
     response: str
     session_id: str
+    tools_used: list[ToolUsage] = []
 
 
 class DataInfo(BaseModel):
@@ -69,10 +77,11 @@ def chat(request: ChatRequest):
     """Send a message to the trading agent."""
     try:
         agent = get_agent(request.session_id)
-        response = agent.chat(request.message)
+        result = agent.chat(request.message)
         return ChatResponse(
-            response=response,
-            session_id=request.session_id
+            response=result["response"],
+            session_id=request.session_id,
+            tools_used=result.get("tools_used", [])
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

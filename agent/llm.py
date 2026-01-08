@@ -418,13 +418,18 @@ Rules:
 - Mention sample size when showing statistics
 - Respond in user's language (English/Russian)"""
 
-    def chat(self, user_message: str) -> str:
-        """Send message and get response, handling tool calls."""
+    def chat(self, user_message: str) -> dict:
+        """Send message and get response, handling tool calls.
 
+        Returns:
+            dict with 'response' (str) and 'tools_used' (list)
+        """
         self.messages.append({
             "role": "user",
             "content": user_message
         })
+
+        tools_used = []
 
         while True:
             response = self.client.messages.create(
@@ -455,12 +460,25 @@ Rules:
 
             # If no tool calls, we're done
             if not tool_uses:
-                return text_response
+                return {
+                    "response": text_response,
+                    "tools_used": tools_used
+                }
 
             # Execute tools and add results
             tool_results = []
             for tool_use in tool_uses:
+                start_time = datetime.now()
                 result = self.registry.execute(tool_use.name, tool_use.input)
+                duration_ms = (datetime.now() - start_time).total_seconds() * 1000
+
+                tools_used.append({
+                    "name": tool_use.name,
+                    "input": tool_use.input,
+                    "result": result,
+                    "duration_ms": duration_ms
+                })
+
                 tool_results.append({
                     "type": "tool_result",
                     "tool_use_id": tool_use.id,
