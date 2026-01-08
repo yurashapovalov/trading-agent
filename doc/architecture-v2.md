@@ -326,6 +326,28 @@ LIMIT 20;
 
 ---
 
+## Tech Debt: Component Structure
+
+Current mess:
+```
+components/
+├── ui/shadcn-io/ai/    ← original shadcn AI components
+├── ai-elements/        ← our customized copies (DUPLICATES!)
+└── ui/                 ← base UI primitives
+```
+
+Target:
+```
+components/
+├── ui/          # base primitives (button, input, dialog)
+├── ai/          # AI components (message, tool, suggestion)
+└── chat.tsx     # main chat
+```
+
+Action: Delete `ui/shadcn-io/ai/`, keep only `ai-elements/` renamed to `ai/`
+
+---
+
 ## Environment Variables
 
 ```bash
