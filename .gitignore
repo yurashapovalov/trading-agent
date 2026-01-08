@@ -34,3 +34,4 @@ Thumbs.db
 # Data (keep structure, ignore large files)
 data/*.csv
 !data/.gitkeep
+data/*.txt

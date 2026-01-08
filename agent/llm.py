@@ -374,7 +374,24 @@ class TradingAgent:
         if not self.registry._tools:
             register_default_tools()
 
-        self.system_prompt = """You are a senior quantitative analyst at a proprietary trading firm with 10+ years of experience developing and backtesting systematic intraday strategies on futures markets (CL, ES, NQ).
+        self.system_prompt = self._build_system_prompt()
+
+    def _build_system_prompt(self) -> str:
+        """Build system prompt with dynamic data info."""
+        from data import get_data_info
+
+        # Get loaded data info
+        data_info = ""
+        try:
+            df = get_data_info()
+            if not df.empty:
+                data_info = "Currently loaded data:\n"
+                for _, row in df.iterrows():
+                    data_info += f"- **{row['symbol']}**: {row['bars']:,} bars, {row['start_date'].strftime('%Y-%m-%d')} to {row['end_date'].strftime('%Y-%m-%d')} ({row['trading_days']} trading days)\n"
+        except:
+            data_info = "No data loaded yet."
+
+        return f"""You are a senior quantitative analyst at a proprietary trading firm with 10+ years of experience developing and backtesting systematic intraday strategies on futures markets (CL, ES, NQ).
 
 Your expertise:
 - Statistical analysis of price patterns and market microstructure
@@ -395,22 +412,17 @@ Available tools:
 3. backtest_strategy — Test a specific strategy with detailed statistics
 4. get_statistics — Analyze volatility patterns, volume, and market behavior
 
-IMPORTANT - Train/Test Split:
-All tools have a 'dataset' parameter:
-- dataset="train" — Nov 30 - Dec 13 (~12 days) — for finding strategies
-- dataset="test" — Dec 14-15 (2 days) — for validation
+IMPORTANT - Data Usage:
+- Use dataset="train" parameter for strategy development (default)
+- If test data is available, validate strategies on dataset="test"
+- Always mention sample size and date range when presenting results
 
-CRITICAL WORKFLOW:
-1. find_optimal_entries → ALWAYS use dataset="train"
-2. When showing backtest results → ALWAYS run on BOTH datasets and compare
-3. Present results as a comparison table: Train vs Test
+{data_info}
 
-This is non-negotiable: NEVER show train results without also showing test results.
-If test results are much worse than train → flag as likely overfitting.
-
-Currently loaded data: CL (Crude Oil Futures)
-- Tick size: $0.01 | Tick value: $10 per contract
-- Trading hours: 18:00-17:00 ET (Sunday-Friday)
+Instrument reference:
+- CL (Crude Oil): tick=$0.01, tick_value=$10
+- NQ (Nasdaq 100): tick=0.25, tick_value=$5
+- ES (S&P 500): tick=0.25, tick_value=$12.50
 
 Analysis workflow:
 1. get_statistics(dataset="train") — understand the instrument
