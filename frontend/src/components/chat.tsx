@@ -58,6 +58,9 @@ type ChatMessage = {
   usage?: Usage
 }
 
+// Generate unique session ID per page load
+const SESSION_ID = `session_${Date.now()}_${Math.random().toString(36).slice(2)}`
+
 export default function Chat() {
   const [input, setInput] = useState("")
   const [messages, setMessages] = useState<ChatMessage[]>([])
@@ -94,7 +97,7 @@ export default function Chat() {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ message: text }),
+        body: JSON.stringify({ message: text, session_id: SESSION_ID }),
         signal: abortControllerRef.current.signal,
       })
 
