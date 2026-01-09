@@ -426,9 +426,11 @@ Tick values: NQ=0.25 ($5), ES=0.25 ($12.50)"""
         )
 
         tool_declarations = self.registry.get_declarations()
+        total_input_tokens = 0
+        total_output_tokens = 0
 
         while True:
-            # Collect full response first (Gemini streaming with tools is complex)
+            # First check if we need to handle function calls (non-streaming)
             response = self.client.models.generate_content(
                 model=self.model,
                 contents=self.contents,
@@ -437,6 +439,11 @@ Tick values: NQ=0.25 ($5), ES=0.25 ($12.50)"""
                     tools=[types.Tool(function_declarations=tool_declarations)]
                 )
             )
+
+            # Track usage
+            if response.usage_metadata:
+                total_input_tokens += response.usage_metadata.prompt_token_count or 0
+                total_output_tokens += response.usage_metadata.candidates_token_count or 0
 
             # Check for function calls
             if response.function_calls:
@@ -474,34 +481,50 @@ Tick values: NQ=0.25 ($5), ES=0.25 ($12.50)"""
                 self.contents.append(
                     types.Content(role="user", parts=function_responses)
                 )
+                # Continue loop to get final response
             else:
-                # Stream text response
-                text_response = response.text or ""
-                self.contents.append(response.candidates[0].content)
+                # No function calls - now stream the final text response
+                # Reset contents to re-request with streaming
+                # Remove the last non-streaming response and re-request with streaming
 
-                # Emit text in chunks for streaming feel
-                chunk_size = 50
-                for i in range(0, len(text_response), chunk_size):
-                    chunk = text_response[i:i + chunk_size]
-                    yield {"type": "text_delta", "content": chunk}
+                full_text = ""
+                for chunk in self.client.models.generate_content_stream(
+                    model=self.model,
+                    contents=self.contents,
+                    config=types.GenerateContentConfig(
+                        system_instruction=self.system_instruction,
+                        tools=[types.Tool(function_declarations=tool_declarations)]
+                    )
+                ):
+                    if chunk.text:
+                        yield {"type": "text_delta", "content": chunk.text}
+                        full_text += chunk.text
+
+                    # Track usage from final chunk
+                    if chunk.usage_metadata:
+                        total_input_tokens = chunk.usage_metadata.prompt_token_count or 0
+                        total_output_tokens = chunk.usage_metadata.candidates_token_count or 0
+
+                # Store the full response in history
+                if full_text:
+                    self.contents.append(
+                        types.Content(role="model", parts=[types.Part(text=full_text)])
+                    )
 
                 # Parse suggestions
-                suggestions = self._parse_suggestions(text_response)
+                suggestions = self._parse_suggestions(full_text)
                 if suggestions:
                     yield {"type": "suggestions", "suggestions": suggestions}
 
                 # Usage data
-                if response.usage_metadata:
-                    input_tokens = response.usage_metadata.prompt_token_count or 0
-                    output_tokens = response.usage_metadata.candidates_token_count or 0
-                    # Gemini 3 Flash pricing: $0.10/1M input, $0.40/1M output
-                    cost = (input_tokens * 0.10 + output_tokens * 0.40) / 1_000_000
-                    yield {
-                        "type": "usage",
-                        "input_tokens": input_tokens,
-                        "output_tokens": output_tokens,
-                        "cost": cost
-                    }
+                # Gemini 3 Flash pricing: $0.10/1M input, $0.40/1M output
+                cost = (total_input_tokens * 0.10 + total_output_tokens * 0.40) / 1_000_000
+                yield {
+                    "type": "usage",
+                    "input_tokens": total_input_tokens,
+                    "output_tokens": total_output_tokens,
+                    "cost": cost
+                }
 
                 yield {"type": "done"}
                 return
