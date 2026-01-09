@@ -177,6 +177,9 @@ async def chat_stream(request: ChatRequest, user_id: str = Depends(require_auth)
 
     # Fetch recent history for context
     history = get_recent_history(user_id, limit=10)
+    print(f"[CONTEXT] Loaded {len(history)} messages for user {user_id[:8]}...")
+    for h in history:
+        print(f"  Q: {h.get('question', '')[:40]}... | R: {h.get('response', '')[:40]}...")
 
     async def generate():
         start_time = time.time()
