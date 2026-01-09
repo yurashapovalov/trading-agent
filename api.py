@@ -7,9 +7,14 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import Any, Optional
 
-from agent.llm import TradingAgent
 from data import get_data_info, init_database
 import config
+
+# Import agent based on provider
+if config.LLM_PROVIDER == "gemini":
+    from agent.llm_gemini import GeminiAgent as TradingAgent
+else:
+    from agent.llm import TradingAgent
 
 # Initialize database on startup
 init_database(config.DATABASE_PATH)
