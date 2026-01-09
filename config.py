@@ -40,3 +40,4 @@ SYMBOLS = {
         "trading_hours": "18:00-17:00"
     }
 }
+# Auto-deploy configured
