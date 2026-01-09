@@ -420,114 +420,110 @@ Tick values: NQ=0.25 ($5), ES=0.25 ($12.50)"""
                 }
 
     def chat_stream(self, user_message: str):
-        """Stream chat response with tool events."""
+        """Stream chat response with tool events. True streaming with function call support."""
         self.contents.append(
             types.Content(role="user", parts=[types.Part(text=user_message)])
         )
 
         tool_declarations = self.registry.get_declarations()
+        config = types.GenerateContentConfig(
+            system_instruction=self.system_instruction,
+            tools=[types.Tool(function_declarations=tool_declarations)]
+        )
+
         total_input_tokens = 0
         total_output_tokens = 0
 
         while True:
-            # First check if we need to handle function calls (non-streaming)
-            response = self.client.models.generate_content(
+            full_text = ""
+            model_content = None
+            has_function_calls = False
+
+            # Stream response
+            for chunk in self.client.models.generate_content_stream(
                 model=self.model,
                 contents=self.contents,
-                config=types.GenerateContentConfig(
-                    system_instruction=self.system_instruction,
-                    tools=[types.Tool(function_declarations=tool_declarations)]
-                )
-            )
+                config=config
+            ):
+                # Track usage
+                if chunk.usage_metadata:
+                    total_input_tokens = chunk.usage_metadata.prompt_token_count or 0
+                    total_output_tokens = chunk.usage_metadata.candidates_token_count or 0
 
-            # Track usage
-            if response.usage_metadata:
-                total_input_tokens += response.usage_metadata.prompt_token_count or 0
-                total_output_tokens += response.usage_metadata.candidates_token_count or 0
+                # Check for function calls (comes in first chunk)
+                if chunk.function_calls:
+                    has_function_calls = True
+                    # Save model content for history
+                    if chunk.candidates:
+                        model_content = chunk.candidates[0].content
 
-            # Check for function calls
-            if response.function_calls:
-                self.contents.append(response.candidates[0].content)
+                    # Execute function calls
+                    function_responses = []
+                    for fc in chunk.function_calls:
+                        yield {
+                            "type": "tool_start",
+                            "name": fc.name,
+                            "input": dict(fc.args)
+                        }
 
-                function_responses = []
-                for fc in response.function_calls:
-                    # Emit tool_start
-                    yield {
-                        "type": "tool_start",
-                        "name": fc.name,
-                        "input": dict(fc.args)
-                    }
+                        start_time = datetime.now()
+                        result = self.registry.execute(fc.name, dict(fc.args))
+                        duration_ms = (datetime.now() - start_time).total_seconds() * 1000
 
-                    start_time = datetime.now()
-                    result = self.registry.execute(fc.name, dict(fc.args))
-                    duration_ms = (datetime.now() - start_time).total_seconds() * 1000
+                        yield {
+                            "type": "tool_end",
+                            "name": fc.name,
+                            "input": dict(fc.args),
+                            "result": result,
+                            "duration_ms": duration_ms
+                        }
 
-                    # Emit tool_end
-                    yield {
-                        "type": "tool_end",
-                        "name": fc.name,
-                        "input": dict(fc.args),
-                        "result": result,
-                        "duration_ms": duration_ms
-                    }
-
-                    function_responses.append(
-                        types.Part.from_function_response(
-                            name=fc.name,
-                            response={"result": result}
+                        function_responses.append(
+                            types.Part.from_function_response(
+                                name=fc.name,
+                                response={"result": result}
+                            )
                         )
-                    )
 
-                self.contents.append(
-                    types.Content(role="user", parts=function_responses)
-                )
-                # Continue loop to get final response
-            else:
-                # No function calls - now stream the final text response
-                # Reset contents to re-request with streaming
-                # Remove the last non-streaming response and re-request with streaming
-
-                full_text = ""
-                for chunk in self.client.models.generate_content_stream(
-                    model=self.model,
-                    contents=self.contents,
-                    config=types.GenerateContentConfig(
-                        system_instruction=self.system_instruction,
-                        tools=[types.Tool(function_declarations=tool_declarations)]
-                    )
-                ):
-                    if chunk.text:
-                        yield {"type": "text_delta", "content": chunk.text}
-                        full_text += chunk.text
-
-                    # Track usage from final chunk
-                    if chunk.usage_metadata:
-                        total_input_tokens = chunk.usage_metadata.prompt_token_count or 0
-                        total_output_tokens = chunk.usage_metadata.candidates_token_count or 0
-
-                # Store the full response in history
-                if full_text:
+                    # Add model response and function results to history
+                    if model_content:
+                        self.contents.append(model_content)
                     self.contents.append(
-                        types.Content(role="model", parts=[types.Part(text=full_text)])
+                        types.Content(role="user", parts=function_responses)
                     )
+                    break  # Exit stream loop to continue with new request
 
-                # Parse suggestions
-                suggestions = self._parse_suggestions(full_text)
-                if suggestions:
-                    yield {"type": "suggestions", "suggestions": suggestions}
+                # Stream text
+                if chunk.text:
+                    yield {"type": "text_delta", "content": chunk.text}
+                    full_text += chunk.text
 
-                # Usage data
-                # Gemini 3 Flash pricing: $0.10/1M input, $0.40/1M output
-                cost = (total_input_tokens * 0.10 + total_output_tokens * 0.40) / 1_000_000
-                yield {
-                    "type": "usage",
-                    "input_tokens": total_input_tokens,
-                    "output_tokens": total_output_tokens,
-                    "cost": cost
-                }
+            # If we had function calls, continue loop to get final response
+            if has_function_calls:
+                continue
 
-                yield {"type": "done"}
-                return
+            # No function calls - we're done
+            if full_text:
+                self.contents.append(
+                    types.Content(role="model", parts=[types.Part(text=full_text)])
+                )
+
+            # Parse suggestions
+            suggestions = self._parse_suggestions(full_text)
+            if suggestions:
+                yield {"type": "suggestions", "suggestions": suggestions}
+
+            # Usage data - Gemini 3 Flash: $0.10/1M input, $0.40/1M output
+            cost = (total_input_tokens * 0.10 + total_output_tokens * 0.40) / 1_000_000
+            yield {
+                "type": "usage",
+                "input_tokens": total_input_tokens,
+                "output_tokens": total_output_tokens,
+                "cost": cost
+            }
+
+            yield {"type": "done"}
+            return
 
     def _parse_suggestions(self, text: str) -> list[str]:
         """Parse [SUGGESTIONS]...[/SUGGESTIONS] block from response."""
