@@ -515,9 +515,9 @@ Tick values: NQ=0.25 ($5), ES=0.25 ($12.50)"""
             if suggestions:
                 yield {"type": "suggestions", "suggestions": suggestions}
 
-            # Gemini 3 Flash pricing: $0.50/1M input, $3.00/1M output (includes thinking)
-            output_with_thinking = total_output_tokens + total_thinking_tokens
-            cost = (total_input_tokens * 0.50 + output_with_thinking * 3.00) / 1_000_000
+            # Calculate cost using pricing module
+            from agent.pricing import calculate_cost
+            cost = calculate_cost(total_input_tokens, total_output_tokens, total_thinking_tokens)
             yield {
                 "type": "usage",
                 "input_tokens": total_input_tokens,

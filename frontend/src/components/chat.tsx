@@ -48,6 +48,7 @@ type ToolUsage = {
 type Usage = {
   input_tokens: number
   output_tokens: number
+  thinking_tokens?: number
   cost: number
 }
 
@@ -164,6 +165,7 @@ export default function Chat() {
                 usageData = {
                   input_tokens: event.input_tokens,
                   output_tokens: event.output_tokens,
+                  thinking_tokens: event.thinking_tokens,
                   cost: event.cost,
                 }
               } else if (event.type === "done") {
@@ -264,7 +266,7 @@ export default function Chat() {
                 {message.role === "assistant" && message.usage && (
                   <Actions className="mt-2">
                     <span className="text-xs text-muted-foreground">
-                      ↑{message.usage.input_tokens.toLocaleString()} · ↓{message.usage.output_tokens.toLocaleString()} · ${message.usage.cost.toFixed(4)}
+                      ↑{message.usage.input_tokens.toLocaleString()} · ↓{message.usage.output_tokens.toLocaleString()}{message.usage.thinking_tokens ? ` · 🧠${message.usage.thinking_tokens.toLocaleString()}` : ''} · ${message.usage.cost.toFixed(4)}
                     </span>
                   </Actions>
                 )}
