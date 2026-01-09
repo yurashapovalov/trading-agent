@@ -282,11 +282,23 @@ Always include LIMIT clause.""",
 class GeminiAgent:
     """Trading analytics agent powered by Google Gemini."""
 
-    def __init__(self, registry: Optional[GeminiToolRegistry] = None):
+    def __init__(self, registry: Optional[GeminiToolRegistry] = None, history: Optional[List[dict]] = None):
         self.client = genai.Client(api_key=config.GOOGLE_API_KEY)
         self.model = config.GEMINI_MODEL
         self.registry = registry or GEMINI_REGISTRY
         self.contents: List[types.Content] = []
+
+        # Load conversation history if provided
+        if history:
+            for msg in history:
+                if msg.get("question"):
+                    self.contents.append(
+                        types.Content(role="user", parts=[types.Part(text=msg["question"])])
+                    )
+                if msg.get("response"):
+                    self.contents.append(
+                        types.Content(role="model", parts=[types.Part(text=msg["response"])])
+                    )
 
         # Register tools if registry is empty
         if not self.registry._tools:

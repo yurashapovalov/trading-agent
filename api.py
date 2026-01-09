@@ -152,11 +152,31 @@ def chat(request: ChatRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+def get_recent_history(user_id: str, limit: int = 10) -> list:
+    """Fetch recent chat history for context."""
+    if not supabase:
+        return []
+    try:
+        result = supabase.table("chat_logs") \
+            .select("question, response") \
+            .eq("user_id", user_id) \
+            .order("created_at", desc=True) \
+            .limit(limit) \
+            .execute()
+        return list(reversed(result.data)) if result.data else []
+    except Exception as e:
+        print(f"Failed to fetch history for context: {e}")
+        return []
+
+
 @app.post("/chat/stream")
 async def chat_stream(request: ChatRequest, user_id: str = Depends(require_auth)):
     """Stream chat response with SSE events."""
     import asyncio
     import time
+
+    # Fetch recent history for context
+    history = get_recent_history(user_id, limit=10)
 
     async def generate():
         start_time = time.time()
@@ -165,7 +185,7 @@ async def chat_stream(request: ChatRequest, user_id: str = Depends(require_auth)
         usage_data = {}
 
         try:
-            agent = TradingAgent()  # Fresh agent each request
+            agent = TradingAgent(history=history)  # Agent with conversation context
             for event in agent.chat_stream(request.message):
                 yield f"data: {json.dumps(event, default=str)}\n\n"
                 await asyncio.sleep(0)  # Force flush
