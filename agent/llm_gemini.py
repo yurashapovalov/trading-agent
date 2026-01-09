@@ -433,6 +433,7 @@ Tick values: NQ=0.25 ($5), ES=0.25 ($12.50)"""
 
         total_input_tokens = 0
         total_output_tokens = 0
+        total_thinking_tokens = 0
 
         while True:
             full_text = ""
@@ -449,6 +450,7 @@ Tick values: NQ=0.25 ($5), ES=0.25 ($12.50)"""
                 if chunk.usage_metadata:
                     total_input_tokens = chunk.usage_metadata.prompt_token_count or 0
                     total_output_tokens = chunk.usage_metadata.candidates_token_count or 0
+                    total_thinking_tokens = getattr(chunk.usage_metadata, 'thoughts_token_count', 0) or 0
 
                 # Check for function calls (comes in first chunk)
                 if chunk.function_calls:
@@ -513,12 +515,14 @@ Tick values: NQ=0.25 ($5), ES=0.25 ($12.50)"""
             if suggestions:
                 yield {"type": "suggestions", "suggestions": suggestions}
 
-            # Usage data - Gemini 3 Flash: $0.10/1M input, $0.40/1M output
-            cost = (total_input_tokens * 0.10 + total_output_tokens * 0.40) / 1_000_000
+            # Gemini 3 Flash pricing: $0.50/1M input, $3.00/1M output (includes thinking)
+            output_with_thinking = total_output_tokens + total_thinking_tokens
+            cost = (total_input_tokens * 0.50 + output_with_thinking * 3.00) / 1_000_000
             yield {
                 "type": "usage",
                 "input_tokens": total_input_tokens,
                 "output_tokens": total_output_tokens,
+                "thinking_tokens": total_thinking_tokens,
                 "cost": cost
             }
 
