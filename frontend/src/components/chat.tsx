@@ -22,6 +22,7 @@ import {
 } from "@/components/ai-elements/prompt-input"
 import { Actions } from "@/components/ui/shadcn-io/ai/actions"
 import { useState, useRef, useEffect } from "react"
+import { useAuth } from "@/components/auth-provider"
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
 
@@ -60,6 +61,7 @@ type ChatMessage = {
 }
 
 export default function Chat() {
+  const { user, session, signOut } = useAuth()
   const [input, setInput] = useState("")
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [isLoading, setIsLoading] = useState(false)
@@ -100,6 +102,7 @@ export default function Chat() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          ...(session?.access_token && { Authorization: `Bearer ${session.access_token}` }),
         },
         body: JSON.stringify({ message: text, session_id: sessionIdRef.current }),
         signal: abortControllerRef.current.signal,
@@ -236,6 +239,20 @@ export default function Chat() {
 
   return (
     <div className="flex flex-col h-dvh bg-background">
+      {/* Header */}
+      <header className="flex items-center justify-between px-4 py-2 border-b border-border">
+        <h1 className="text-sm font-medium">Trading Analytics</h1>
+        <div className="flex items-center gap-3">
+          <span className="text-xs text-muted-foreground">{user?.email}</span>
+          <button
+            onClick={signOut}
+            className="text-xs text-muted-foreground hover:text-foreground"
+          >
+            Sign out
+          </button>
+        </div>
+      </header>
+
       {/* Messages */}
       <div className="flex-1 overflow-y-auto">
         <div className="max-w-2xl mx-auto px-4 py-6 space-y-6">

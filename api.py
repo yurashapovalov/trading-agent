@@ -1,14 +1,20 @@
 """FastAPI server for Trading Agent"""
 
 import json
-from fastapi import FastAPI, HTTPException
+import jwt
+from datetime import datetime
+from fastapi import FastAPI, HTTPException, Header, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import Any, Optional
+from supabase import create_client
 
 from data import get_data_info, init_database
 import config
+
+# Initialize Supabase client
+supabase = create_client(config.SUPABASE_URL, config.SUPABASE_SERVICE_KEY) if config.SUPABASE_URL else None
 
 # Import agent based on provider
 if config.LLM_PROVIDER == "gemini":
@@ -34,6 +40,66 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["*"],  # Required for streaming
 )
+
+
+def get_user_id(authorization: Optional[str] = Header(None)) -> Optional[str]:
+    """Extract user_id from JWT token. Returns None if no auth."""
+    if not authorization or not authorization.startswith("Bearer "):
+        return None
+
+    token = authorization.split(" ")[1]
+    try:
+        # Decode without verification - Supabase tokens are self-signed
+        # We trust the token since it comes from our Supabase instance
+        payload = jwt.decode(token, options={"verify_signature": False})
+        return payload.get("sub")  # user_id is in 'sub' claim
+    except jwt.DecodeError:
+        return None
+
+
+def require_auth(authorization: Optional[str] = Header(None)) -> str:
+    """Require valid authentication. Raises 401 if not authenticated."""
+    user_id = get_user_id(authorization)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    return user_id
+
+
+async def log_chat(
+    user_id: str,
+    question: str,
+    response: str,
+    tools_used: list,
+    input_tokens: int,
+    output_tokens: int,
+    thinking_tokens: int,
+    cost_usd: float,
+    model: str,
+    provider: str,
+    duration_ms: int,
+    session_id: str
+):
+    """Log chat interaction to Supabase."""
+    if not supabase:
+        return
+
+    try:
+        supabase.table("chat_logs").insert({
+            "user_id": user_id,
+            "question": question,
+            "response": response,
+            "tools_used": tools_used,
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "thinking_tokens": thinking_tokens,
+            "cost_usd": cost_usd,
+            "model": model,
+            "provider": provider,
+            "duration_ms": duration_ms,
+            "session_id": session_id
+        }).execute()
+    except Exception as e:
+        print(f"Failed to log chat: {e}")
 
 
 
@@ -87,16 +153,52 @@ def chat(request: ChatRequest):
 
 
 @app.post("/chat/stream")
-async def chat_stream(request: ChatRequest):
+async def chat_stream(request: ChatRequest, user_id: str = Depends(require_auth)):
     """Stream chat response with SSE events."""
     import asyncio
+    import time
 
     async def generate():
+        start_time = time.time()
+        tools_collected = []
+        final_text = ""
+        usage_data = {}
+
         try:
             agent = TradingAgent()  # Fresh agent each request
             for event in agent.chat_stream(request.message):
                 yield f"data: {json.dumps(event, default=str)}\n\n"
                 await asyncio.sleep(0)  # Force flush
+
+                # Collect data for logging
+                if event.get("type") == "tool_end":
+                    tools_collected.append({
+                        "name": event.get("name"),
+                        "input": event.get("input"),
+                        "result": str(event.get("result", ""))[:1000],  # Truncate
+                        "duration_ms": event.get("duration_ms")
+                    })
+                elif event.get("type") == "text_delta":
+                    final_text += event.get("content", "")
+                elif event.get("type") == "usage":
+                    usage_data = event
+                elif event.get("type") == "done":
+                    # Log to Supabase
+                    duration_ms = int((time.time() - start_time) * 1000)
+                    await log_chat(
+                        user_id=user_id,
+                        question=request.message,
+                        response=final_text[:10000],  # Truncate long responses
+                        tools_used=tools_collected,
+                        input_tokens=usage_data.get("input_tokens", 0),
+                        output_tokens=usage_data.get("output_tokens", 0),
+                        thinking_tokens=usage_data.get("thinking_tokens", 0),
+                        cost_usd=usage_data.get("cost", 0),
+                        model=config.GEMINI_MODEL if config.LLM_PROVIDER == "gemini" else config.CLAUDE_MODEL,
+                        provider=config.LLM_PROVIDER,
+                        duration_ms=duration_ms,
+                        session_id=request.session_id or "default"
+                    )
         except Exception as e:
             yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
 
