@@ -340,7 +340,7 @@ export default function Chat() {
             <PromptInputTextarea
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder="Спроси о торговых данных..."
+              placeholder="Ask me anything about NQ futures..."
             />
             <PromptInputFooter>
               <div />
