@@ -85,6 +85,43 @@ export default function Chat() {
     scrollToBottom()
   }, [messages, currentTools, streamingText])
 
+  // Load chat history on mount
+  useEffect(() => {
+    if (!session?.access_token) return
+
+    const loadHistory = async () => {
+      try {
+        const response = await fetch(`${API_URL}/chat/history`, {
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+          },
+        })
+        if (response.ok) {
+          const history = await response.json()
+          const loadedMessages: ChatMessage[] = history.map((item: any) => ([
+            { role: "user" as const, content: item.question },
+            {
+              role: "assistant" as const,
+              content: item.response,
+              tools_used: item.tools_used || [],
+              usage: {
+                input_tokens: item.input_tokens,
+                output_tokens: item.output_tokens,
+                thinking_tokens: item.thinking_tokens,
+                cost: parseFloat(item.cost_usd) || 0,
+              },
+            },
+          ])).flat()
+          setMessages(loadedMessages)
+        }
+      } catch (e) {
+        console.error("Failed to load history:", e)
+      }
+    }
+
+    loadHistory()
+  }, [session?.access_token])
+
   const sendMessage = async (text: string) => {
     if (!text.trim() || isLoading) return
 

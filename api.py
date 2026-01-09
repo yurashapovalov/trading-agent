@@ -219,6 +219,27 @@ def reset():
     return {"status": "ok", "message": "Agents are fresh each request, no reset needed"}
 
 
+@app.get("/chat/history")
+async def chat_history(user_id: str = Depends(require_auth), limit: int = 50):
+    """Get chat history for the authenticated user."""
+    if not supabase:
+        return []
+
+    try:
+        result = supabase.table("chat_logs") \
+            .select("id, question, response, tools_used, input_tokens, output_tokens, thinking_tokens, cost_usd, created_at, session_id") \
+            .eq("user_id", user_id) \
+            .order("created_at", desc=True) \
+            .limit(limit) \
+            .execute()
+
+        # Reverse to get chronological order
+        return list(reversed(result.data)) if result.data else []
+    except Exception as e:
+        print(f"Failed to fetch chat history: {e}")
+        return []
+
+
 @app.get("/data", response_model=list[DataInfo])
 def data_info():
     """Get information about loaded data."""
