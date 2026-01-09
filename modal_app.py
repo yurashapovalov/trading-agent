@@ -84,38 +84,16 @@ def create_fastapi_app():
         async def generate():
             try:
                 agent = TradingAgent()
-                result = agent.chat(message)
 
-                response_text = result["response"]
-                tools_used = result.get("tools_used", [])
-
-                # Send tools info first
-                if tools_used:
-                    yield {
-                        "event": "tool",
-                        "data": json.dumps({"tools": tools_used})
-                    }
-
-                # Stream the response in chunks
-                chunk_size = 50
-                for i in range(0, len(response_text), chunk_size):
-                    chunk = response_text[i:i + chunk_size]
-                    yield {
-                        "event": "message",
-                        "data": json.dumps({"content": chunk})
-                    }
-
-                # Done
-                yield {
-                    "event": "done",
-                    "data": json.dumps({"status": "complete"})
-                }
+                # Use streaming method for real streaming + usage data
+                for event in agent.chat_stream(message):
+                    yield {"data": json.dumps(event, default=str)}
 
             except Exception as e:
-                yield {
-                    "event": "error",
-                    "data": json.dumps({"error": str(e)})
-                }
+                yield {"data": json.dumps({
+                    "type": "error",
+                    "message": str(e)
+                })}
 
         return EventSourceResponse(generate())
 
