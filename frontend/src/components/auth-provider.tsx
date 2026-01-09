@@ -50,6 +50,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     window.location.href = '/login'
   }
 
+  // Show nothing while loading to avoid hydration mismatch
+  if (loading) {
+    return (
+      <div className="flex h-dvh items-center justify-center">
+        <div className="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full" />
+      </div>
+    )
+  }
+
   return (
     <AuthContext.Provider value={{ user, session, loading, signOut }}>
       {children}
