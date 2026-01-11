@@ -1,10 +1,22 @@
 """Supabase logging for request traces and completions."""
 
+import json
 from datetime import datetime
 from typing import Any
 from supabase import create_client
 
 import config
+
+
+def make_json_serializable(obj: Any) -> Any:
+    """Convert object to JSON-serializable format."""
+    if obj is None:
+        return None
+    # Convert to JSON string and back to handle Timestamps, etc.
+    try:
+        return json.loads(json.dumps(obj, default=str))
+    except (TypeError, ValueError):
+        return str(obj)
 
 # Initialize Supabase client
 _supabase = None
@@ -53,9 +65,14 @@ async def log_trace_step(
         return
 
     try:
+        # Convert all data to JSON-serializable format
+        serializable_sql_result = make_json_serializable(sql_result)
+        serializable_input = make_json_serializable(input_data)
+        serializable_output = make_json_serializable(output_data)
+
         # Truncate large fields to avoid storage issues
-        if sql_result and len(str(sql_result)) > 10000:
-            sql_result = str(sql_result)[:10000] + "... [truncated]"
+        if serializable_sql_result and len(str(serializable_sql_result)) > 10000:
+            serializable_sql_result = str(serializable_sql_result)[:10000] + "... [truncated]"
 
         supabase.table("request_traces").insert({
             "request_id": request_id,
@@ -63,13 +80,13 @@ async def log_trace_step(
             "step_number": step_number,
             "agent_name": agent_name,
             "agent_type": agent_type,
-            "input_data": input_data,
-            "output_data": output_data,
+            "input_data": serializable_input,
+            "output_data": serializable_output,
             "duration_ms": duration_ms,
             "started_at": started_at.isoformat() if started_at else None,
             "finished_at": finished_at.isoformat() if finished_at else None,
             "sql_query": sql_query,
-            "sql_result": sql_result,
+            "sql_result": serializable_sql_result,
             "sql_rows_returned": sql_rows_returned,
             "sql_error": sql_error,
             "validation_status": validation_status,
