@@ -183,6 +183,7 @@ export default function Chat() {
           if (line.startsWith("data: ")) {
             try {
               const event = JSON.parse(line.slice(6))
+              console.log("[SSE]", event.type, event)
 
               // New multi-agent events
               if (event.type === "step_start") {
