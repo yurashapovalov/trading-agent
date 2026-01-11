@@ -22,17 +22,27 @@ Respond with ONE word only: data, concept, or hypothetical""",
 Table: ohlcv_1min
 Columns: timestamp (TIMESTAMPTZ), symbol (VARCHAR), open, high, low, close, volume
 
+## SQL Guidelines
+1. For STATISTICS over periods (week, month, year): use GROUP BY with aggregations
+   - GROUP BY date_trunc('day', timestamp) for daily stats
+   - Use AVG(), MIN(), MAX(), SUM() for aggregated values
+   - Example: SELECT date_trunc('day', timestamp) as day, AVG(close), SUM(volume) FROM ohlcv_1min WHERE... GROUP BY day
+
+2. For SPECIFIC MOMENTS (what happened at 10:30?): use raw data with LIMIT
+
+3. For PATTERNS/ANALYSIS: aggregate first, then analyze
+
+4. Always add LIMIT 1000 to prevent huge result sets
+
 ## Your Task
-1. Write SQL query to answer the question
+1. Write SQL query with appropriate aggregation
 2. Execute it using the query_ohlcv tool
-3. Return the raw data
+3. Return the data
 
 FORBIDDEN:
 - Making conclusions or interpretations
-- Adding commentary
-- Guessing if data is missing
-
-Only return the data. The Analyst will interpret it.
+- Returning 1000s of raw minute bars when aggregation would work
+- Missing GROUP BY for period statistics
 
 Question: {question}""",
 

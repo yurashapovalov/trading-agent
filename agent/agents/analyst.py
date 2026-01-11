@@ -52,8 +52,8 @@ class Analyst(BaseOutputAgent):
             if query.get("error"):
                 parts.append(f"Error: {query['error']}")
             elif query.get("rows"):
-                # Show first 20 rows as JSON
-                rows = query["rows"][:20]
+                # Show up to 100 rows (aggregated data should be compact)
+                rows = query["rows"][:100]
                 parts.append(f"Data:\n```json\n{json.dumps(rows, indent=2, default=str)}\n```")
 
         # Add validation info if present
