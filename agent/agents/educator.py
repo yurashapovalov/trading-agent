@@ -45,7 +45,7 @@ class Educator(BaseOutputAgent):
             contents=prompt,
             config=types.GenerateContentConfig(
                 temperature=0.5,  # Slightly more creative for explanations
-                max_output_tokens=1500,
+                max_output_tokens=8000,
             )
         )
 
@@ -81,7 +81,7 @@ class Educator(BaseOutputAgent):
             contents=prompt,
             config=types.GenerateContentConfig(
                 temperature=0.5,
-                max_output_tokens=1500,
+                max_output_tokens=8000,
             )
         ):
             if chunk.usage_metadata:
