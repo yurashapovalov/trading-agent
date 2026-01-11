@@ -5,13 +5,6 @@ import {
   MessageContent,
   MessageResponse,
 } from "@/components/ai-elements/message"
-import {
-  Tool,
-  ToolHeader,
-  ToolContent,
-  ToolInput,
-  ToolOutput,
-} from "@/components/ai-elements/tool"
 import { Loader } from "@/components/ai-elements/loader"
 import { Suggestions, Suggestion } from "@/components/ai-elements/suggestion"
 import {
@@ -390,10 +383,6 @@ export default function Chat() {
     setInput(suggestion)
   }
 
-  const getToolState = (status: "running" | "completed") => {
-    return status === "running" ? "input-available" : "output-available"
-  }
-
   return (
     <div className="flex flex-col h-dvh bg-background">
       {/* Header */}
@@ -484,31 +473,6 @@ export default function Chat() {
           ))}
 
 
-          {/* Currently running tools */}
-          {currentTools.length > 0 && (
-            <div>
-              {currentTools.map((tool, i) => (
-                <Tool key={i} className="mb-4">
-                  <ToolHeader
-                    title={
-                      tool.status === "running"
-                        ? tool.name
-                        : `${tool.name} (${tool.duration_ms?.toFixed(0)}ms)`
-                    }
-                    type="tool-invocation"
-                    state={getToolState(tool.status)}
-                  />
-                  <ToolContent>
-                    <ToolInput input={tool.input} />
-                    {tool.status === "completed" && (
-                      <ToolOutput output={tool.result} errorText={undefined} />
-                    )}
-                  </ToolContent>
-                </Tool>
-              ))}
-            </div>
-          )}
-
           {/* Streaming text */}
           {streamingText && (
             <Message from="assistant">
@@ -520,21 +484,49 @@ export default function Chat() {
 
           {/* Agent steps progress */}
           {currentSteps.length > 0 && (
-            <div className="space-y-1 mb-4">
+            <div className="space-y-2 mb-4 p-3 border border-border rounded-lg bg-muted/30">
               {currentSteps.map((step, i) => (
-                <div key={i} className="flex items-center gap-2 text-sm">
-                  {step.status === "running" ? (
-                    <Loader size={14} />
-                  ) : (
-                    <span className="text-green-500">✓</span>
-                  )}
-                  <span className={step.status === "completed" ? "text-muted-foreground" : ""}>
-                    {step.message}
-                  </span>
-                  {step.result && "route" in step.result && (
-                    <span className="text-xs bg-muted px-1.5 py-0.5 rounded">
-                      {String(step.result.route)}
+                <div key={i} className="text-sm">
+                  <div className="flex items-center gap-2">
+                    {step.status === "running" ? (
+                      <Loader size={14} />
+                    ) : (
+                      <span className="text-green-500">✓</span>
+                    )}
+                    <span className={step.status === "completed" ? "text-muted-foreground" : "font-medium"}>
+                      {step.message}
                     </span>
+                    {step.result && "route" in step.result && (
+                      <span className="text-xs bg-blue-500/10 text-blue-500 px-1.5 py-0.5 rounded">
+                        → {String(step.result.route)}
+                      </span>
+                    )}
+                    {step.result && "total_rows" in step.result && (
+                      <span className="text-xs bg-purple-500/10 text-purple-500 px-1.5 py-0.5 rounded">
+                        {String(step.result.total_rows)} rows
+                      </span>
+                    )}
+                  </div>
+                  {/* Show SQL query inline if present */}
+                  {step.tools && step.tools.length > 0 && (
+                    <div className="ml-6 mt-1 text-xs text-muted-foreground">
+                      {step.tools.map((tool, j) => (
+                        <div key={j} className="flex items-center gap-1">
+                          <span>└─</span>
+                          <span className="font-mono truncate max-w-[300px]">
+                            {typeof tool.input === 'object' && 'query' in tool.input
+                              ? String(tool.input.query).substring(0, 60) + '...'
+                              : tool.name}
+                          </span>
+                          {(() => {
+                            const res = tool.result as Record<string, unknown> | undefined
+                            return res && typeof res === 'object' && 'rows' in res
+                              ? <span className="text-green-600">({String(res.rows)} rows)</span>
+                              : null
+                          })()}
+                        </div>
+                      ))}
+                    </div>
                   )}
                 </div>
               ))}
