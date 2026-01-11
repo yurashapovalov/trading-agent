@@ -190,19 +190,52 @@ async def chat_stream_v2(request: ChatRequest, user_id: str = Depends(require_au
 
 @app.get("/chat/history")
 async def chat_history(user_id: str = Depends(require_auth), limit: int = 50):
-    """Get chat history for the authenticated user."""
+    """Get chat history for the authenticated user with agent traces."""
     if not supabase:
         return []
 
     try:
+        # Get chat logs
         result = supabase.table("chat_logs") \
-            .select("id, question, response, route, agents_used, validation_passed, input_tokens, output_tokens, thinking_tokens, cost_usd, created_at, session_id") \
+            .select("id, request_id, question, response, route, agents_used, validation_passed, input_tokens, output_tokens, thinking_tokens, cost_usd, created_at, session_id") \
             .eq("user_id", user_id) \
             .order("created_at", desc=True) \
             .limit(limit) \
             .execute()
 
-        return list(reversed(result.data)) if result.data else []
+        if not result.data:
+            return []
+
+        logs = list(reversed(result.data))
+
+        # Get request_ids to fetch traces
+        request_ids = [log["request_id"] for log in logs if log.get("request_id")]
+
+        if request_ids:
+            # Fetch all traces for these requests in one query
+            traces_result = supabase.table("request_traces") \
+                .select("request_id, step_number, agent_name, agent_type, input_data, output_data, sql_query, sql_result, sql_rows_returned, validation_status, duration_ms") \
+                .in_("request_id", request_ids) \
+                .order("step_number") \
+                .execute()
+
+            # Group traces by request_id
+            traces_by_request = {}
+            for trace in (traces_result.data or []):
+                req_id = trace["request_id"]
+                if req_id not in traces_by_request:
+                    traces_by_request[req_id] = []
+                traces_by_request[req_id].append(trace)
+
+            # Attach traces to logs
+            for log in logs:
+                req_id = log.get("request_id")
+                if req_id and req_id in traces_by_request:
+                    log["traces"] = traces_by_request[req_id]
+                else:
+                    log["traces"] = []
+
+        return logs
     except Exception as e:
         print(f"Failed to fetch chat history: {e}")
         return []

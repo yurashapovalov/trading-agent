@@ -98,6 +98,46 @@ export default function Chat() {
     scrollToBottom()
   }, [messages, currentTools, currentSteps, streamingText])
 
+  // Convert traces from API to agent_steps format
+  const tracesToAgentSteps = (traces: any[]): AgentStep[] => {
+    if (!traces || traces.length === 0) return []
+
+    const agentMessages: Record<string, string> = {
+      router: "Determining question type...",
+      data_agent: "Fetching data...",
+      analyst: "Analyzing data...",
+      analyst_no_data: "Analyzing scenario...",
+      educator: "Preparing explanation...",
+      validator: "Validating response...",
+    }
+
+    return traces.map(trace => {
+      const step: AgentStep = {
+        agent: trace.agent_name,
+        message: agentMessages[trace.agent_name] || trace.agent_name,
+        status: "completed",
+        result: typeof trace.output_data === 'string'
+          ? JSON.parse(trace.output_data)
+          : trace.output_data,
+        durationMs: trace.duration_ms,
+        tools: [],
+      }
+
+      // Add SQL query as a tool if present
+      if (trace.sql_query) {
+        step.tools = [{
+          name: "SQL Query",
+          input: { query: trace.sql_query },
+          result: { rows: trace.sql_rows_returned, data: trace.sql_result },
+          duration_ms: trace.duration_ms,
+          status: "completed",
+        }]
+      }
+
+      return step
+    })
+  }
+
   // Load chat history on mount
   useEffect(() => {
     if (!session?.access_token) return
@@ -116,7 +156,10 @@ export default function Chat() {
             {
               role: "assistant" as const,
               content: item.response,
-              tools_used: item.tools_used || [],
+              tools_used: [],
+              agent_steps: tracesToAgentSteps(item.traces || []),
+              route: item.route,
+              validation_passed: item.validation_passed,
               usage: {
                 input_tokens: item.input_tokens,
                 output_tokens: item.output_tokens,
