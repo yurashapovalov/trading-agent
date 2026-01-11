@@ -236,6 +236,110 @@ async def chat_stream(request: ChatRequest, user_id: str = Depends(require_auth)
     )
 
 
+@app.post("/chat/v2/stream")
+async def chat_stream_v2(request: ChatRequest, user_id: str = Depends(require_auth)):
+    """
+    Stream chat response using multi-agent system.
+
+    New SSE event types:
+    - step_start: agent starting work
+    - step_end: agent finished
+    - sql_executed: SQL query result
+    - text_delta: streaming text
+    - validation: validation result
+    - usage: token usage
+    - done: completion
+    """
+    import asyncio
+    from agent.graph import trading_graph
+    from agent.logging.supabase import log_completion
+
+    print(f"[V2] Processing: {request.message[:50]}... for user {user_id[:8]}...")
+
+    async def generate():
+        final_text = ""
+        usage_data = {}
+        request_id = None
+        route = None
+        agents_used = []
+        sql_queries_count = 0
+        total_rows = 0
+        validation_attempts = 0
+        validation_passed = None
+
+        try:
+            for event in trading_graph.stream_sse(
+                question=request.message,
+                user_id=user_id,
+                session_id=request.session_id or "default"
+            ):
+                yield f"data: {json.dumps(event, default=str)}\n\n"
+                await asyncio.sleep(0)  # Force flush
+
+                # Collect data for logging
+                event_type = event.get("type")
+
+                if event_type == "step_start":
+                    agents_used.append(event.get("agent"))
+
+                elif event_type == "step_end" and event.get("agent") == "router":
+                    route = event.get("result", {}).get("route")
+
+                elif event_type == "sql_executed":
+                    sql_queries_count += 1
+                    total_rows += event.get("rows_found", 0)
+
+                elif event_type == "text_delta":
+                    final_text += event.get("content", "")
+
+                elif event_type == "validation":
+                    validation_attempts += 1
+                    validation_passed = event.get("status") == "ok"
+
+                elif event_type == "usage":
+                    usage_data = event
+
+                elif event_type == "done":
+                    request_id = event.get("request_id")
+                    duration_ms = event.get("total_duration_ms", 0)
+
+                    # Log to Supabase (new format)
+                    await log_completion(
+                        request_id=request_id,
+                        user_id=user_id,
+                        session_id=request.session_id or "default",
+                        question=request.message,
+                        response=final_text[:10000],
+                        route=route,
+                        agents_used=list(set(agents_used)),  # Dedupe
+                        total_sql_queries=sql_queries_count,
+                        total_rows_returned=total_rows,
+                        validation_attempts=validation_attempts,
+                        validation_passed=validation_passed,
+                        input_tokens=usage_data.get("input_tokens", 0),
+                        output_tokens=usage_data.get("output_tokens", 0),
+                        thinking_tokens=usage_data.get("thinking_tokens", 0),
+                        cost_usd=usage_data.get("cost", 0),
+                        duration_ms=duration_ms,
+                        model=config.GEMINI_MODEL,
+                        provider="gemini"
+                    )
+
+        except Exception as e:
+            print(f"[V2] Error: {e}")
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        }
+    )
+
+
 @app.post("/reset")
 def reset():
     """Reset endpoint (no-op, agents are fresh each request)."""
