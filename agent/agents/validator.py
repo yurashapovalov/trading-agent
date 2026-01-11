@@ -1,6 +1,7 @@
 """Validator agent - checks responses against data for hallucinations."""
 
 import json
+import re
 from google import genai
 from google.genai import types
 
@@ -8,6 +9,33 @@ import config
 from agent.state import AgentState, ValidationResult, UsageStats
 from agent.prompts import get_prompt
 from agent.pricing import calculate_cost
+
+
+def extract_json(text: str) -> dict | None:
+    """Extract JSON from text that may contain markdown code blocks or other text."""
+    text = text.strip()
+
+    # Try to find JSON in code blocks first
+    code_block_match = re.search(r'```(?:json)?\s*\n?(.*?)\n?```', text, re.DOTALL)
+    if code_block_match:
+        try:
+            return json.loads(code_block_match.group(1).strip())
+        except json.JSONDecodeError:
+            pass
+
+    # Try to find raw JSON object
+    json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', text, re.DOTALL)
+    if json_match:
+        try:
+            return json.loads(json_match.group(0))
+        except json.JSONDecodeError:
+            pass
+
+    # Last resort: try parsing the whole text
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return None
 
 
 class Validator:
@@ -104,27 +132,21 @@ class Validator:
                     cost_usd=cost
                 )
 
-            # Parse JSON response
-            text = result.text.strip()
-            # Remove markdown code blocks if present
-            if text.startswith("```"):
-                lines = text.split("\n")
-                text = "\n".join(lines[1:-1])
+            # Parse JSON response using robust extraction
+            validation = extract_json(result.text)
 
-            validation = json.loads(text)
+            if validation is None:
+                # If can't parse, assume ok
+                return ValidationResult(
+                    status="ok",
+                    issues=["Validation response not parseable"],
+                    feedback=""
+                )
 
             return ValidationResult(
                 status=validation.get("status", "ok"),
                 issues=validation.get("issues", []),
                 feedback=validation.get("feedback", "")
-            )
-
-        except json.JSONDecodeError:
-            # If can't parse, assume ok
-            return ValidationResult(
-                status="ok",
-                issues=["Validation response not parseable"],
-                feedback=""
             )
         except Exception as e:
             # On error, don't block - approve with warning

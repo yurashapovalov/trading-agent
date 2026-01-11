@@ -1,6 +1,7 @@
 """Data Agent - executes SQL queries to fetch trading data."""
 
 import time
+import pandas as pd
 from google import genai
 from google.genai import types
 
@@ -132,6 +133,16 @@ Only respond with valid JSON."""
                     rows=[],
                     row_count=0,
                     error=result["error"],
+                    duration_ms=duration_ms
+                ))
+            elif isinstance(result, pd.DataFrame):
+                # DataFrame from query_ohlcv
+                rows = result.to_dict(orient='records')
+                results.append(SQLResult(
+                    query=sql_query,
+                    rows=rows,
+                    row_count=len(rows),
+                    error=None,
                     duration_ms=duration_ms
                 ))
             elif isinstance(result, list):
