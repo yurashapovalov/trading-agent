@@ -186,7 +186,6 @@ export default function Chat() {
           if (line.startsWith("data: ")) {
             try {
               const event = JSON.parse(line.slice(6))
-              console.log("[SSE]", event.type, event)
 
               // New multi-agent events
               if (event.type === "step_start") {
@@ -198,7 +197,6 @@ export default function Chat() {
                   tools: [],
                 }
                 stepsCollected.push(newStep)
-                console.log("[DEBUG] step_start, stepsCollected now:", stepsCollected.length)
                 setCurrentSteps((prev) => [...prev, newStep])
               } else if (event.type === "step_end") {
                 if (event.agent === "router") {
@@ -283,8 +281,6 @@ export default function Chat() {
                   cost: event.cost,
                 }
               } else if (event.type === "done") {
-                console.log("[DEBUG] stepsCollected:", JSON.stringify(stepsCollected, null, 2))
-                console.log("[DEBUG] toolsCollected:", toolsCollected.length)
                 setMessages((prev) => [
                   ...prev,
                   {
@@ -375,11 +371,7 @@ export default function Chat() {
       <div className="flex-1 overflow-y-auto">
         <div className="max-w-2xl mx-auto px-4 py-6 space-y-6">
 
-          {messages.map((message, index) => {
-            if (message.role === "assistant") {
-              console.log("[RENDER] message", index, "agent_steps:", message.agent_steps?.length, message.agent_steps)
-            }
-            return (
+          {messages.map((message, index) => (
             <div key={index}>
               {/* Agent execution trace before assistant response */}
               {message.role === "assistant" && message.agent_steps && message.agent_steps.length > 0 && (
@@ -446,7 +438,7 @@ export default function Chat() {
                 )}
               </Message>
             </div>
-          )})}
+          ))}
 
 
           {/* Currently running tools */}
