@@ -198,6 +198,7 @@ export default function Chat() {
                   tools: [],
                 }
                 stepsCollected.push(newStep)
+                console.log("[DEBUG] step_start, stepsCollected now:", stepsCollected.length)
                 setCurrentSteps((prev) => [...prev, newStep])
               } else if (event.type === "step_end") {
                 if (event.agent === "router") {
@@ -282,13 +283,15 @@ export default function Chat() {
                   cost: event.cost,
                 }
               } else if (event.type === "done") {
+                console.log("[DEBUG] stepsCollected:", JSON.stringify(stepsCollected, null, 2))
+                console.log("[DEBUG] toolsCollected:", toolsCollected.length)
                 setMessages((prev) => [
                   ...prev,
                   {
                     role: "assistant",
                     content: stripSuggestions(finalText),
                     tools_used: toolsCollected,
-                    agent_steps: stepsCollected,
+                    agent_steps: [...stepsCollected], // Create new array to ensure React detects change
                     route,
                     validation_passed: validationPassed,
                     usage: usageData,
