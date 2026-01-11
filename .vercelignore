@@ -1,0 +1,9 @@
+data/
+*.duckdb
+*.duckdb.wal
+venv/
+__pycache__/
+*.pyc
+.env
+node_modules/
+.next/

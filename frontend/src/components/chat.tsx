@@ -427,7 +427,7 @@ export default function Chat() {
                   <span className={step.status === "completed" ? "text-muted-foreground" : ""}>
                     {step.message}
                   </span>
-                  {step.result?.route && (
+                  {step.result && "route" in step.result && (
                     <span className="text-xs bg-muted px-1.5 py-0.5 rounded">
                       {String(step.result.route)}
                     </span>
