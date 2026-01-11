@@ -51,6 +51,8 @@ type AgentStep = {
   message: string
   status: "running" | "completed"
   result?: Record<string, unknown>
+  tools?: ToolUsage[]  // Tools executed by this agent
+  durationMs?: number
 }
 
 type Usage = {
@@ -64,7 +66,7 @@ type ChatMessage = {
   role: "user" | "assistant"
   content: string
   tools_used?: ToolUsage[]
-  agents_used?: string[]
+  agent_steps?: AgentStep[]  // Full agent execution trace
   route?: string
   validation_passed?: boolean
   usage?: Usage
@@ -165,7 +167,8 @@ export default function Chat() {
       const decoder = new TextDecoder()
       let buffer = ""
       const toolsCollected: ToolUsage[] = []
-      const agentsUsed: string[] = []
+      const stepsCollected: AgentStep[] = []
+      let currentAgentName: string | null = null
       let finalText = ""
       let usageData: Usage | undefined
       let route: string | undefined
@@ -187,16 +190,29 @@ export default function Chat() {
 
               // New multi-agent events
               if (event.type === "step_start") {
+                currentAgentName = event.agent
                 const newStep: AgentStep = {
                   agent: event.agent,
                   message: event.message,
                   status: "running",
+                  tools: [],
                 }
-                agentsUsed.push(event.agent)
+                stepsCollected.push(newStep)
                 setCurrentSteps((prev) => [...prev, newStep])
               } else if (event.type === "step_end") {
                 if (event.agent === "router") {
-                  route = event.result?.route
+                  route = event.result?.route as string | undefined
+                }
+                // Update the step in stepsCollected
+                const stepIndex = stepsCollected.findIndex(
+                  s => s.agent === event.agent && s.status === "running"
+                )
+                if (stepIndex >= 0) {
+                  stepsCollected[stepIndex] = {
+                    ...stepsCollected[stepIndex],
+                    status: "completed",
+                    result: event.result,
+                  }
                 }
                 setCurrentSteps((prev) =>
                   prev.map((s) =>
@@ -215,6 +231,15 @@ export default function Chat() {
                   status: "completed",
                 }
                 toolsCollected.push(sqlTool)
+                // Attach tool to current agent's step
+                if (currentAgentName) {
+                  const stepIndex = stepsCollected.findIndex(
+                    s => s.agent === currentAgentName && s.status === "running"
+                  )
+                  if (stepIndex >= 0 && stepsCollected[stepIndex].tools) {
+                    stepsCollected[stepIndex].tools!.push(sqlTool)
+                  }
+                }
                 setCurrentTools((prev) => [...prev, sqlTool])
               } else if (event.type === "validation") {
                 validationPassed = event.status === "ok"
@@ -263,7 +288,7 @@ export default function Chat() {
                     role: "assistant",
                     content: stripSuggestions(finalText),
                     tools_used: toolsCollected,
-                    agents_used: [...new Set(agentsUsed)],
+                    agent_steps: stepsCollected,
                     route,
                     validation_passed: validationPassed,
                     usage: usageData,
@@ -349,21 +374,56 @@ export default function Chat() {
 
           {messages.map((message, index) => (
             <div key={index}>
-              {/* Tool calls before assistant response */}
-              {message.role === "assistant" &&
-                message.tools_used?.map((tool, i) => (
-                  <Tool key={i} className="mb-4">
-                    <ToolHeader
-                      title={`${tool.name} (${tool.duration_ms?.toFixed(0)}ms)`}
-                      type="tool-invocation"
-                      state="output-available"
-                    />
-                    <ToolContent>
-                      <ToolInput input={tool.input} />
-                      <ToolOutput output={tool.result} errorText={undefined} />
-                    </ToolContent>
-                  </Tool>
-                ))}
+              {/* Agent execution trace before assistant response */}
+              {message.role === "assistant" && message.agent_steps && message.agent_steps.length > 0 && (
+                <details className="mb-4 border border-border rounded-lg">
+                  <summary className="px-3 py-2 cursor-pointer text-sm text-muted-foreground hover:text-foreground flex items-center gap-2">
+                    <span>🤖 Agent Flow</span>
+                    <span className="text-xs">({message.agent_steps.length} steps)</span>
+                    {message.route && (
+                      <span className="text-xs bg-muted px-1.5 py-0.5 rounded ml-auto">
+                        {message.route}
+                      </span>
+                    )}
+                  </summary>
+                  <div className="px-3 py-2 space-y-2 border-t border-border">
+                    {message.agent_steps.map((step, i) => (
+                      <div key={i} className="text-sm">
+                        <div className="flex items-center gap-2">
+                          <span className="text-green-500">✓</span>
+                          <span className="font-medium">{step.agent}</span>
+                          <span className="text-muted-foreground">— {step.message}</span>
+                          {step.result && "route" in step.result && (
+                            <span className="text-xs bg-blue-500/10 text-blue-500 px-1.5 py-0.5 rounded">
+                              → {String(step.result.route)}
+                            </span>
+                          )}
+                          {step.result && "queries" in step.result && (
+                            <span className="text-xs bg-purple-500/10 text-purple-500 px-1.5 py-0.5 rounded">
+                              {String(step.result.queries)} queries, {String(step.result.total_rows)} rows
+                            </span>
+                          )}
+                        </div>
+                        {/* Nested tools for this agent */}
+                        {step.tools && step.tools.length > 0 && (
+                          <div className="ml-6 mt-1 space-y-1">
+                            {step.tools.map((tool, j) => (
+                              <details key={j} className="text-xs">
+                                <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
+                                  └─ {tool.name} ({tool.duration_ms}ms) → {JSON.stringify(tool.result)}
+                                </summary>
+                                <pre className="mt-1 p-2 bg-muted rounded text-xs overflow-x-auto">
+                                  {JSON.stringify(tool.input, null, 2)}
+                                </pre>
+                              </details>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </details>
+              )}
 
               {/* Message */}
               <Message from={message.role}>
