@@ -112,25 +112,36 @@ export default function Chat() {
     }
 
     return traces.map(trace => {
+      const outputData = typeof trace.output_data === 'string'
+        ? JSON.parse(trace.output_data)
+        : trace.output_data
+
       const step: AgentStep = {
         agent: trace.agent_name,
         message: agentMessages[trace.agent_name] || trace.agent_name,
         status: "completed",
-        result: typeof trace.output_data === 'string'
-          ? JSON.parse(trace.output_data)
-          : trace.output_data,
+        result: outputData,
         durationMs: trace.duration_ms,
         tools: [],
       }
 
+      // Add tool calls from output_data (Gemini function calling)
+      if (outputData?.tool_calls && Array.isArray(outputData.tool_calls)) {
+        step.tools = outputData.tool_calls.map((tc: any) => ({
+          name: tc.tool,
+          input: tc.args,
+          status: "completed" as const,
+        }))
+      }
+
       // Add SQL query as a tool if present
       if (trace.sql_query) {
-        step.tools = [{
+        step.tools = [...(step.tools || []), {
           name: "SQL Query",
           input: { query: trace.sql_query },
           result: { rows: trace.sql_rows_returned, data: trace.sql_result },
           duration_ms: trace.duration_ms,
-          status: "completed",
+          status: "completed" as const,
         }]
       }
 
@@ -260,6 +271,29 @@ export default function Chat() {
                   prev.map((s) =>
                     s.agent === event.agent && s.status === "running"
                       ? { ...s, status: "completed", result: event.result }
+                      : s
+                  )
+                )
+              } else if (event.type === "tool_call") {
+                // Gemini function calling - show tool call from agent
+                const toolCall: ToolUsage = {
+                  name: event.tool,
+                  input: event.args,
+                  status: "running",
+                }
+                // Attach to current agent's step
+                if (currentAgentName) {
+                  const stepIndex = stepsCollected.findIndex(
+                    s => s.agent === currentAgentName && s.status === "running"
+                  )
+                  if (stepIndex >= 0 && stepsCollected[stepIndex].tools) {
+                    stepsCollected[stepIndex].tools!.push(toolCall)
+                  }
+                }
+                setCurrentSteps((prev) =>
+                  prev.map((s) =>
+                    s.agent === currentAgentName && s.status === "running"
+                      ? { ...s, tools: [...(s.tools || []), toolCall] }
                       : s
                   )
                 )

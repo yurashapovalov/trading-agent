@@ -1,4 +1,4 @@
-"""Data Agent - executes SQL queries to fetch trading data."""
+"""Data Agent - executes SQL queries to fetch trading data using Gemini function calling."""
 
 import time
 import pandas as pd
@@ -8,19 +8,65 @@ from google.genai import types
 import config
 from agent.base import BaseDataAgent
 from agent.state import AgentState, SQLResult
-from agent.prompts import get_prompt
 from agent.tools import query_ohlcv, analyze_data
 from data import get_data_info
 
 
+# Define function declarations for Gemini function calling
+QUERY_OHLCV_DECLARATION = types.FunctionDeclaration(
+    name="query_ohlcv",
+    description="Execute a custom SQL query on the OHLCV database. Use for complex or custom queries.",
+    parameters=types.Schema(
+        type=types.Type.OBJECT,
+        properties={
+            "sql": types.Schema(
+                type=types.Type.STRING,
+                description="SQL query to execute. Table: ohlcv_1min with columns: timestamp, symbol, open, high, low, close, volume. Always use LIMIT clause. For period statistics, use GROUP BY with aggregations (AVG, SUM, MIN, MAX)."
+            )
+        },
+        required=["sql"]
+    )
+)
+
+ANALYZE_DATA_DECLARATION = types.FunctionDeclaration(
+    name="analyze_data",
+    description="Run standard analysis on trading data. Use for common analysis types.",
+    parameters=types.Schema(
+        type=types.Type.OBJECT,
+        properties={
+            "symbol": types.Schema(
+                type=types.Type.STRING,
+                description="Trading symbol (e.g., NQ, ES, CL)"
+            ),
+            "period": types.Schema(
+                type=types.Type.STRING,
+                description="Time period: today, yesterday, last_week, last_month, last_year, all",
+                enum=["today", "yesterday", "last_week", "last_month", "last_year", "all"]
+            ),
+            "analysis": types.Schema(
+                type=types.Type.STRING,
+                description="Analysis type: summary, daily, anomalies, hourly, trend",
+                enum=["summary", "daily", "anomalies", "hourly", "trend"]
+            )
+        },
+        required=["symbol", "period", "analysis"]
+    )
+)
+
+# Tool definition
+DATA_TOOLS = types.Tool(
+    function_declarations=[QUERY_OHLCV_DECLARATION, ANALYZE_DATA_DECLARATION]
+)
+
+
 class DataAgent(BaseDataAgent):
     """
-    Fetches data from the database using SQL.
+    Fetches data from the database using SQL with Gemini function calling.
 
     This agent:
-    1. Understands the question
-    2. Writes appropriate SQL queries
-    3. Executes them using existing tools
+    1. Receives user question
+    2. Uses Gemini function calling to decide which tool to use
+    3. Executes the tool with proper parameters
     4. Returns raw data for the Analyst
     """
 
@@ -32,6 +78,7 @@ class DataAgent(BaseDataAgent):
         self.client = genai.Client(api_key=config.GOOGLE_API_KEY)
         self.model = "gemini-2.0-flash"
         self._last_usage = {}
+        self._tool_calls = []  # Track tool calls for logging
 
     def _get_data_info(self) -> str:
         """Get available data description."""
@@ -51,40 +98,106 @@ class DataAgent(BaseDataAgent):
         except Exception:
             return "Data info unavailable."
 
+    def _execute_tool(self, name: str, args: dict) -> tuple[any, str, int]:
+        """Execute a tool and return (result, query_description, duration_ms)."""
+        start_time = time.time()
+
+        if name == "analyze_data":
+            result = analyze_data(
+                symbol=args.get("symbol", "NQ"),
+                period=args.get("period", "last_month"),
+                analysis=args.get("analysis", "summary")
+            )
+            query_desc = f"analyze_data(symbol='{args.get('symbol')}', period='{args.get('period')}', analysis='{args.get('analysis')}')"
+        elif name == "query_ohlcv":
+            sql = args.get("sql", "SELECT 1")
+            result = query_ohlcv(sql)
+            query_desc = sql
+        else:
+            result = {"error": f"Unknown tool: {name}"}
+            query_desc = f"unknown_tool({name})"
+
+        duration_ms = int((time.time() - start_time) * 1000)
+        return result, query_desc, duration_ms
+
+    def _result_to_sql_result(self, result: any, query: str, duration_ms: int) -> SQLResult:
+        """Convert tool result to SQLResult format."""
+        if isinstance(result, dict) and "error" in result:
+            return SQLResult(
+                query=query,
+                rows=[],
+                row_count=0,
+                error=result["error"],
+                duration_ms=duration_ms
+            )
+        elif isinstance(result, pd.DataFrame):
+            rows = result.to_dict(orient='records')
+            return SQLResult(
+                query=query,
+                rows=rows,
+                row_count=len(rows),
+                error=None,
+                duration_ms=duration_ms
+            )
+        elif isinstance(result, list):
+            return SQLResult(
+                query=query,
+                rows=result,
+                row_count=len(result),
+                error=None,
+                duration_ms=duration_ms
+            )
+        elif isinstance(result, dict):
+            return SQLResult(
+                query=query,
+                rows=[result],
+                row_count=1,
+                error=None,
+                duration_ms=duration_ms
+            )
+        else:
+            return SQLResult(
+                query=query,
+                rows=[{"result": str(result)}],
+                row_count=1,
+                error=None,
+                duration_ms=duration_ms
+            )
+
     def execute(self, state: AgentState) -> list[SQLResult]:
-        """Generate and execute SQL queries."""
+        """Generate and execute SQL queries using function calling."""
         question = state.get("question", "")
         data_info = self._get_data_info()
+        self._tool_calls = []
 
-        prompt = get_prompt("data_agent", question=question, data_info=data_info)
+        # System instruction for the model
+        system = f"""You are a data agent for a trading analytics system.
 
-        # Ask LLM to decide which tool to use and with what parameters
-        system = """You are a data agent. Analyze the question and decide how to get the data.
+Available data:
+{data_info}
 
-You have these tools:
-1. analyze_data(symbol, period, analysis) - for standard analysis
-   - period: "today", "yesterday", "last_week", "last_month", "last_year", "all"
-   - analysis: "summary", "daily", "anomalies", "hourly", "trend"
+Your task: Analyze the user's question and call the appropriate function to get the data.
 
-2. query_ohlcv(sql) - for custom SQL queries
-   - Table: ohlcv_1min (timestamp, symbol, open, high, low, close, volume)
-   - Always use LIMIT
+Guidelines:
+- For specific date ranges or custom queries, use query_ohlcv with SQL
+- For standard analysis (summary, daily stats, trends), use analyze_data
+- When using query_ohlcv for period statistics (week, month, year), use GROUP BY with aggregations
+- Always include LIMIT in SQL queries
+- Table schema: ohlcv_1min (timestamp, symbol, open, high, low, close, volume)"""
 
-Respond with JSON:
-{
-  "tool": "analyze_data" or "query_ohlcv",
-  "params": { ... }
-}
-
-Only respond with valid JSON."""
-
+        # Initial request with function calling
         response = self.client.models.generate_content(
             model=self.model,
-            contents=prompt,
+            contents=f"User question: {question}",
             config=types.GenerateContentConfig(
                 system_instruction=system,
                 temperature=0,
-                max_output_tokens=500,
+                tools=[DATA_TOOLS],
+                tool_config=types.ToolConfig(
+                    function_calling_config=types.FunctionCallingConfig(
+                        mode=types.FunctionCallingConfigMode.AUTO
+                    )
+                )
             )
         )
 
@@ -95,88 +208,36 @@ Only respond with valid JSON."""
                 "output_tokens": response.usage_metadata.candidates_token_count or 0,
             }
 
-        # Parse response and execute tool
         results = []
-        try:
-            import json
-            text = response.text.strip()
-            # Remove markdown code blocks if present
-            if text.startswith("```"):
-                text = text.split("```")[1]
-                if text.startswith("json"):
-                    text = text[4:]
 
-            decision = json.loads(text)
-            tool_name = decision.get("tool", "analyze_data")
-            params = decision.get("params", {})
+        # Process function calls
+        if response.candidates and response.candidates[0].content.parts:
+            for part in response.candidates[0].content.parts:
+                if part.function_call:
+                    func_call = part.function_call
+                    tool_name = func_call.name
+                    tool_args = dict(func_call.args) if func_call.args else {}
 
-            start_time = time.time()
+                    # Track tool call for logging
+                    self._tool_calls.append({
+                        "tool": tool_name,
+                        "args": tool_args
+                    })
 
-            if tool_name == "analyze_data":
-                result = analyze_data(
-                    symbol=params.get("symbol", "NQ"),
-                    period=params.get("period", "last_month"),
-                    analysis=params.get("analysis", "summary")
-                )
-                sql_query = f"analyze_data({params})"
-            else:
-                sql = params.get("sql", "SELECT 1")
-                result = query_ohlcv(sql)
-                sql_query = sql
+                    # Execute the tool
+                    result, query_desc, duration_ms = self._execute_tool(tool_name, tool_args)
 
-            duration_ms = int((time.time() - start_time) * 1000)
+                    # Convert to SQLResult
+                    sql_result = self._result_to_sql_result(result, query_desc, duration_ms)
+                    results.append(sql_result)
 
-            # Convert result to SQLResult format
-            if isinstance(result, dict) and "error" in result:
-                results.append(SQLResult(
-                    query=sql_query,
-                    rows=[],
-                    row_count=0,
-                    error=result["error"],
-                    duration_ms=duration_ms
-                ))
-            elif isinstance(result, pd.DataFrame):
-                # DataFrame from query_ohlcv
-                rows = result.to_dict(orient='records')
-                results.append(SQLResult(
-                    query=sql_query,
-                    rows=rows,
-                    row_count=len(rows),
-                    error=None,
-                    duration_ms=duration_ms
-                ))
-            elif isinstance(result, list):
-                results.append(SQLResult(
-                    query=sql_query,
-                    rows=result,
-                    row_count=len(result),
-                    error=None,
-                    duration_ms=duration_ms
-                ))
-            elif isinstance(result, dict):
-                # Single dict result (like from analyze_data)
-                results.append(SQLResult(
-                    query=sql_query,
-                    rows=[result],
-                    row_count=1,
-                    error=None,
-                    duration_ms=duration_ms
-                ))
-            else:
-                results.append(SQLResult(
-                    query=sql_query,
-                    rows=[{"result": str(result)}],
-                    row_count=1,
-                    error=None,
-                    duration_ms=duration_ms
-                ))
-
-        except Exception as e:
+        # If no function calls, return empty result
+        if not results:
             results.append(SQLResult(
-                query="failed_to_parse",
+                query="no_tool_called",
                 rows=[],
                 row_count=0,
-                error=str(e),
+                error="Model did not call any function",
                 duration_ms=0
             ))
 
@@ -185,3 +246,7 @@ Only respond with valid JSON."""
     def get_usage(self) -> dict:
         """Return usage from last execution."""
         return self._last_usage
+
+    def get_tool_calls(self) -> list[dict]:
+        """Return tool calls from last execution for logging."""
+        return self._tool_calls

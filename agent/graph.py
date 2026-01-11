@@ -282,6 +282,18 @@ class TradingGraph:
                 elif node_name == "data_agent":
                     sql_queries = updates.get("sql_queries", [])
                     data = updates.get("data", {})
+                    # Get tool calls from data_agent
+                    tool_calls = data_agent.get_tool_calls() if hasattr(data_agent, 'get_tool_calls') else []
+
+                    # Emit tool call events
+                    for tool_call in tool_calls:
+                        yield {
+                            "type": "tool_call",
+                            "agent": node_name,
+                            "tool": tool_call.get("tool"),
+                            "args": tool_call.get("args")
+                        }
+
                     for query in sql_queries:
                         yield {
                             "type": "sql_executed",
@@ -295,10 +307,11 @@ class TradingGraph:
                         "agent": node_name,
                         "result": {
                             "queries": len(sql_queries),
-                            "total_rows": sum(q.get("row_count", 0) for q in sql_queries)
+                            "total_rows": sum(q.get("row_count", 0) for q in sql_queries),
+                            "tool_calls": tool_calls
                         }
                     }
-                    # Log trace with SQL details
+                    # Log trace with SQL details and tool calls
                     first_query = sql_queries[0] if sql_queries else {}
                     log_trace_step_sync(
                         request_id=request_id,
@@ -307,7 +320,11 @@ class TradingGraph:
                         agent_name=node_name,
                         agent_type="data",
                         input_data={"question": question, "route": final_state.get("route") if final_state else None},
-                        output_data={"validation": data.get("validation"), "total_rows": data.get("total_rows")},
+                        output_data={
+                            "validation": data.get("validation"),
+                            "total_rows": data.get("total_rows"),
+                            "tool_calls": tool_calls
+                        },
                         duration_ms=int((time.time() - step_start_time) * 1000),
                         sql_query=first_query.get("query"),
                         sql_result=first_query.get("rows", [])[:10],  # First 10 rows
