@@ -405,55 +405,49 @@ export default function Chat() {
 
           {messages.map((message, index) => (
             <div key={index}>
-              {/* Agent execution trace before assistant response */}
+              {/* Agent steps - shown above assistant response */}
               {message.role === "assistant" && message.agent_steps && message.agent_steps.length > 0 && (
-                <details className="mb-4 border border-border rounded-lg">
-                  <summary className="px-3 py-2 cursor-pointer text-sm text-muted-foreground hover:text-foreground flex items-center gap-2">
-                    <span>🤖 Agent Flow</span>
-                    <span className="text-xs">({message.agent_steps.length} steps)</span>
-                    {message.route && (
-                      <span className="text-xs bg-muted px-1.5 py-0.5 rounded ml-auto">
-                        {message.route}
-                      </span>
-                    )}
-                  </summary>
-                  <div className="px-3 py-2 space-y-2 border-t border-border">
-                    {message.agent_steps.map((step, i) => (
-                      <div key={i} className="text-sm">
-                        <div className="flex items-center gap-2">
-                          <span className="text-green-500">✓</span>
-                          <span className="font-medium">{step.agent}</span>
-                          <span className="text-muted-foreground">— {step.message}</span>
-                          {step.result && "route" in step.result && (
-                            <span className="text-xs bg-blue-500/10 text-blue-500 px-1.5 py-0.5 rounded">
-                              → {String(step.result.route)}
-                            </span>
-                          )}
-                          {step.result && "queries" in step.result && (
-                            <span className="text-xs bg-purple-500/10 text-purple-500 px-1.5 py-0.5 rounded">
-                              {String(step.result.queries)} queries, {String(step.result.total_rows)} rows
-                            </span>
-                          )}
-                        </div>
-                        {/* Nested tools for this agent */}
-                        {step.tools && step.tools.length > 0 && (
-                          <div className="ml-6 mt-1 space-y-1">
-                            {step.tools.map((tool, j) => (
-                              <details key={j} className="text-xs">
-                                <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
-                                  └─ {tool.name} ({tool.duration_ms}ms) → {JSON.stringify(tool.result)}
-                                </summary>
-                                <pre className="mt-1 p-2 bg-muted rounded text-xs overflow-x-auto">
-                                  {JSON.stringify(tool.input, null, 2)}
-                                </pre>
-                              </details>
-                            ))}
-                          </div>
+                <div className="space-y-2 mb-4 p-3 border border-border rounded-lg bg-muted/30">
+                  {message.agent_steps.map((step, i) => (
+                    <div key={i} className="text-sm">
+                      <div className="flex items-center gap-2">
+                        <span className="text-green-500">✓</span>
+                        <span className="text-muted-foreground">{step.message}</span>
+                        {step.result && "route" in step.result && (
+                          <span className="text-xs bg-blue-500/10 text-blue-500 px-1.5 py-0.5 rounded">
+                            → {String(step.result.route)}
+                          </span>
+                        )}
+                        {step.result && "total_rows" in step.result && (
+                          <span className="text-xs bg-purple-500/10 text-purple-500 px-1.5 py-0.5 rounded">
+                            {String(step.result.total_rows)} rows
+                          </span>
                         )}
                       </div>
-                    ))}
-                  </div>
-                </details>
+                      {/* SQL query inline */}
+                      {step.tools && step.tools.length > 0 && (
+                        <div className="ml-6 mt-1 text-xs text-muted-foreground">
+                          {step.tools.map((tool, j) => (
+                            <div key={j} className="flex items-center gap-1">
+                              <span>└─</span>
+                              <span className="font-mono truncate max-w-[300px]">
+                                {typeof tool.input === 'object' && tool.input && 'query' in tool.input
+                                  ? String((tool.input as Record<string, unknown>).query).substring(0, 60) + '...'
+                                  : tool.name}
+                              </span>
+                              {(() => {
+                                const res = tool.result as Record<string, unknown> | undefined
+                                return res && typeof res === 'object' && 'rows' in res
+                                  ? <span className="text-green-600">({String(res.rows)} rows)</span>
+                                  : null
+                              })()}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
               )}
 
               {/* Message */}
