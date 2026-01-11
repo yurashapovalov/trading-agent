@@ -229,9 +229,14 @@ class TradingGraph:
         - done: completion
         """
         import time
+        from datetime import datetime
+        from agent.logging import log_trace_step_sync
+
         start_time = time.time()
+        step_number = 0
 
         initial_state = create_initial_state(question, user_id, session_id)
+        request_id = initial_state.get("request_id")
         config = {
             "configurable": {
                 "thread_id": f"{user_id}_{session_id}"
@@ -239,11 +244,13 @@ class TradingGraph:
         }
 
         final_state = None
-        current_agent = None
 
         for event in self.app.stream(initial_state, config, stream_mode="updates"):
             # event is dict like {"node_name": {state_updates}}
             for node_name, updates in event.items():
+                step_start_time = time.time()
+                step_number += 1
+
                 # Emit step_start
                 yield {
                     "type": "step_start",
@@ -260,9 +267,21 @@ class TradingGraph:
                         "result": {"route": route},
                         "message": f"Route: {route}"
                     }
+                    # Log trace
+                    log_trace_step_sync(
+                        request_id=request_id,
+                        user_id=user_id,
+                        step_number=step_number,
+                        agent_name=node_name,
+                        agent_type="routing",
+                        input_data={"question": question},
+                        output_data={"route": route},
+                        duration_ms=int((time.time() - step_start_time) * 1000),
+                    )
 
                 elif node_name == "data_agent":
                     sql_queries = updates.get("sql_queries", [])
+                    data = updates.get("data", {})
                     for query in sql_queries:
                         yield {
                             "type": "sql_executed",
@@ -279,6 +298,22 @@ class TradingGraph:
                             "total_rows": sum(q.get("row_count", 0) for q in sql_queries)
                         }
                     }
+                    # Log trace with SQL details
+                    first_query = sql_queries[0] if sql_queries else {}
+                    log_trace_step_sync(
+                        request_id=request_id,
+                        user_id=user_id,
+                        step_number=step_number,
+                        agent_name=node_name,
+                        agent_type="data",
+                        input_data={"question": question, "route": final_state.get("route") if final_state else None},
+                        output_data={"validation": data.get("validation"), "total_rows": data.get("total_rows")},
+                        duration_ms=int((time.time() - step_start_time) * 1000),
+                        sql_query=first_query.get("query"),
+                        sql_result=first_query.get("rows", [])[:10],  # First 10 rows
+                        sql_rows_returned=first_query.get("row_count", 0),
+                        sql_error=first_query.get("error"),
+                    )
 
                 elif node_name in ["analyst", "analyst_no_data", "educator"]:
                     response = updates.get("response", "")
@@ -295,6 +330,17 @@ class TradingGraph:
                         "agent": node_name,
                         "result": {"response_length": len(response)}
                     }
+                    # Log trace
+                    log_trace_step_sync(
+                        request_id=request_id,
+                        user_id=user_id,
+                        step_number=step_number,
+                        agent_name=node_name,
+                        agent_type="output",
+                        input_data={"data_summary": str(final_state.get("data", {}))[:500] if final_state else None},
+                        output_data={"response_length": len(response), "response_preview": response[:500]},
+                        duration_ms=int((time.time() - step_start_time) * 1000),
+                    )
 
                 elif node_name == "validator":
                     validation = updates.get("validation", {})
@@ -309,6 +355,20 @@ class TradingGraph:
                         "agent": node_name,
                         "result": {"status": validation.get("status")}
                     }
+                    # Log trace
+                    log_trace_step_sync(
+                        request_id=request_id,
+                        user_id=user_id,
+                        step_number=step_number,
+                        agent_name=node_name,
+                        agent_type="output",
+                        input_data={"response_preview": (final_state.get("response", "") if final_state else "")[:500]},
+                        output_data=validation,
+                        duration_ms=int((time.time() - step_start_time) * 1000),
+                        validation_status=validation.get("status"),
+                        validation_issues=validation.get("issues"),
+                        validation_feedback=validation.get("feedback"),
+                    )
 
                 # Track final state
                 if final_state is None:
