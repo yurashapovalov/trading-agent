@@ -46,6 +46,13 @@ type ToolUsage = {
   status: "running" | "completed"
 }
 
+type AgentStep = {
+  agent: string
+  message: string
+  status: "running" | "completed"
+  result?: Record<string, unknown>
+}
+
 type Usage = {
   input_tokens: number
   output_tokens: number
@@ -57,6 +64,9 @@ type ChatMessage = {
   role: "user" | "assistant"
   content: string
   tools_used?: ToolUsage[]
+  agents_used?: string[]
+  route?: string
+  validation_passed?: boolean
   usage?: Usage
 }
 
@@ -66,6 +76,7 @@ export default function Chat() {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [currentTools, setCurrentTools] = useState<ToolUsage[]>([])
+  const [currentSteps, setCurrentSteps] = useState<AgentStep[]>([])
   const [streamingText, setStreamingText] = useState("")
   const [suggestions, setSuggestions] = useState<string[]>(DEFAULT_SUGGESTIONS)
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -83,7 +94,7 @@ export default function Chat() {
 
   useEffect(() => {
     scrollToBottom()
-  }, [messages, currentTools, streamingText])
+  }, [messages, currentTools, currentSteps, streamingText])
 
   // Load chat history on mount
   useEffect(() => {
@@ -129,6 +140,7 @@ export default function Chat() {
     setMessages((prev) => [...prev, { role: "user", content: text }])
     setIsLoading(true)
     setCurrentTools([])
+    setCurrentSteps([])
     setStreamingText("")
 
     // Create abort controller for this request
@@ -153,8 +165,11 @@ export default function Chat() {
       const decoder = new TextDecoder()
       let buffer = ""
       const toolsCollected: ToolUsage[] = []
+      const agentsUsed: string[] = []
       let finalText = ""
       let usageData: Usage | undefined
+      let route: string | undefined
+      let validationPassed: boolean | undefined
 
       while (true) {
         const { done, value } = await reader.read()
@@ -169,7 +184,41 @@ export default function Chat() {
             try {
               const event = JSON.parse(line.slice(6))
 
-              if (event.type === "tool_start") {
+              // New multi-agent events
+              if (event.type === "step_start") {
+                const newStep: AgentStep = {
+                  agent: event.agent,
+                  message: event.message,
+                  status: "running",
+                }
+                agentsUsed.push(event.agent)
+                setCurrentSteps((prev) => [...prev, newStep])
+              } else if (event.type === "step_end") {
+                if (event.agent === "router") {
+                  route = event.result?.route
+                }
+                setCurrentSteps((prev) =>
+                  prev.map((s) =>
+                    s.agent === event.agent && s.status === "running"
+                      ? { ...s, status: "completed", result: event.result }
+                      : s
+                  )
+                )
+              } else if (event.type === "sql_executed") {
+                // Show SQL query as a tool-like display
+                const sqlTool: ToolUsage = {
+                  name: "SQL Query",
+                  input: { query: event.query },
+                  result: { rows: event.rows_found, error: event.error },
+                  duration_ms: event.duration_ms,
+                  status: "completed",
+                }
+                toolsCollected.push(sqlTool)
+                setCurrentTools((prev) => [...prev, sqlTool])
+              } else if (event.type === "validation") {
+                validationPassed = event.status === "ok"
+              } else if (event.type === "tool_start") {
+                // Legacy tool events (keep for compatibility)
                 const newTool: ToolUsage = {
                   name: event.name,
                   input: event.input,
@@ -196,12 +245,10 @@ export default function Chat() {
                 finalText += event.content
                 setStreamingText((prev) => prev + event.content)
               } else if (event.type === "suggestions") {
-                // Update suggestions with contextual ones
                 if (event.suggestions && event.suggestions.length > 0) {
                   setSuggestions(event.suggestions)
                 }
               } else if (event.type === "usage") {
-                // Track token usage and cost
                 usageData = {
                   input_tokens: event.input_tokens,
                   output_tokens: event.output_tokens,
@@ -209,17 +256,20 @@ export default function Chat() {
                   cost: event.cost,
                 }
               } else if (event.type === "done") {
-                // Add final message (strip suggestions block)
                 setMessages((prev) => [
                   ...prev,
                   {
                     role: "assistant",
                     content: stripSuggestions(finalText),
                     tools_used: toolsCollected,
+                    agents_used: [...new Set(agentsUsed)],
+                    route,
+                    validation_passed: validationPassed,
                     usage: usageData,
                   },
                 ])
                 setCurrentTools([])
+                setCurrentSteps([])
                 setStreamingText("")
               } else if (event.type === "error") {
                 setMessages((prev) => [
@@ -227,6 +277,7 @@ export default function Chat() {
                   { role: "assistant", content: `Ошибка: ${event.message}` },
                 ])
                 setCurrentTools([])
+                setCurrentSteps([])
               }
             } catch (e) {
               console.error("Failed to parse SSE event:", e)
@@ -258,6 +309,7 @@ export default function Chat() {
     }
     setIsLoading(false)
     setCurrentTools([])
+    setCurrentSteps([])
     setStreamingText("")
     // Add message that generation was stopped
     setMessages((prev) => [
@@ -362,7 +414,30 @@ export default function Chat() {
             </Message>
           )}
 
-          {isLoading && currentTools.length === 0 && !streamingText && (
+          {/* Agent steps progress */}
+          {currentSteps.length > 0 && (
+            <div className="space-y-1 mb-4">
+              {currentSteps.map((step, i) => (
+                <div key={i} className="flex items-center gap-2 text-sm">
+                  {step.status === "running" ? (
+                    <Loader size={14} />
+                  ) : (
+                    <span className="text-green-500">✓</span>
+                  )}
+                  <span className={step.status === "completed" ? "text-muted-foreground" : ""}>
+                    {step.message}
+                  </span>
+                  {step.result?.route && (
+                    <span className="text-xs bg-muted px-1.5 py-0.5 rounded">
+                      {String(step.result.route)}
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {isLoading && currentSteps.length === 0 && currentTools.length === 0 && !streamingText && (
             <div className="flex items-center gap-2 text-muted-foreground">
               <Loader size={16} />
               <span className="text-sm">Думаю...</span>
