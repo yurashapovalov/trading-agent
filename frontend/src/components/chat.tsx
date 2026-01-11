@@ -473,16 +473,7 @@ export default function Chat() {
           ))}
 
 
-          {/* Streaming text */}
-          {streamingText && (
-            <Message from="assistant">
-              <MessageContent>
-                <MessageResponse>{streamingText}</MessageResponse>
-              </MessageContent>
-            </Message>
-          )}
-
-          {/* Agent steps progress */}
+          {/* Agent steps progress - shown during streaming */}
           {currentSteps.length > 0 && (
             <div className="space-y-2 mb-4 p-3 border border-border rounded-lg bg-muted/30">
               {currentSteps.map((step, i) => (
@@ -531,6 +522,15 @@ export default function Chat() {
                 </div>
               ))}
             </div>
+          )}
+
+          {/* Streaming text - shown after agent steps */}
+          {streamingText && (
+            <Message from="assistant">
+              <MessageContent>
+                <MessageResponse>{streamingText}</MessageResponse>
+              </MessageContent>
+            </Message>
           )}
 
           {isLoading && currentSteps.length === 0 && currentTools.length === 0 && !streamingText && (
