@@ -375,7 +375,11 @@ export default function Chat() {
       <div className="flex-1 overflow-y-auto">
         <div className="max-w-2xl mx-auto px-4 py-6 space-y-6">
 
-          {messages.map((message, index) => (
+          {messages.map((message, index) => {
+            if (message.role === "assistant") {
+              console.log("[RENDER] message", index, "agent_steps:", message.agent_steps?.length, message.agent_steps)
+            }
+            return (
             <div key={index}>
               {/* Agent execution trace before assistant response */}
               {message.role === "assistant" && message.agent_steps && message.agent_steps.length > 0 && (
@@ -442,7 +446,8 @@ export default function Chat() {
                 )}
               </Message>
             </div>
-          ))}
+          )})}
+
 
           {/* Currently running tools */}
           {currentTools.length > 0 && (
