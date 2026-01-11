@@ -15,13 +15,13 @@ from data import get_data_info
 # Define function declarations for Gemini function calling
 QUERY_OHLCV_DECLARATION = types.FunctionDeclaration(
     name="query_ohlcv",
-    description="Execute a custom SQL query on the OHLCV database. Use for complex or custom queries.",
+    description="Execute SQL query on OHLCV database. IMPORTANT: For period queries (week/month/year), MUST use GROUP BY date_trunc('day', timestamp) with aggregations. Never return raw 1-min bars for periods.",
     parameters=types.Schema(
         type=types.Type.OBJECT,
         properties={
             "sql": types.Schema(
                 type=types.Type.STRING,
-                description="SQL query to execute. Table: ohlcv_1min with columns: timestamp, symbol, open, high, low, close, volume. Always use LIMIT clause. For period statistics, use GROUP BY with aggregations (AVG, SUM, MIN, MAX)."
+                description="SQL query. Table: ohlcv_1min (timestamp, symbol, open, high, low, close, volume). For period stats: SELECT date_trunc('day', timestamp) AS day, AVG(open), AVG(close), SUM(volume) ... GROUP BY day. Max LIMIT 1000."
             )
         },
         required=["sql"]
@@ -178,12 +178,19 @@ Available data:
 
 Your task: Analyze the user's question and call the appropriate function to get the data.
 
-Guidelines:
-- For specific date ranges or custom queries, use query_ohlcv with SQL
-- For standard analysis (summary, daily stats, trends), use analyze_data
-- When using query_ohlcv for period statistics (week, month, year), use GROUP BY with aggregations
-- Always include LIMIT in SQL queries
-- Table schema: ohlcv_1min (timestamp, symbol, open, high, low, close, volume)"""
+CRITICAL SQL RULES:
+1. For period statistics (week, month, year), ALWAYS use GROUP BY with aggregations:
+   - GROUP BY date_trunc('day', timestamp) for daily stats
+   - Use AVG(open), AVG(high), AVG(low), AVG(close), SUM(volume)
+   - Example: SELECT date_trunc('day', timestamp) AS day, AVG(open), AVG(close), SUM(volume) FROM ohlcv_1min WHERE symbol='NQ' AND timestamp >= '2025-03-01' AND timestamp < '2025-04-01' GROUP BY day ORDER BY day LIMIT 100
+
+2. NEVER return raw 1-minute bars for period queries - always aggregate!
+
+3. Only return raw bars for intraday queries (specific hours/minutes)
+
+4. Always include LIMIT (max 1000 for aggregated, 100 for raw)
+
+Table schema: ohlcv_1min (timestamp, symbol, open, high, low, close, volume)"""
 
         # Initial request with function calling
         response = self.client.models.generate_content(
