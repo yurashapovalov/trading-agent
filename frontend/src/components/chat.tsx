@@ -5,6 +5,13 @@ import {
   MessageContent,
   MessageResponse,
 } from "@/components/ai-elements/message"
+import {
+  Tool,
+  ToolHeader,
+  ToolContent,
+  ToolInput,
+  ToolOutput,
+} from "@/components/ai-elements/tool"
 import { Loader } from "@/components/ai-elements/loader"
 import { Suggestions, Suggestion } from "@/components/ai-elements/suggestion"
 import {
@@ -405,47 +412,38 @@ export default function Chat() {
 
           {messages.map((message, index) => (
             <div key={index}>
-              {/* Agent steps - shown above assistant response */}
+              {/* Agent steps - each step is a collapsible Tool */}
               {message.role === "assistant" && message.agent_steps && message.agent_steps.length > 0 && (
-                <div className="space-y-2 mb-4 p-3 border border-border rounded-lg bg-muted/30">
+                <div className="space-y-2 mb-4">
                   {message.agent_steps.map((step, i) => (
-                    <div key={i} className="text-sm">
-                      <div className="flex items-center gap-2">
-                        <span className="text-green-500">✓</span>
-                        <span className="text-muted-foreground">{step.message}</span>
-                        {step.result && "route" in step.result && (
-                          <span className="text-xs bg-blue-500/10 text-blue-500 px-1.5 py-0.5 rounded">
-                            → {String(step.result.route)}
-                          </span>
+                    <Tool key={i}>
+                      <ToolHeader
+                        title={step.message}
+                        type="tool-invocation"
+                        state={step.status === "running" ? "input-available" : "output-available"}
+                      />
+                      <ToolContent>
+                        {step.result && (
+                          <ToolOutput
+                            output={step.result as any}
+                            errorText={undefined}
+                          />
                         )}
-                        {step.result && "total_rows" in step.result && (
-                          <span className="text-xs bg-purple-500/10 text-purple-500 px-1.5 py-0.5 rounded">
-                            {String(step.result.total_rows)} rows
-                          </span>
-                        )}
-                      </div>
-                      {/* SQL query inline */}
-                      {step.tools && step.tools.length > 0 && (
-                        <div className="ml-6 mt-1 text-xs text-muted-foreground">
-                          {step.tools.map((tool, j) => (
-                            <div key={j} className="flex items-center gap-1">
-                              <span>└─</span>
-                              <span className="font-mono truncate max-w-[300px]">
-                                {typeof tool.input === 'object' && tool.input && 'query' in tool.input
-                                  ? String((tool.input as Record<string, unknown>).query).substring(0, 60) + '...'
-                                  : tool.name}
-                              </span>
-                              {(() => {
-                                const res = tool.result as Record<string, unknown> | undefined
-                                return res && typeof res === 'object' && 'rows' in res
-                                  ? <span className="text-green-600">({String(res.rows)} rows)</span>
-                                  : null
-                              })()}
+                        {step.tools && step.tools.length > 0 && step.tools.map((tool, j) => {
+                          return (
+                            <div key={j}>
+                              <ToolInput input={tool.input as any} />
+                              {tool.result ? (
+                                <ToolOutput
+                                  output={tool.result as any}
+                                  errorText={undefined}
+                                />
+                              ) : null}
                             </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
+                          )
+                        })}
+                      </ToolContent>
+                    </Tool>
                   ))}
                 </div>
               )}
@@ -469,51 +467,36 @@ export default function Chat() {
 
           {/* Agent steps progress - shown during streaming */}
           {currentSteps.length > 0 && (
-            <div className="space-y-2 mb-4 p-3 border border-border rounded-lg bg-muted/30">
+            <div className="space-y-2 mb-4">
               {currentSteps.map((step, i) => (
-                <div key={i} className="text-sm">
-                  <div className="flex items-center gap-2">
-                    {step.status === "running" ? (
-                      <Loader size={14} />
-                    ) : (
-                      <span className="text-green-500">✓</span>
+                <Tool key={i}>
+                  <ToolHeader
+                    title={step.message}
+                    type="tool-invocation"
+                    state={step.status === "running" ? "input-available" : "output-available"}
+                  />
+                  <ToolContent>
+                    {step.result && (
+                      <ToolOutput
+                        output={step.result as any}
+                        errorText={undefined}
+                      />
                     )}
-                    <span className={step.status === "completed" ? "text-muted-foreground" : "font-medium"}>
-                      {step.message}
-                    </span>
-                    {step.result && "route" in step.result && (
-                      <span className="text-xs bg-blue-500/10 text-blue-500 px-1.5 py-0.5 rounded">
-                        → {String(step.result.route)}
-                      </span>
-                    )}
-                    {step.result && "total_rows" in step.result && (
-                      <span className="text-xs bg-purple-500/10 text-purple-500 px-1.5 py-0.5 rounded">
-                        {String(step.result.total_rows)} rows
-                      </span>
-                    )}
-                  </div>
-                  {/* Show SQL query inline if present */}
-                  {step.tools && step.tools.length > 0 && (
-                    <div className="ml-6 mt-1 text-xs text-muted-foreground">
-                      {step.tools.map((tool, j) => (
-                        <div key={j} className="flex items-center gap-1">
-                          <span>└─</span>
-                          <span className="font-mono truncate max-w-[300px]">
-                            {typeof tool.input === 'object' && 'query' in tool.input
-                              ? String(tool.input.query).substring(0, 60) + '...'
-                              : tool.name}
-                          </span>
-                          {(() => {
-                            const res = tool.result as Record<string, unknown> | undefined
-                            return res && typeof res === 'object' && 'rows' in res
-                              ? <span className="text-green-600">({String(res.rows)} rows)</span>
-                              : null
-                          })()}
+                    {step.tools && step.tools.length > 0 && step.tools.map((tool, j) => {
+                      return (
+                        <div key={j}>
+                          <ToolInput input={tool.input as any} />
+                          {tool.result ? (
+                            <ToolOutput
+                              output={tool.result as any}
+                              errorText={undefined}
+                            />
+                          ) : null}
                         </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
+                      )
+                    })}
+                  </ToolContent>
+                </Tool>
               ))}
             </div>
           )}
