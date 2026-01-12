@@ -148,7 +148,36 @@ FROM with_windows
 WHERE (date >= '2023-01-01' AND date < '2023-02-01')
    OR (date >= '2024-01-01' AND date < '2024-02-01')
 GROUP BY period
+
+Example 7: "compare RTH vs ETH volatility" (trading sessions)
+→ Use timestamp::time to filter by time of day. DO NOT aggregate to daily first for session comparison.
+WITH session_data AS (
+    SELECT
+        CASE
+            WHEN timestamp::time BETWEEN '09:30:00' AND '16:00:00' THEN 'RTH'
+            ELSE 'ETH'
+        END as session,
+        high - low as range
+    FROM ohlcv_1min
+    WHERE symbol = '{symbol}'
+      AND timestamp >= '{period_start}'
+      AND timestamp < '{period_end}'
+)
+SELECT
+    session,
+    ROUND(AVG(range), 4) as avg_minute_range,
+    COUNT(*) as minutes
+FROM session_data
+GROUP BY session
+ORDER BY session
 </examples>
+
+<trading_sessions>
+For RTH/ETH or session-based queries, filter on minute-level data BEFORE daily aggregation:
+- RTH (Regular Trading Hours): timestamp::time BETWEEN '09:30:00' AND '16:00:00'
+- ETH (Extended Trading Hours): timestamp::time NOT BETWEEN '09:30:00' AND '16:00:00'
+- Overnight: timestamp::time >= '18:00:00' OR timestamp::time < '09:30:00'
+</trading_sessions>
 
 <output_format>
 Return ONLY the SQL query, nothing else.

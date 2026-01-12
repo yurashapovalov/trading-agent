@@ -20,6 +20,32 @@ GRANULARITIES = {
 
 
 # =============================================================================
+# Trading Sessions (for time-of-day filtering)
+# =============================================================================
+
+TRADING_SESSIONS = {
+    "RTH": {
+        "name": "Regular Trading Hours",
+        "description": "Основная торговая сессия",
+        "hours": "09:30-16:00 ET",
+        "sql_filter": "timestamp::time BETWEEN '09:30:00' AND '16:00:00'",
+    },
+    "ETH": {
+        "name": "Extended Trading Hours",
+        "description": "Электронная сессия (до и после RTH)",
+        "hours": "Всё кроме 09:30-16:00",
+        "sql_filter": "timestamp::time NOT BETWEEN '09:30:00' AND '16:00:00'",
+    },
+    "OVERNIGHT": {
+        "name": "Overnight Session",
+        "description": "Ночная сессия",
+        "hours": "18:00-09:30 ET",
+        "sql_filter": "timestamp::time >= '18:00:00' OR timestamp::time < '09:30:00'",
+    },
+}
+
+
+# =============================================================================
 # Patterns (for complex queries)
 # =============================================================================
 
@@ -63,12 +89,18 @@ def get_capabilities_prompt() -> str:
         "",
         "### Данные",
         f"Символы: {', '.join(SUPPORTED_SYMBOLS)}",
+        "Данные: минутные свечи (OHLCV) 24 часа в сутки",
         "",
         "### Гранулярность (type='data'):",
     ]
 
     for name, desc in GRANULARITIES.items():
         lines.append(f"- {name}: {desc}")
+
+    lines.append("")
+    lines.append("### Торговые сессии (можно фильтровать по времени дня):")
+    for name, info in TRADING_SESSIONS.items():
+        lines.append(f"- {name}: {info['description']} ({info['hours']})")
 
     lines.append("")
     lines.append("### Паттерны (type='pattern'):")
