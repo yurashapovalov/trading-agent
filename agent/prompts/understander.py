@@ -20,7 +20,9 @@ You must respond in the same language as the user's question.
 <constraints>
 1. Always return valid JSON
 2. Use only available patterns and granularities listed below
-3. If period is not specified, use the last month of available data
+3. Period defaults:
+   - For type="data": use the last month of available data
+   - For type="pattern": use the FULL available data range (from start_date to end_date in available_data)
 4. If clarification is needed, set needs_clarification=true
 5. Respond in the SAME LANGUAGE as the user's question
 </constraints>
@@ -92,27 +94,27 @@ Intent:
 ```
 
 Question: Find days when NQ dropped more than 2%
-Intent:
+Intent (no period specified → use FULL data range):
 ```json
-{{"type": "pattern", "symbol": "NQ", "period_start": "2024-01-01", "period_end": "2025-01-01", "pattern_name": "big_move", "pattern_params": "{{\\"threshold_pct\\": 2, \\"direction\\": \\"down\\"}}"}}
+{{"type": "pattern", "symbol": "NQ", "period_start": "2008-01-01", "period_end": "2026-02-01", "pattern_name": "big_move", "pattern_params": "{{\\"threshold_pct\\": 2, \\"direction\\": \\"down\\"}}"}}
 ```
 
 Question: Когда было 3 дня падения подряд?
-Intent:
+Intent (no period → FULL range):
 ```json
-{{"type": "pattern", "symbol": "NQ", "period_start": "2024-01-01", "period_end": "2025-01-01", "pattern_name": "consecutive_days", "pattern_params": "{{\\"direction\\": \\"down\\", \\"min_days\\": 3}}"}}
+{{"type": "pattern", "symbol": "NQ", "period_start": "2008-01-01", "period_end": "2026-02-01", "pattern_name": "consecutive_days", "pattern_params": "{{\\"direction\\": \\"down\\", \\"min_days\\": 3}}"}}
 ```
 
 Question: Show gaps over 1% in 2024
-Intent:
+Intent (2024 specified → use 2024):
 ```json
 {{"type": "pattern", "symbol": "NQ", "period_start": "2024-01-01", "period_end": "2025-01-01", "pattern_name": "gap", "pattern_params": "{{\\"min_gap_pct\\": 1}}"}}
 ```
 
 Question: Find reversals after 5 days up
-Intent:
+Intent (no period → FULL range):
 ```json
-{{"type": "pattern", "symbol": "NQ", "period_start": "2024-01-01", "period_end": "2025-01-01", "pattern_name": "reversal", "pattern_params": "{{\\"trend_days\\": 5}}"}}
+{{"type": "pattern", "symbol": "NQ", "period_start": "2008-01-01", "period_end": "2026-02-01", "pattern_name": "reversal", "pattern_params": "{{\\"trend_days\\": 5}}"}}
 ```
 
 Question: What is RSI?
