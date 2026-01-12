@@ -174,7 +174,12 @@ class Understander:
 
             # Default period if not specified
             if not intent["period_start"] or not intent["period_end"]:
-                intent["period_start"], intent["period_end"] = self._default_period()
+                if intent_type == "pattern":
+                    # Patterns search ALL available data by default
+                    intent["period_start"], intent["period_end"] = self._full_data_range()
+                else:
+                    # Data queries use last month by default
+                    intent["period_start"], intent["period_end"] = self._default_period()
 
         if intent_type == "data":
             intent["granularity"] = data.get("granularity") or DEFAULT_GRANULARITY
@@ -225,3 +230,12 @@ class Understander:
         today = datetime.now()
         month_ago = today - timedelta(days=30)
         return month_ago.strftime("%Y-%m-%d"), today.strftime("%Y-%m-%d")
+
+    def _full_data_range(self) -> tuple[str, str]:
+        """Get full available data range (for pattern searches)."""
+        data_range = get_data_range("NQ")
+        if data_range:
+            return data_range['start_date'], data_range['end_date']
+
+        # Fallback - wide range
+        return "2008-01-01", datetime.now().strftime("%Y-%m-%d")

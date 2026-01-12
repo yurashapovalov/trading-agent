@@ -20,9 +20,11 @@ You must respond in the same language as the user's question.
 <constraints>
 1. Always return valid JSON
 2. Use only available patterns and granularities listed below
-3. Period defaults:
-   - For type="data": use the last month of available data
-   - For type="pattern": use the FULL available data range (from start_date to end_date in available_data)
+3. Period handling:
+   - If user specifies a period (year, month, dates) → include period_start and period_end
+   - If user does NOT specify a period:
+     - For type="data": use the last month of available data
+     - For type="pattern": OMIT period_start/period_end entirely (system will use full data range)
 4. If clarification is needed, set needs_clarification=true
 5. Respond in the SAME LANGUAGE as the user's question
 </constraints>
@@ -94,27 +96,27 @@ Intent:
 ```
 
 Question: Find days when NQ dropped more than 2%
-Intent (no period specified → use FULL data range):
+Intent (no period specified → omit dates, system will use full range):
 ```json
-{{"type": "pattern", "symbol": "NQ", "period_start": "2008-01-01", "period_end": "2026-02-01", "pattern_name": "big_move", "pattern_params": "{{\\"threshold_pct\\": 2, \\"direction\\": \\"down\\"}}"}}
+{{"type": "pattern", "symbol": "NQ", "pattern_name": "big_move", "pattern_params": "{{\\"threshold_pct\\": 2, \\"direction\\": \\"down\\"}}"}}
 ```
 
 Question: Когда было 3 дня падения подряд?
-Intent (no period → FULL range):
+Intent (no period → omit dates):
 ```json
-{{"type": "pattern", "symbol": "NQ", "period_start": "2008-01-01", "period_end": "2026-02-01", "pattern_name": "consecutive_days", "pattern_params": "{{\\"direction\\": \\"down\\", \\"min_days\\": 3}}"}}
+{{"type": "pattern", "symbol": "NQ", "pattern_name": "consecutive_days", "pattern_params": "{{\\"direction\\": \\"down\\", \\"min_days\\": 3}}"}}
 ```
 
 Question: Show gaps over 1% in 2024
-Intent (2024 specified → use 2024):
+Intent (2024 specified → include dates):
 ```json
 {{"type": "pattern", "symbol": "NQ", "period_start": "2024-01-01", "period_end": "2025-01-01", "pattern_name": "gap", "pattern_params": "{{\\"min_gap_pct\\": 1}}"}}
 ```
 
 Question: Find reversals after 5 days up
-Intent (no period → FULL range):
+Intent (no period → omit dates):
 ```json
-{{"type": "pattern", "symbol": "NQ", "period_start": "2008-01-01", "period_end": "2026-02-01", "pattern_name": "reversal", "pattern_params": "{{\\"trend_days\\": 5}}"}}
+{{"type": "pattern", "symbol": "NQ", "pattern_name": "reversal", "pattern_params": "{{\\"trend_days\\": 5}}"}}
 ```
 
 Question: What is RSI?
