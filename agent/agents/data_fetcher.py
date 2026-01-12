@@ -2,12 +2,14 @@
 DataFetcher agent - fetches data based on Intent.
 
 No LLM here. Pure Python routing to modules.
-Understander (LLM) decides WHAT, DataFetcher (code) executes HOW.
+Central hub: executes validated SQL from SQL Agent or uses templates.
 """
 
 import time
+import duckdb
 from typing import Any
 
+import config
 from agent.state import AgentState, Intent
 from agent.modules import sql
 
@@ -16,9 +18,10 @@ class DataFetcher:
     """
     Fetches data based on structured Intent.
 
-    Routes to appropriate module:
-    - type="data" → sql.fetch()
+    Routes:
+    - sql_validation.status == "ok" + sql_query → execute SQL from SQL Agent
     - type="concept" → no data needed
+    - else → use standard templates from sql.py
     """
 
     name = "data_fetcher"
@@ -38,10 +41,17 @@ class DataFetcher:
 
         intent_type = intent.get("type", "data")
 
+        # Check for validated SQL from SQL Agent
+        sql_validation = state.get("sql_validation", {})
+        sql_query = state.get("sql_query")
+
         # Route to appropriate handler
-        if intent_type == "concept":
+        if sql_validation.get("status") == "ok" and sql_query:
+            # Execute validated SQL from SQL Agent
+            data = self._execute_sql(sql_query)
+        elif intent_type == "concept":
             data = self._handle_concept(intent)
-        else:  # "data" or default
+        else:  # "data" or default - use templates
             data = self._handle_data(intent)
 
         duration_ms = int((time.time() - start_time) * 1000)
@@ -52,6 +62,31 @@ class DataFetcher:
             "step_number": state.get("step_number", 0) + 1,
             "total_duration_ms": state.get("total_duration_ms", 0) + duration_ms,
         }
+
+    def _execute_sql(self, sql_query: str) -> dict[str, Any]:
+        """Execute validated SQL from SQL Agent."""
+        try:
+            with duckdb.connect(config.DATABASE_PATH, read_only=True) as conn:
+                df = conn.execute(sql_query).df()
+                rows = df.to_dict(orient='records')
+
+                # Convert numpy types to Python types
+                rows = sql._convert_numpy_types(rows)
+
+                return {
+                    "rows": rows,
+                    "row_count": len(rows),
+                    "granularity": "daily",
+                    "sql_query": sql_query,
+                    "source": "sql_agent",
+                }
+        except Exception as e:
+            return {
+                "error": str(e),
+                "sql_query": sql_query,
+                "rows": [],
+                "row_count": 0,
+            }
 
     def _handle_data(self, intent: Intent) -> dict[str, Any]:
         """Handle type=data: fetch with granularity."""

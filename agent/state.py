@@ -124,6 +124,13 @@ class ValidationResult(TypedDict, total=False):
     feedback: str
 
 
+class SQLValidation(TypedDict, total=False):
+    """Result from SQL Validator agent."""
+    status: Literal["ok", "rewrite"]
+    issues: list[str]
+    feedback: str
+
+
 class UsageStats(TypedDict, total=False):
     """Token usage and cost tracking."""
     input_tokens: int
@@ -150,6 +157,10 @@ class AgentState(TypedDict, total=False):
     # Understander output (replaces route)
     intent: Intent | None
     clarification_attempts: int
+
+    # SQL Agent output
+    sql_query: str | None         # Generated SQL from SQL Agent
+    sql_validation: SQLValidation | None  # Validation result from SQL Validator
 
     # DataFetcher output
     sql_queries: list[SQLResult]  # Keep for logging
@@ -196,6 +207,9 @@ def create_initial_state(
         # Understander
         intent=None,
         clarification_attempts=0,
+        # SQL Agent
+        sql_query=None,
+        sql_validation=None,
         # DataFetcher
         sql_queries=[],
         data={},

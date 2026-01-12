@@ -5,9 +5,12 @@ Flow:
                     ┌─ chitchat/out_of_scope ─► Responder ──► END
                     │
 Question ─► Understander ─┤
-                    │
-                    └─ data/pattern/concept ─► DataFetcher ─► Analyst ─► Validator ─► END
-                                                                ↑____________| (rewrite loop)
+                    │                            ┌──────────────────────────────────────┐
+                    │                            │ (rewrite loop)                       │
+                    └─ data ─► SQL Agent ─► SQL Validator ─► DataFetcher ─► Analyst ─► Validator ─► END
+                                   ↑_______________|                           ↑____________| (rewrite loop)
+
+Note: SQL Agent only runs if search_condition exists in Intent.
 """
 
 from typing import Literal
@@ -15,6 +18,8 @@ from langgraph.graph import StateGraph, START, END
 
 from agent.state import AgentState, create_initial_state
 from agent.agents.understander import Understander
+from agent.agents.sql_agent import SQLAgent
+from agent.agents.sql_validator import SQLValidator
 from agent.agents.data_fetcher import DataFetcher
 from agent.agents.analyst import Analyst
 from agent.agents.validator import Validator
@@ -23,6 +28,8 @@ from agent.checkpointer import get_checkpointer
 
 # Initialize agents (singletons)
 understander = Understander()
+sql_agent = SQLAgent()
+sql_validator = SQLValidator()
 data_fetcher = DataFetcher()
 analyst = Analyst()
 validator = Validator()
@@ -35,6 +42,16 @@ validator = Validator()
 def understand_question(state: AgentState) -> dict:
     """Understander node - parses question into Intent."""
     return understander(state)
+
+
+def generate_sql(state: AgentState) -> dict:
+    """SQL Agent node - generates SQL from search_condition."""
+    return sql_agent(state)
+
+
+def validate_sql(state: AgentState) -> dict:
+    """SQL Validator node - validates SQL before execution."""
+    return sql_validator(state)
 
 
 def fetch_data(state: AgentState) -> dict:
@@ -69,15 +86,36 @@ def simple_respond(state: AgentState) -> dict:
 # Conditional Edges
 # =============================================================================
 
-def after_understander(state: AgentState) -> Literal["responder", "data_fetcher"]:
+def after_understander(state: AgentState) -> Literal["responder", "sql_agent", "data_fetcher"]:
     """Route based on intent type after understanding."""
     intent = state.get("intent", {})
     intent_type = intent.get("type", "data")
 
     if intent_type in ("chitchat", "out_of_scope"):
         return "responder"
-    else:
+
+    # If search_condition exists, use SQL Agent
+    if intent.get("search_condition"):
+        return "sql_agent"
+
+    # Otherwise go directly to DataFetcher
+    return "data_fetcher"
+
+
+def after_sql_validation(state: AgentState) -> Literal["data_fetcher", "sql_agent"]:
+    """Route based on SQL validation result."""
+    sql_validation = state.get("sql_validation", {})
+    status = sql_validation.get("status", "ok")
+    step_number = state.get("step_number", 0)
+
+    # Max 3 attempts
+    if step_number >= 6:  # 2 cycles of sql_agent + sql_validator
         return "data_fetcher"
+
+    if status == "ok":
+        return "data_fetcher"
+    else:  # rewrite
+        return "sql_agent"
 
 
 def after_validation(state: AgentState) -> Literal["end", "analyst"]:
@@ -108,6 +146,8 @@ def build_graph() -> StateGraph:
     # Add nodes
     graph.add_node("understander", understand_question)
     graph.add_node("responder", simple_respond)  # For chitchat/out_of_scope
+    graph.add_node("sql_agent", generate_sql)
+    graph.add_node("sql_validator", validate_sql)
     graph.add_node("data_fetcher", fetch_data)
     graph.add_node("analyst", analyze_data)
     graph.add_node("validator", validate_response)
@@ -121,12 +161,26 @@ def build_graph() -> StateGraph:
         after_understander,
         {
             "responder": "responder",
+            "sql_agent": "sql_agent",
             "data_fetcher": "data_fetcher",
         }
     )
 
     # Responder → END (no validation needed for chitchat)
     graph.add_edge("responder", END)
+
+    # SQL flow: sql_agent → sql_validator → conditional routing
+    graph.add_edge("sql_agent", "sql_validator")
+
+    # After SQL validation: ok → data_fetcher, rewrite → sql_agent
+    graph.add_conditional_edges(
+        "sql_validator",
+        after_sql_validation,
+        {
+            "data_fetcher": "data_fetcher",
+            "sql_agent": "sql_agent",
+        }
+    )
 
     # Data flow: data_fetcher → analyst → validator
     graph.add_edge("data_fetcher", "analyst")
@@ -321,6 +375,7 @@ class TradingGraph:
                             "symbol": intent.get("symbol"),
                             "period": f"{intent.get('period_start')} — {intent.get('period_end')}" if intent.get("period_start") else None,
                             "granularity": intent.get("granularity"),
+                            "search_condition": intent.get("search_condition"),
                         },
                         "input": input_data,
                         "output": {
@@ -331,6 +386,41 @@ class TradingGraph:
                     # Update accumulated state
                     accumulated_state["intent"] = intent
 
+                elif node_name == "sql_agent":
+                    sql_query = updates.get("sql_query")
+                    usage = updates.get("usage", {})
+                    yield {
+                        "type": "step_end",
+                        "agent": node_name,
+                        "duration_ms": step_duration_ms,
+                        "result": {
+                            "sql_generated": sql_query is not None,
+                        },
+                        "input": input_data,
+                        "output": {
+                            "sql_query": sql_query,
+                            "usage": usage,
+                        }
+                    }
+                    # Update accumulated state
+                    accumulated_state["sql_query"] = sql_query
+
+                elif node_name == "sql_validator":
+                    sql_validation = updates.get("sql_validation", {})
+                    yield {
+                        "type": "step_end",
+                        "agent": node_name,
+                        "duration_ms": step_duration_ms,
+                        "result": {
+                            "status": sql_validation.get("status"),
+                            "issues": sql_validation.get("issues"),
+                        },
+                        "input": input_data,
+                        "output": sql_validation
+                    }
+                    # Update accumulated state
+                    accumulated_state["sql_validation"] = sql_validation
+
                 elif node_name == "data_fetcher":
                     data = updates.get("data", {})
                     yield {
@@ -340,7 +430,6 @@ class TradingGraph:
                         "result": {
                             "rows": data.get("row_count") or data.get("matches_count", 0),
                             "granularity": data.get("granularity"),
-                            "pattern": data.get("pattern"),
                         },
                         "input": input_data,
                         "output": data
@@ -464,6 +553,8 @@ class TradingGraph:
         messages = {
             "understander": "Understanding question...",
             "responder": "Responding...",
+            "sql_agent": "Generating SQL...",
+            "sql_validator": "Validating SQL...",
             "data_fetcher": "Fetching data...",
             "analyst": "Analyzing data...",
             "validator": "Validating response...",
@@ -480,9 +571,20 @@ class TradingGraph:
             return {
                 "intent": state.get("intent"),
             }
+        elif agent == "sql_agent":
+            return {
+                "intent": state.get("intent"),
+                "sql_validation": state.get("sql_validation"),  # For rewrite
+            }
+        elif agent == "sql_validator":
+            return {
+                "sql_query": state.get("sql_query"),
+            }
         elif agent == "data_fetcher":
             return {
                 "intent": state.get("intent"),
+                "sql_query": state.get("sql_query"),
+                "sql_validation": state.get("sql_validation"),
             }
         elif agent == "analyst":
             return {
