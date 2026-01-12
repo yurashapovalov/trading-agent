@@ -131,7 +131,8 @@ def after_understander(state: AgentState) -> Literal["responder", "sql_agent", "
     if intent.get("needs_clarification"):
         return "clarification"
 
-    if intent_type in ("chitchat", "out_of_scope"):
+    # Non-data types go to responder
+    if intent_type in ("chitchat", "out_of_scope", "concept"):
         return "responder"
 
     # If search_condition exists, use SQL Agent
