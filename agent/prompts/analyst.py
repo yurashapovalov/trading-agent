@@ -49,7 +49,11 @@ Your response must be valid JSON with two fields:
 # User Prompt Templates
 # =============================================================================
 
-USER_PROMPT_DATA = """<data>
+USER_PROMPT_DATA = """<chat_history>
+{chat_history}
+</chat_history>
+
+<data>
 {data}
 </data>
 
@@ -57,6 +61,7 @@ USER_PROMPT_DATA = """<data>
 Question: {question}
 
 Analyze the data and respond with JSON containing "response" and "stats".
+Consider the chat history for context when answering follow-up questions.
 </task>
 """
 
@@ -111,6 +116,7 @@ def get_analyst_prompt(
     intent_type: str = "data",
     previous_response: str = "",
     issues: list = None,
+    chat_history: list = None,
 ) -> str:
     """
     Build complete prompt for Analyst.
@@ -121,11 +127,20 @@ def get_analyst_prompt(
         intent_type: "data", "pattern", or "concept"
         previous_response: Previous response if rewriting
         issues: Validation issues if rewriting
+        chat_history: Previous messages for context
 
     Returns:
         Complete prompt string
     """
     import json
+
+    # Format chat history
+    history_str = "No previous context"
+    if chat_history:
+        history_str = ""
+        for msg in chat_history[-4:]:  # Last 4 messages
+            role = "User" if msg.get("role") == "user" else "Assistant"
+            history_str += f"{role}: {msg.get('content', '')}\n"
 
     # Rewrite case
     if previous_response and issues:
@@ -160,6 +175,7 @@ def get_analyst_prompt(
 
     # Data (default)
     return SYSTEM_PROMPT + "\n" + USER_PROMPT_DATA.format(
+        chat_history=history_str,
         data=json.dumps(data, indent=2, default=str),
         question=question,
     )

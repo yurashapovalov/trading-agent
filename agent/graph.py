@@ -1,8 +1,13 @@
 """
 LangGraph definition for multi-agent trading system v2.
 
-Flow: Understander → DataFetcher → Analyst → Validator → END
-                                     ↑_________| (rewrite loop)
+Flow:
+                    ┌─ chitchat/out_of_scope ─► Responder ──► END
+                    │
+Question ─► Understander ─┤
+                    │
+                    └─ data/pattern/concept ─► DataFetcher ─► Analyst ─► Validator ─► END
+                                                                ↑____________| (rewrite loop)
 """
 
 from typing import Literal
@@ -47,9 +52,33 @@ def validate_response(state: AgentState) -> dict:
     return validator(state)
 
 
+def simple_respond(state: AgentState) -> dict:
+    """
+    Responder node - returns response_text for chitchat/out_of_scope.
+    No data fetching or analysis needed.
+    """
+    intent = state.get("intent", {})
+    response_text = intent.get("response_text", "Чем могу помочь с анализом торговых данных?")
+    return {
+        "response": response_text,
+        "agents_used": ["responder"],
+    }
+
+
 # =============================================================================
 # Conditional Edges
 # =============================================================================
+
+def after_understander(state: AgentState) -> Literal["responder", "data_fetcher"]:
+    """Route based on intent type after understanding."""
+    intent = state.get("intent", {})
+    intent_type = intent.get("type", "data")
+
+    if intent_type in ("chitchat", "out_of_scope"):
+        return "responder"
+    else:
+        return "data_fetcher"
+
 
 def after_validation(state: AgentState) -> Literal["end", "analyst"]:
     """Decide whether to end or rewrite."""
@@ -78,13 +107,28 @@ def build_graph() -> StateGraph:
 
     # Add nodes
     graph.add_node("understander", understand_question)
+    graph.add_node("responder", simple_respond)  # For chitchat/out_of_scope
     graph.add_node("data_fetcher", fetch_data)
     graph.add_node("analyst", analyze_data)
     graph.add_node("validator", validate_response)
 
-    # Linear flow: START → understander → data_fetcher → analyst → validator
+    # START → understander
     graph.add_edge(START, "understander")
-    graph.add_edge("understander", "data_fetcher")
+
+    # Conditional routing after understander
+    graph.add_conditional_edges(
+        "understander",
+        after_understander,
+        {
+            "responder": "responder",
+            "data_fetcher": "data_fetcher",
+        }
+    )
+
+    # Responder → END (no validation needed for chitchat)
+    graph.add_edge("responder", END)
+
+    # Data flow: data_fetcher → analyst → validator
     graph.add_edge("data_fetcher", "analyst")
     graph.add_edge("analyst", "validator")
 
@@ -353,6 +397,30 @@ class TradingGraph:
                         "output": validation
                     }
 
+                elif node_name == "responder":
+                    # Responder handles chitchat/out_of_scope - just returns response
+                    response = updates.get("response", "")
+
+                    # Stream response in chunks
+                    chunk_size = 50
+                    for i in range(0, len(response), chunk_size):
+                        yield {
+                            "type": "text_delta",
+                            "agent": node_name,
+                            "content": response[i:i+chunk_size]
+                        }
+
+                    yield {
+                        "type": "step_end",
+                        "agent": node_name,
+                        "duration_ms": step_duration_ms,
+                        "result": {"response_length": len(response)},
+                        "input": input_data,
+                        "output": {"response": response}
+                    }
+                    # Update accumulated state
+                    accumulated_state["response"] = response
+
                 # Track final state (manually merge usage)
                 if final_state is None:
                     final_state = dict(updates)
@@ -395,6 +463,7 @@ class TradingGraph:
         """Get human-readable message for agent."""
         messages = {
             "understander": "Understanding question...",
+            "responder": "Responding...",
             "data_fetcher": "Fetching data...",
             "analyst": "Analyzing data...",
             "validator": "Validating response...",
@@ -406,6 +475,10 @@ class TradingGraph:
         if agent == "understander":
             return {
                 "question": state.get("question"),
+            }
+        elif agent == "responder":
+            return {
+                "intent": state.get("intent"),
             }
         elif agent == "data_fetcher":
             return {

@@ -37,7 +37,7 @@ You must respond in the same language as the user's question.
 
 <output_schema>
 {{
-  "type": "data" | "pattern" | "concept" | "strategy",
+  "type": "data" | "pattern" | "concept" | "strategy" | "chitchat" | "out_of_scope",
   "symbol": "NQ",
   "period_start": "YYYY-MM-DD",
   "period_end": "YYYY-MM-DD",
@@ -45,11 +45,21 @@ You must respond in the same language as the user's question.
   "pattern_name": "...",                          // for type=pattern
   "pattern_params": "{{...}}",                    // JSON string with params
   "concept": "...",                               // for type=concept
+  "response_text": "...",                         // for type=chitchat or out_of_scope (friendly response)
   "needs_clarification": false,
   "clarification_question": "...",                // in user's language
   "suggestions": ["...", "..."]                   // in user's language
 }}
 </output_schema>
+
+<type_guidelines>
+- type="data": User wants trading data, statistics, prices
+- type="pattern": User looking for specific patterns (consecutive days, gaps, reversals)
+- type="concept": User asking about trading terms/concepts (RSI, MACD, support/resistance)
+- type="strategy": User wants to backtest a trading strategy
+- type="chitchat": Greetings, thanks, small talk, "how are you", etc. Return friendly response_text
+- type="out_of_scope": Questions not related to trading (weather, recipes, etc). Politely redirect to trading
+</type_guidelines>
 
 <examples>
 {examples}
@@ -113,6 +123,36 @@ Question: NQ last week
 Intent:
 ```json
 {{"type": "data", "symbol": "NQ", "period_start": "2025-01-05", "period_end": "2025-01-12", "granularity": "daily"}}
+```
+
+Question: Привет! Как дела?
+Intent:
+```json
+{{"type": "chitchat", "response_text": "Привет! Всё отлично, готов помочь с анализом торговых данных. Что хочешь узнать про NQ?"}}
+```
+
+Question: Hi there!
+Intent:
+```json
+{{"type": "chitchat", "response_text": "Hey! I'm your trading data assistant. How can I help you with NQ analysis today?"}}
+```
+
+Question: Спасибо за помощь!
+Intent:
+```json
+{{"type": "chitchat", "response_text": "Всегда рад помочь! Если будут ещё вопросы по трейдингу — обращайся."}}
+```
+
+Question: What's the weather like?
+Intent:
+```json
+{{"type": "out_of_scope", "response_text": "I'm specialized in trading data analysis. I can help you with NQ statistics, find patterns, or explain trading concepts. What would you like to know?"}}
+```
+
+Question: Расскажи анекдот
+Intent:
+```json
+{{"type": "out_of_scope", "response_text": "Я специализируюсь на анализе торговых данных. Могу показать статистику по NQ, найти паттерны или объяснить торговые термины. Чем могу помочь?"}}
 ```
 """
 

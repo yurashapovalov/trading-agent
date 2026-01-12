@@ -78,6 +78,36 @@ def root():
     return {"status": "ok", "service": "Trading Analytics Agent", "version": "2.0"}
 
 
+def get_recent_chat_history(user_id: str, session_id: str, limit: int = 6) -> list[dict]:
+    """Fetch recent chat history from Supabase for context."""
+    if not supabase:
+        return []
+
+    try:
+        result = supabase.table("chat_logs") \
+            .select("question, response") \
+            .eq("user_id", user_id) \
+            .eq("session_id", session_id) \
+            .order("created_at", desc=True) \
+            .limit(limit) \
+            .execute()
+
+        if not result.data:
+            return []
+
+        # Convert to chat format and reverse to chronological order
+        history = []
+        for row in reversed(result.data):
+            history.append({"role": "user", "content": row["question"]})
+            if row.get("response"):
+                history.append({"role": "assistant", "content": row["response"]})
+
+        return history
+    except Exception as e:
+        print(f"Failed to fetch chat history: {e}")
+        return []
+
+
 @app.post("/chat/stream")
 async def chat_stream(request: ChatRequest, user_id: str = Depends(require_auth)):
     """
@@ -98,6 +128,9 @@ async def chat_stream(request: ChatRequest, user_id: str = Depends(require_auth)
 
     print(f"[CHAT] Processing: {request.message[:50]}... for user {user_id[:8]}...")
 
+    # Load recent chat history for context
+    chat_history = get_recent_chat_history(user_id, request.session_id or "default")
+
     async def generate():
         final_text = ""
         usage_data = {}
@@ -112,7 +145,8 @@ async def chat_stream(request: ChatRequest, user_id: str = Depends(require_auth)
             for event in trading_graph.stream_sse(
                 question=request.message,
                 user_id=user_id,
-                session_id=request.session_id or "default"
+                session_id=request.session_id or "default",
+                chat_history=chat_history
             ):
                 yield f"data: {json.dumps(event, default=str)}\n\n"
                 await asyncio.sleep(0)  # Force flush

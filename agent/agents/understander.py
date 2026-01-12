@@ -109,7 +109,7 @@ class Understander:
                         "properties": {
                             "type": {
                                 "type": "string",
-                                "enum": ["data", "pattern", "concept", "strategy"]
+                                "enum": ["data", "pattern", "concept", "strategy", "chitchat", "out_of_scope"]
                             },
                             "symbol": {"type": "string"},
                             "period_start": {"type": "string"},
@@ -121,6 +121,7 @@ class Understander:
                             "pattern_name": {"type": "string"},
                             "pattern_params": {"type": "string"},  # JSON string
                             "concept": {"type": "string"},
+                            "response_text": {"type": "string"},  # For chitchat/out_of_scope
                             "needs_clarification": {"type": "boolean"},
                             "clarification_question": {"type": "string"},
                             "suggestions": {
@@ -194,6 +195,9 @@ class Understander:
 
         if intent_type == "concept":
             intent["concept"] = data.get("concept", "")
+
+        if intent_type in ("chitchat", "out_of_scope"):
+            intent["response_text"] = data.get("response_text", "")
 
         return intent
 

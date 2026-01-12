@@ -53,7 +53,7 @@ class Intent(TypedDict, total=False):
     DataFetcher uses this to decide what data to fetch.
     """
     # Type of request
-    type: Literal["data", "concept", "strategy", "pattern"]
+    type: Literal["data", "concept", "strategy", "pattern", "chitchat", "out_of_scope"]
 
     # Data parameters (for type="data")
     symbol: str | None            # "NQ", "ES", etc.
@@ -69,6 +69,9 @@ class Intent(TypedDict, total=False):
 
     # For concept requests (type="concept")
     concept: str | None           # "RSI", "MACD", "support/resistance"
+
+    # For chitchat/out_of_scope (type="chitchat" or "out_of_scope")
+    response_text: str | None     # Direct response from Understander (no data needed)
 
     # Clarification
     needs_clarification: bool

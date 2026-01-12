@@ -44,6 +44,7 @@ class Analyst:
         data = state.get("data", {})
         intent = state.get("intent", {})
         intent_type = intent.get("type", "data")
+        chat_history = state.get("chat_history", [])
 
         # Check if rewrite needed
         validation = state.get("validation", {})
@@ -60,6 +61,7 @@ class Analyst:
             intent_type=intent_type,
             previous_response=previous_response,
             issues=issues,
+            chat_history=chat_history,
         )
 
         # Call LLM with JSON mode
