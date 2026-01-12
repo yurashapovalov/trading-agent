@@ -116,7 +116,7 @@ class Understander:
                             "period_end": {"type": "string"},
                             "granularity": {
                                 "type": "string",
-                                "enum": ["period", "daily", "hourly"]
+                                "enum": ["period", "daily", "hourly", "weekday"]
                             },
                             "pattern_name": {"type": "string"},
                             "pattern_params": {"type": "string"},  # JSON string

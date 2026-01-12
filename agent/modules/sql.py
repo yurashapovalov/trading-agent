@@ -73,6 +73,38 @@ TEMPLATES = {
         GROUP BY hour
         ORDER BY hour
     """,
+
+    # One row per day of week (aggregated across all weeks in period)
+    "weekday": """
+        WITH daily AS (
+            SELECT
+                timestamp::date as date,
+                dayofweek(timestamp::date) as weekday_num,
+                dayname(timestamp::date) as weekday_name,
+                FIRST(open ORDER BY timestamp) as open,
+                LAST(close ORDER BY timestamp) as close,
+                MAX(high) as high,
+                MIN(low) as low,
+                SUM(volume) as volume
+            FROM ohlcv_1min
+            WHERE symbol = $1
+              AND timestamp >= $2
+              AND timestamp < $3
+            GROUP BY date, dayofweek(timestamp::date), dayname(timestamp::date)
+        )
+        SELECT
+            weekday_num,
+            weekday_name,
+            COUNT(*) as trading_days,
+            ROUND(AVG(high - low), 2) as avg_range,
+            ROUND(AVG((close - open) / open * 100), 4) as avg_change_pct,
+            ROUND(AVG(volume), 0) as avg_volume,
+            ROUND(STDDEV((close - open) / open * 100), 4) as volatility
+        FROM daily
+        WHERE weekday_num BETWEEN 1 AND 5
+        GROUP BY weekday_num, weekday_name
+        ORDER BY weekday_num
+    """,
 }
 
 
@@ -84,7 +116,7 @@ def fetch(
     symbol: str,
     period_start: str,
     period_end: str,
-    granularity: Literal["period", "daily", "hourly"] = "daily"
+    granularity: Literal["period", "daily", "hourly", "weekday"] = "daily"
 ) -> dict[str, Any]:
     """
     Fetch OHLCV data at specified granularity.
@@ -97,6 +129,7 @@ def fetch(
             - "period": single row with aggregates
             - "daily": one row per day
             - "hourly": one row per hour (aggregated across days)
+            - "weekday": one row per day of week (Mon-Fri stats)
 
     Returns:
         {

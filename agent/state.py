@@ -59,7 +59,7 @@ class Intent(TypedDict, total=False):
     symbol: str | None            # "NQ", "ES", etc.
     period_start: str | None      # ISO date "2025-01-01"
     period_end: str | None        # ISO date "2025-01-31"
-    granularity: Literal["period", "daily", "hourly"] | None  # How to group data
+    granularity: Literal["period", "daily", "hourly", "weekday"] | None  # How to group data
 
     # For pattern requests (type="pattern")
     pattern: PatternDef | None    # Pattern name + params for complex queries

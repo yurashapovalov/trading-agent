@@ -41,7 +41,7 @@ You must respond in the same language as the user's question.
   "symbol": "NQ",
   "period_start": "YYYY-MM-DD",
   "period_end": "YYYY-MM-DD",
-  "granularity": "period" | "daily" | "hourly",  // for type=data
+  "granularity": "period" | "daily" | "hourly" | "weekday",  // for type=data
   "pattern_name": "...",                          // for type=pattern
   "pattern_params": "{{...}}",                    // JSON string with params
   "concept": "...",                               // for type=concept
@@ -60,6 +60,13 @@ You must respond in the same language as the user's question.
 - type="chitchat": Greetings, thanks, small talk, "how are you", etc. Return friendly response_text
 - type="out_of_scope": Questions not related to trading (weather, recipes, etc). Politely redirect to trading
 </type_guidelines>
+
+<granularity_guidelines>
+- "period": Single aggregate for entire period (e.g., "show NQ stats for 2024")
+- "daily": Day-by-day breakdown (e.g., "show each day in March")
+- "hourly": Hour-by-hour profile (e.g., "what hour is most volatile")
+- "weekday": Day-of-week comparison (e.g., "compare Mondays vs Fridays", "which weekday is best")
+</granularity_guidelines>
 
 <examples>
 {examples}
@@ -123,6 +130,24 @@ Question: NQ last week
 Intent:
 ```json
 {{"type": "data", "symbol": "NQ", "period_start": "2025-01-05", "period_end": "2025-01-12", "granularity": "daily"}}
+```
+
+Question: Compare Monday vs Friday volatility in 2024
+Intent:
+```json
+{{"type": "data", "symbol": "NQ", "period_start": "2024-01-01", "period_end": "2025-01-01", "granularity": "weekday"}}
+```
+
+Question: Какой день недели лучше для торговли?
+Intent:
+```json
+{{"type": "data", "symbol": "NQ", "period_start": "2024-01-01", "period_end": "2025-01-01", "granularity": "weekday"}}
+```
+
+Question: Сравни понедельники и пятницы по волатильности
+Intent:
+```json
+{{"type": "data", "symbol": "NQ", "period_start": "2024-01-01", "period_end": "2025-01-01", "granularity": "weekday"}}
 ```
 
 Question: Привет! Как дела?
