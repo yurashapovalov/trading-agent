@@ -539,6 +539,7 @@ class TradingGraph:
             "type": "usage",
             "input_tokens": usage.get("input_tokens", 0),
             "output_tokens": usage.get("output_tokens", 0),
+            "thinking_tokens": usage.get("thinking_tokens", 0),
             "cost": usage.get("cost_usd", 0)
         }
 
