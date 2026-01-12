@@ -112,6 +112,9 @@ def fetch(
     if not template:
         return {"error": f"Unknown granularity: {granularity}"}
 
+    # Build actual SQL with params for logging
+    sql_query = template.replace("$1", f"'{symbol}'").replace("$2", f"'{period_start}'").replace("$3", f"'{period_end}'")
+
     try:
         with duckdb.connect(config.DATABASE_PATH, read_only=True) as conn:
             df = conn.execute(template, [symbol, period_start, period_end]).df()
@@ -129,14 +132,16 @@ def fetch(
                 "period_start": period_start,
                 "period_end": period_end,
                 "row_count": len(rows),
-                "rows": rows
+                "rows": rows,
+                "sql_query": sql_query.strip(),
             }
 
     except Exception as e:
         return {
             "error": str(e),
             "granularity": granularity,
-            "symbol": symbol
+            "symbol": symbol,
+            "sql_query": sql_query.strip(),
         }
 
 
