@@ -18,22 +18,11 @@ CREATE TABLE IF NOT EXISTS chat_logs (
 
     -- Routing & agents
     route TEXT,                           -- 'data', 'concept', 'hypothetical'
-    agents_used TEXT[] DEFAULT '{}',      -- ['router', 'data_agent', 'analyst', 'validator']
-
-    -- Tools used (legacy, kept for backward compatibility)
-    tools_used JSONB DEFAULT '[]',
-
-    -- SQL aggregates
-    total_sql_queries INTEGER DEFAULT 0,
-    total_rows_returned INTEGER DEFAULT 0,
+    agents_used TEXT[] DEFAULT '{}',      -- ['understander', 'data_fetcher', 'analyst', 'validator']
 
     -- Validation
     validation_attempts INTEGER DEFAULT 1,
     validation_passed BOOLEAN,
-
-    -- Human-in-the-loop
-    was_interrupted BOOLEAN DEFAULT FALSE,
-    interrupt_reason TEXT,
 
     -- Token usage (totals across all agents)
     input_tokens INTEGER DEFAULT 0,
