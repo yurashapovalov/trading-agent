@@ -104,8 +104,6 @@ async def chat_stream(request: ChatRequest, user_id: str = Depends(require_auth)
         request_id = str(uuid.uuid4())
         route = None
         agents_used = []
-        sql_queries_count = 0
-        total_rows = 0
         validation_attempts = 0
         validation_passed = None
         step_number = 0
@@ -145,10 +143,6 @@ async def chat_stream(request: ChatRequest, user_id: str = Depends(require_auth)
                         duration_ms=duration_ms,
                     )
 
-                elif event_type == "sql_executed":
-                    sql_queries_count += 1
-                    total_rows += event.get("rows_found", 0)
-
                 elif event_type == "text_delta":
                     final_text += event.get("content", "")
 
@@ -171,8 +165,6 @@ async def chat_stream(request: ChatRequest, user_id: str = Depends(require_auth)
                         response=final_text[:10000],
                         route=route,
                         agents_used=list(set(agents_used)),
-                        total_sql_queries=sql_queries_count,
-                        total_rows_returned=total_rows,
                         validation_attempts=validation_attempts,
                         validation_passed=validation_passed,
                         input_tokens=usage_data.get("input_tokens", 0),
