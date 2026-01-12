@@ -42,7 +42,7 @@ class Analyst:
         """Generate analysis with stats."""
         question = state.get("question", "")
         data = state.get("data", {})
-        intent = state.get("intent", {})
+        intent = state.get("intent") or {}
         intent_type = intent.get("type", "data")
         chat_history = state.get("chat_history", [])
 

@@ -37,7 +37,7 @@ class SQLAgent:
 
     def __call__(self, state: AgentState) -> dict:
         """Generate SQL query from search condition."""
-        intent = state.get("intent", {})
+        intent = state.get("intent") or {}
         search_condition = intent.get("search_condition")
 
         # No search condition - skip SQL Agent

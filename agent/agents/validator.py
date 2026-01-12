@@ -28,8 +28,8 @@ class Validator:
     def __call__(self, state: AgentState) -> dict:
         """Validate stats against data."""
         stats = state.get("stats") or {}
-        data = state.get("data", {})
-        intent = state.get("intent", {})
+        data = state.get("data") or {}
+        intent = state.get("intent") or {}
         intent_type = intent.get("type", "data")
         attempts = state.get("validation_attempts", 0)
 

@@ -82,7 +82,7 @@ def simple_respond(state: AgentState) -> dict:
     Responder node - returns response_text for chitchat/out_of_scope/clarification.
     No data fetching or analysis needed.
     """
-    intent = state.get("intent", {})
+    intent = state.get("intent") or {}
 
     # Handle clarification - return question with suggestions
     if intent.get("needs_clarification"):
@@ -114,7 +114,7 @@ def simple_respond(state: AgentState) -> dict:
 
 def after_understander(state: AgentState) -> Literal["responder", "sql_agent", "data_fetcher"]:
     """Route based on intent type after understanding."""
-    intent = state.get("intent", {})
+    intent = state.get("intent") or {}
     intent_type = intent.get("type", "data")
 
     # Clarification goes to responder (stateless approach)
