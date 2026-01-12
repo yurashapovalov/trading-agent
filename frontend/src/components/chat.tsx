@@ -208,7 +208,7 @@ export default function Chat() {
             <ClarificationMessage
               question={clarification.question}
               suggestions={clarification.suggestions}
-              onSelect={handleClarificationSelect}
+              onSelectSuggestion={handleClarificationSelect}
             />
           )}
 

@@ -5,16 +5,16 @@ import { cn } from "@/lib/utils"
 import { HelpCircleIcon } from "lucide-react"
 import type { ComponentProps } from "react"
 
-export type ClarificationMessageProps = ComponentProps<"div"> & {
+export type ClarificationMessageProps = Omit<ComponentProps<"div">, "onSelect"> & {
   question: string
   suggestions: string[]
-  onSelect: (response: string) => void
+  onSelectSuggestion: (response: string) => void
 }
 
 export function ClarificationMessage({
   question,
   suggestions,
-  onSelect,
+  onSelectSuggestion,
   className,
   ...props
 }: ClarificationMessageProps) {
@@ -41,7 +41,7 @@ export function ClarificationMessage({
               variant="outline"
               size="sm"
               className="h-auto py-2 px-3 text-sm whitespace-normal text-left"
-              onClick={() => onSelect(suggestion)}
+              onClick={() => onSelectSuggestion(suggestion)}
             >
               {suggestion}
             </Button>
