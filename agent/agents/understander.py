@@ -38,7 +38,7 @@ class Understander:
 
     def __init__(self):
         self.client = genai.Client(api_key=config.GOOGLE_API_KEY)
-        self.model = "gemini-2.0-flash"
+        self.model = config.GEMINI_MODEL
         self._last_usage = UsageStats(
             input_tokens=0,
             output_tokens=0,
@@ -60,6 +60,7 @@ class Understander:
 
         return {
             "intent": intent,
+            "usage": self._last_usage,
             "agents_used": [self.name],
             "step_number": state.get("step_number", 0) + 1,
         }

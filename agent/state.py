@@ -10,6 +10,20 @@ def merge_lists(a: list, b: list) -> list:
     return a + b
 
 
+def merge_usage(a: dict, b: dict) -> dict:
+    """Sum usage stats from multiple agents."""
+    if not a:
+        return b
+    if not b:
+        return a
+    return {
+        "input_tokens": (a.get("input_tokens") or 0) + (b.get("input_tokens") or 0),
+        "output_tokens": (a.get("output_tokens") or 0) + (b.get("output_tokens") or 0),
+        "thinking_tokens": (a.get("thinking_tokens") or 0) + (b.get("thinking_tokens") or 0),
+        "cost_usd": (a.get("cost_usd") or 0) + (b.get("cost_usd") or 0),
+    }
+
+
 # =============================================================================
 # Intent Types (from Understander)
 # =============================================================================
@@ -166,8 +180,8 @@ class AgentState(TypedDict, total=False):
     agents_used: Annotated[list[str], merge_lists]
     step_number: int
 
-    # Usage aggregation
-    usage: UsageStats
+    # Usage aggregation (summed across all LLM agents)
+    usage: Annotated[UsageStats, merge_usage]
     total_duration_ms: int
 
     # Error handling
