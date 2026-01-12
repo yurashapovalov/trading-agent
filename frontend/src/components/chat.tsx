@@ -92,7 +92,7 @@ export default function Chat() {
   }
 
   const handleSuggestionClick = (suggestion: string) => {
-    sendMessage(suggestion)
+    setText(suggestion)
   }
 
   return (
