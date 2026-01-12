@@ -14,9 +14,8 @@ export type MessageProps = HTMLAttributes<HTMLDivElement> & {
 export const Message = ({ className, from, ...props }: MessageProps) => (
   <div
     className={cn(
-      'group flex w-full items-end justify-end gap-2 py-4',
-      from === 'user' ? 'is-user' : 'is-assistant flex-row-reverse justify-end',
-      '[&>div]:max-w-[80%]',
+      'group flex w-full gap-2 py-2',
+      from === 'user' ? 'is-user justify-end' : 'is-assistant justify-start',
       className
     )}
     {...(props as any)}
@@ -32,14 +31,14 @@ export const MessageContent = ({
 }: MessageContentProps) => (
   <div
     className={cn(
-      'flex flex-col gap-2 overflow-hidden rounded-lg px-4 py-3 text-foreground text-sm',
+      'max-w-[85%] overflow-hidden rounded-2xl px-4 py-3 text-sm',
       'group-[.is-user]:bg-primary group-[.is-user]:text-primary-foreground',
-      'group-[.is-assistant]:bg-secondary group-[.is-assistant]:text-foreground',
+      'group-[.is-assistant]:bg-muted group-[.is-assistant]:text-foreground',
       className
     )}
     {...(props as any)}
   >
-    <div className="is-user:dark">{children}</div>
+    {children}
   </div>
 );
 
