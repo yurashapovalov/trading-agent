@@ -180,6 +180,14 @@ async def chat_stream(request: ChatRequest, user_id: str = Depends(require_auth)
                 elif event_type == "text_delta":
                     final_text += event.get("content", "")
 
+                elif event_type == "clarification":
+                    # Save clarification question as response for context
+                    question = event.get("question", "")
+                    suggestions = event.get("suggestions", [])
+                    final_text = question
+                    if suggestions:
+                        final_text += "\n\nВарианты:\n" + "\n".join(f"• {s}" for s in suggestions)
+
                 elif event_type == "validation":
                     validation_attempts += 1
                     validation_passed = event.get("status") == "ok"
