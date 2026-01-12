@@ -9,6 +9,7 @@ Multi-agent trading analytics system.
 | Agent | Type | Purpose |
 |-------|------|---------|
 | Understander | LLM | Парсит вопрос → Intent |
+| Clarification | Interrupt | Human-in-the-loop - уточняет вопрос |
 | SQL Agent | LLM | Intent → SQL запрос |
 | SQL Validator | Code | Проверяет SQL |
 | DataFetcher | Code | Выполняет SQL → данные |
@@ -198,6 +199,72 @@ Validator checks Stats vs actual data
 | `chitchat` | Small talk | "Привет!" |
 | `out_of_scope` | Non-trading questions | "Какая погода?" |
 
+## Human-in-the-Loop
+
+Когда Understander не может однозначно понять вопрос, он возвращает `needs_clarification: true`.
+
+### Flow
+
+```
+User: "Покажи данные"
+         │
+         ▼
+    Understander
+         │
+    needs_clarification: true
+    clarification_question: "Какой символ и период?"
+    suggestions: ["NQ за последний месяц", "ES за 2024"]
+         │
+         ▼
+    Clarification (interrupt)
+         │
+    ← ждём ответ пользователя →
+         │
+         ▼
+User: "NQ за январь 2024"
+         │
+         ▼
+    Understander (re-parse)
+         │
+         ▼
+    ... нормальный flow ...
+```
+
+### Implementation
+
+Использует LangGraph `interrupt()` функцию:
+
+```python
+def ask_clarification(state):
+    question = intent.get("clarification_question")
+    suggestions = intent.get("suggestions", [])
+
+    # Прерывает flow, ждёт ответа
+    user_response = interrupt({
+        "question": question,
+        "suggestions": suggestions
+    })
+
+    return {"question": user_response}
+```
+
+### Resume
+
+```python
+# Frontend получает clarification_needed событие
+# После ответа пользователя:
+graph.resume_with_clarification(
+    user_response="NQ за январь 2024",
+    user_id="user123",
+    session_id="session1"
+)
+```
+
+### Limits
+
+- Max 3 clarification attempts
+- После лимита - fallback to default Intent
+
 ## Granularity
 
 | Value | Returns | Use Case |
@@ -254,5 +321,19 @@ print(result["response"])
 | `sql_generated` | SQL Agent generated query |
 | `sql_validated` | SQL Validator result |
 | `validation` | Response validation result |
+| `clarification_needed` | Need user input (human-in-the-loop) |
 | `usage` | Token usage |
 | `done` | Complete |
+
+### clarification_needed Event
+
+```json
+{
+  "type": "clarification_needed",
+  "question": "Какой символ вас интересует?",
+  "suggestions": ["NQ", "ES"],
+  "thread_id": "user123_session1"
+}
+```
+
+Frontend должен показать вопрос пользователю и после ответа вызвать `resume_with_clarification()`.

@@ -4,17 +4,26 @@ LangGraph definition for multi-agent trading system v2.
 Flow:
                     ┌─ chitchat/out_of_scope ─► Responder ──► END
                     │
-Question ─► Understander ─┤
+                    ├─ needs_clarification ─► Clarification (interrupt) ─┐
+                    │                                                     │
+Question ─► Understander ◄────────────────────────────────────────────────┘
+                    │
                     │                            ┌──────────────────────────────────────┐
                     │                            │ (rewrite loop)                       │
                     └─ data ─► SQL Agent ─► SQL Validator ─► DataFetcher ─► Analyst ─► Validator ─► END
                                    ↑_______________|                           ↑____________| (rewrite loop)
+
+Human-in-the-loop:
+- Clarification node uses interrupt() to pause and wait for user input
+- User response is fed back to Understander to re-parse with clarification
+- Max 3 clarification attempts before fallback to default intent
 
 Note: SQL Agent only runs if search_condition exists in Intent.
 """
 
 from typing import Literal
 from langgraph.graph import StateGraph, START, END
+from langgraph.types import Command, interrupt
 
 from agent.state import AgentState, create_initial_state
 from agent.agents.understander import Understander
@@ -82,14 +91,45 @@ def simple_respond(state: AgentState) -> dict:
     }
 
 
+def ask_clarification(state: AgentState) -> dict:
+    """
+    Clarification node - interrupts flow to ask user for clarification.
+    Uses LangGraph interrupt() to pause and wait for user input.
+    """
+    intent = state.get("intent", {})
+    question = intent.get("clarification_question", "Уточните ваш вопрос")
+    suggestions = intent.get("suggestions", [])
+
+    # Build clarification request
+    clarification_request = {
+        "question": question,
+        "suggestions": suggestions,
+    }
+
+    # Interrupt and wait for user response
+    user_response = interrupt(clarification_request)
+
+    # User response received - update state and continue
+    # The response becomes the new question or clarification
+    return {
+        "question": user_response,
+        "clarification_attempts": state.get("clarification_attempts", 0) + 1,
+        "agents_used": ["clarification"],
+    }
+
+
 # =============================================================================
 # Conditional Edges
 # =============================================================================
 
-def after_understander(state: AgentState) -> Literal["responder", "sql_agent", "data_fetcher"]:
+def after_understander(state: AgentState) -> Literal["responder", "sql_agent", "data_fetcher", "clarification"]:
     """Route based on intent type after understanding."""
     intent = state.get("intent", {})
     intent_type = intent.get("type", "data")
+
+    # Check if clarification is needed (human-in-the-loop)
+    if intent.get("needs_clarification"):
+        return "clarification"
 
     if intent_type in ("chitchat", "out_of_scope"):
         return "responder"
@@ -145,6 +185,7 @@ def build_graph() -> StateGraph:
 
     # Add nodes
     graph.add_node("understander", understand_question)
+    graph.add_node("clarification", ask_clarification)  # Human-in-the-loop
     graph.add_node("responder", simple_respond)  # For chitchat/out_of_scope
     graph.add_node("sql_agent", generate_sql)
     graph.add_node("sql_validator", validate_sql)
@@ -160,11 +201,15 @@ def build_graph() -> StateGraph:
         "understander",
         after_understander,
         {
+            "clarification": "clarification",
             "responder": "responder",
             "sql_agent": "sql_agent",
             "data_fetcher": "data_fetcher",
         }
     )
+
+    # After clarification → back to understander to re-parse with new info
+    graph.add_edge("clarification", "understander")
 
     # Responder → END (no validation needed for chitchat)
     graph.add_edge("responder", END)
@@ -510,6 +555,28 @@ class TradingGraph:
                     # Update accumulated state
                     accumulated_state["response"] = response
 
+                elif node_name == "clarification":
+                    # Clarification node - will be followed by interrupt
+                    # The actual interrupt data comes separately
+                    yield {
+                        "type": "step_start",
+                        "agent": node_name,
+                        "message": "Waiting for clarification..."
+                    }
+
+                elif node_name == "__interrupt__":
+                    # LangGraph interrupt event - clarification request
+                    # updates contains the interrupt data (question, suggestions)
+                    interrupt_data = updates[0] if isinstance(updates, list) else updates
+                    yield {
+                        "type": "clarification_needed",
+                        "question": interrupt_data.get("question", "Уточните вопрос"),
+                        "suggestions": interrupt_data.get("suggestions", []),
+                        "thread_id": f"{initial_state.get('user_id')}_{initial_state.get('session_id', 'default')}"
+                    }
+                    # Don't emit done - we're waiting for user response
+                    return
+
                 # Track final state (manually merge usage)
                 if final_state is None:
                     final_state = dict(updates)
@@ -553,6 +620,7 @@ class TradingGraph:
         """Get human-readable message for agent."""
         messages = {
             "understander": "Understanding question...",
+            "clarification": "Asking for clarification...",
             "responder": "Responding...",
             "sql_agent": "Generating SQL...",
             "sql_validator": "Validating SQL...",
@@ -598,7 +666,48 @@ class TradingGraph:
                 "stats": state.get("stats"),
                 "data": state.get("data"),
             }
+        elif agent == "clarification":
+            return {
+                "intent": state.get("intent"),
+            }
         return {}
+
+    def resume_with_clarification(
+        self,
+        user_response: str,
+        user_id: str,
+        session_id: str = "default",
+    ):
+        """
+        Resume interrupted graph with user's clarification response.
+
+        Args:
+            user_response: User's answer to clarification question
+            user_id: User ID
+            session_id: Session/thread ID (must match original)
+
+        Yields:
+            SSE events for the resumed flow
+        """
+        config = {
+            "configurable": {
+                "thread_id": f"{user_id}_{session_id}"
+            }
+        }
+
+        # Resume with Command
+        for event in self.app.stream(
+            Command(resume=user_response),
+            config,
+            stream_mode="updates"
+        ):
+            # Re-use stream_sse logic for events
+            for node_name, updates in event.items():
+                yield {
+                    "type": "step_end",
+                    "agent": node_name,
+                    "result": updates
+                }
 
 
 # Singleton instance
