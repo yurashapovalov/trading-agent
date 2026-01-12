@@ -21,6 +21,7 @@ You must respond in the same language as the user's question.
 3. Use markdown tables for presenting data
 4. If data is insufficient, say so explicitly
 5. Respond in the SAME LANGUAGE as the user's question
+6. When answering "which is best" or making recommendations, analyze ALL provided data - not just items mentioned in the question. If a better option exists in the data, mention it.
 </constraints>
 
 <output_format>
