@@ -63,11 +63,6 @@ class ChatRequest(BaseModel):
     session_id: Optional[str] = "default"
 
 
-class ResumeRequest(BaseModel):
-    thread_id: str
-    user_response: str
-
-
 class DataInfo(BaseModel):
     symbol: str
     bars: int
@@ -235,56 +230,6 @@ async def chat_stream(request: ChatRequest, user_id: str = Depends(require_auth)
 async def chat_stream_v2(request: ChatRequest, user_id: str = Depends(require_auth)):
     """Alias for /chat/stream (backward compatibility)."""
     return await chat_stream(request, user_id)
-
-
-@app.post("/chat/resume")
-async def chat_resume(request: ResumeRequest, user_id: str = Depends(require_auth)):
-    """
-    Resume chat after clarification interrupt.
-
-    The thread_id must match the original thread that was interrupted.
-    Expects: {thread_id: "user_session", user_response: "user's answer"}
-    """
-    import asyncio
-    from agent.graph import trading_graph
-
-    # Extract user_id and session_id from thread_id
-    # thread_id format: "{user_id}_{session_id}"
-    parts = request.thread_id.split("_", 1)
-    if len(parts) != 2:
-        raise HTTPException(status_code=400, detail="Invalid thread_id format")
-
-    thread_user_id, session_id = parts
-
-    # Verify the thread belongs to this user
-    if thread_user_id != user_id:
-        raise HTTPException(status_code=403, detail="Thread does not belong to this user")
-
-    print(f"[RESUME] Resuming thread {request.thread_id} with response: {request.user_response[:50]}...")
-
-    async def generate():
-        try:
-            for event in trading_graph.resume_with_clarification(
-                user_response=request.user_response,
-                user_id=user_id,
-                session_id=session_id,
-            ):
-                yield f"data: {json.dumps(event, default=str)}\n\n"
-                await asyncio.sleep(0)  # Force flush
-
-        except Exception as e:
-            print(f"[RESUME] Error: {e}")
-            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
-
-    return StreamingResponse(
-        generate(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        }
-    )
 
 
 @app.get("/chat/history")

@@ -193,6 +193,29 @@ Intent (action unclear → clarification):
 ```json
 {{"type": "data", "symbol": "NQ", "needs_clarification": true, "clarification_question": "What kind of analysis do you need?", "suggestions": ["Show statistics for last month", "Find days with big moves", "Compare weekdays"]}}
 ```
+
+--- CLARIFICATION FOLLOW-UP EXAMPLES ---
+When context shows a clarification was asked and user is responding, combine the original question with user's answer:
+
+Context:
+User: Отдели время электронной сессии от основной
+Assistant: Что вы хотите сделать с данными RTH и ETH?
+
+Question: Сравни волатильность
+Intent (user answered clarification → combine context):
+```json
+{{"type": "data", "symbol": "NQ", "granularity": "daily", "search_condition": "compare RTH vs ETH volatility (minute-level range comparison)"}}
+```
+
+Context:
+User: Analyze NQ
+Assistant: What kind of analysis do you need?
+
+Question: Find big moves
+Intent (user answered clarification → combine context):
+```json
+{{"type": "data", "symbol": "NQ", "granularity": "daily", "search_condition": "days where absolute change_pct > 2%"}}
+```
 """
 
 # =============================================================================
