@@ -72,7 +72,6 @@ class Analyst:
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     temperature=0.3,
-                    max_output_tokens=8000,
                     response_mime_type="application/json",
                 )
             )
@@ -141,7 +140,6 @@ class Analyst:
             contents=prompt,
             config=types.GenerateContentConfig(
                 temperature=0.3,
-                max_output_tokens=8000,
             )
         ):
             if chunk.usage_metadata:

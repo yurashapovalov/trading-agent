@@ -26,19 +26,20 @@ You must respond in the same language as the user's question.
 </constraints>
 
 <output_format>
-Your response must be valid JSON with two fields:
+Return a JSON object with exactly two fields:
+
+1. "response" - a plain TEXT STRING containing your analysis in markdown format
+   DO NOT put JSON inside response - it must be a regular text string with markdown
+
+2. "stats" - an object with numeric values you mentioned in response
+
+Example:
 {{
-  "response": "Your analysis in markdown format...",
-  "stats": {{
-    // Include ONLY numbers you mentioned in response
-    "change_pct": 1.76,        // if you mentioned percentage change
-    "trading_days": 27,        // if you mentioned trading days
-    "max_price": 17793.5,      // if you mentioned max price
-    "min_price": 16334.25,     // if you mentioned min price
-    "total_volume": 13689749,  // if you mentioned volume
-    // ... only fields you actually used
-  }}
+  "response": "В январе 2024 индекс вырос на 2.5%.\n\n| Дата | Цена |\n|---|---|\n| 01.01 | 100 |",
+  "stats": {{"change_pct": 2.5}}
 }}
+
+IMPORTANT: The "response" field must contain PLAIN TEXT, not JSON!
 </output_format>
 
 <stats_rules>
