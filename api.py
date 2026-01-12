@@ -123,8 +123,8 @@ async def chat_stream(request: ChatRequest, user_id: str = Depends(require_auth)
                 if event_type == "step_start":
                     agents_used.append(event.get("agent"))
 
-                elif event_type == "step_end" and event.get("agent") == "router":
-                    route = event.get("result", {}).get("route")
+                elif event_type == "step_end" and event.get("agent") == "understander":
+                    route = event.get("result", {}).get("type")
 
                 elif event_type == "sql_executed":
                     sql_queries_count += 1

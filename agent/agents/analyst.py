@@ -1,4 +1,10 @@
-"""Analyst agent - interprets data and generates responses."""
+"""
+Analyst agent - interprets data and generates responses with Stats.
+
+Returns:
+- response: User-facing markdown response
+- stats: Structured numbers for validation
+"""
 
 import json
 from typing import Generator
@@ -6,21 +12,17 @@ from google import genai
 from google.genai import types
 
 import config
-from agent.base import BaseOutputAgent
-from agent.state import AgentState, UsageStats
-from agent.prompts import get_prompt
+from agent.state import AgentState, Stats, UsageStats
+from agent.prompts.analyst import get_analyst_prompt
 from agent.pricing import calculate_cost
 
 
-class Analyst(BaseOutputAgent):
+class Analyst:
     """
-    Interprets data and writes user-facing responses.
+    Analyzes data and writes responses with Stats for validation.
 
-    This agent:
-    1. Receives data from Data Agent
-    2. Analyzes and interprets the data
-    3. Writes a clear, factual response
-    4. ONLY uses facts from the provided data
+    Principle: LLM analyzes data, returns response + stats.
+    Validator (code) checks if stats match actual data.
     """
 
     name = "analyst"
@@ -36,64 +38,136 @@ class Analyst(BaseOutputAgent):
             cost_usd=0.0
         )
 
-    def _format_data(self, state: AgentState) -> str:
-        """Format data for the prompt."""
-        data = state.get("data", {})
-        sql_queries = state.get("sql_queries", [])
-
-        # Build data summary
-        parts = []
-
-        # Add SQL results
-        for i, query in enumerate(sql_queries):
-            parts.append(f"### Query {i+1}")
-            parts.append(f"SQL: {query.get('query', 'N/A')}")
-            parts.append(f"Rows: {query.get('row_count', 0)}")
-            if query.get("error"):
-                parts.append(f"Error: {query['error']}")
-            elif query.get("rows"):
-                # Show up to 100 rows (aggregated data should be compact)
-                rows = query["rows"][:100]
-                parts.append(f"Data:\n```json\n{json.dumps(rows, indent=2, default=str)}\n```")
-
-        # Add validation info if present
-        if data.get("validation"):
-            parts.append(f"\n### Data Validation")
-            parts.append(f"Status: {data['validation'].get('status')}")
-            if data['validation'].get('reason'):
-                parts.append(f"Note: {data['validation']['reason']}")
-
-        return "\n".join(parts) if parts else "No data available."
-
-    def generate(self, state: AgentState) -> str:
-        """Generate analysis response."""
+    def __call__(self, state: AgentState) -> dict:
+        """Generate analysis with stats."""
         question = state.get("question", "")
-        data_str = self._format_data(state)
+        data = state.get("data", {})
+        intent = state.get("intent", {})
+        intent_type = intent.get("type", "data")
 
-        # Check if this is a rewrite request
-        feedback = state.get("validation", {}).get("feedback", "")
-        if feedback and state.get("validation_attempts", 0) > 0:
-            prompt = get_prompt(
-                "analyst_rewrite",
-                question=question,
-                data=data_str,
-                previous_response=state.get("response", ""),
-                feedback=feedback,
-                issues=state.get("validation", {}).get("issues", [])
+        # Check if rewrite needed
+        validation = state.get("validation", {})
+        previous_response = ""
+        issues = []
+        if validation.get("status") == "rewrite":
+            previous_response = state.get("response", "")
+            issues = validation.get("issues", [])
+
+        # Build prompt
+        prompt = get_analyst_prompt(
+            question=question,
+            data=data,
+            intent_type=intent_type,
+            previous_response=previous_response,
+            issues=issues,
+        )
+
+        # Call LLM with JSON mode
+        try:
+            response_obj = self.client.models.generate_content(
+                model=self.model,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    temperature=0.3,
+                    max_output_tokens=8000,
+                    response_mime_type="application/json",
+                )
             )
-        else:
-            prompt = get_prompt("analyst", question=question, data=data_str)
 
-        response = self.client.models.generate_content(
+            # Track usage
+            self._track_usage(response_obj)
+
+            # Parse JSON response
+            result = json.loads(response_obj.text)
+            response_text = result.get("response", "")
+            stats = result.get("stats", {})
+
+        except json.JSONDecodeError:
+            # Fallback: treat entire response as text
+            response_text = response_obj.text if response_obj else ""
+            stats = {}
+        except Exception as e:
+            response_text = f"Error generating response: {e}"
+            stats = {}
+
+        return {
+            "response": response_text,
+            "stats": Stats(**stats) if stats else None,
+            "agents_used": [self.name],
+            "step_number": state.get("step_number", 0) + 1,
+            "validation_attempts": state.get("validation_attempts", 0) + 1,
+        }
+
+    def generate_stream(self, state: AgentState) -> Generator[str, None, dict]:
+        """
+        Generate response with streaming.
+
+        Note: Streaming doesn't support JSON mode well,
+        so we collect full response and parse at the end.
+        """
+        question = state.get("question", "")
+        data = state.get("data", {})
+        intent = state.get("intent", {})
+        intent_type = intent.get("type", "data")
+
+        # Check if rewrite needed
+        validation = state.get("validation", {})
+        previous_response = ""
+        issues = []
+        if validation.get("status") == "rewrite":
+            previous_response = state.get("response", "")
+            issues = validation.get("issues", [])
+
+        # Build prompt
+        prompt = get_analyst_prompt(
+            question=question,
+            data=data,
+            intent_type=intent_type,
+            previous_response=previous_response,
+            issues=issues,
+        )
+
+        full_text = ""
+        total_input = 0
+        total_output = 0
+
+        for chunk in self.client.models.generate_content_stream(
             model=self.model,
             contents=prompt,
             config=types.GenerateContentConfig(
                 temperature=0.3,
                 max_output_tokens=8000,
             )
+        ):
+            if chunk.usage_metadata:
+                total_input = chunk.usage_metadata.prompt_token_count or 0
+                total_output = chunk.usage_metadata.candidates_token_count or 0
+
+            if chunk.text:
+                yield chunk.text
+                full_text += chunk.text
+
+        # Update usage
+        cost = calculate_cost(total_input, total_output, 0)
+        self._last_usage = UsageStats(
+            input_tokens=total_input,
+            output_tokens=total_output,
+            thinking_tokens=0,
+            cost_usd=cost
         )
 
-        # Track usage
+        # Try to parse stats from streamed response
+        stats = self._extract_stats_from_text(full_text)
+
+        return {
+            "response": full_text,
+            "stats": stats,
+            "agents_used": [self.name],
+            "validation_attempts": state.get("validation_attempts", 0) + 1,
+        }
+
+    def _track_usage(self, response) -> None:
+        """Track token usage from response."""
         if response.usage_metadata:
             input_tokens = response.usage_metadata.prompt_token_count or 0
             output_tokens = response.usage_metadata.candidates_token_count or 0
@@ -107,59 +181,19 @@ class Analyst(BaseOutputAgent):
                 cost_usd=cost
             )
 
-        return response.text or ""
-
-    def generate_stream(self, state: AgentState) -> Generator[str, None, str]:
-        """Generate response with streaming."""
-        question = state.get("question", "")
-        data_str = self._format_data(state)
-
-        # Check if this is a rewrite request
-        feedback = state.get("validation", {}).get("feedback", "")
-        if feedback and state.get("validation_attempts", 0) > 0:
-            prompt = get_prompt(
-                "analyst_rewrite",
-                question=question,
-                data=data_str,
-                previous_response=state.get("response", ""),
-                feedback=feedback,
-                issues=state.get("validation", {}).get("issues", [])
-            )
-        else:
-            prompt = get_prompt("analyst", question=question, data=data_str)
-
-        full_text = ""
-        total_input = 0
-        total_output = 0
-        total_thinking = 0
-
-        for chunk in self.client.models.generate_content_stream(
-            model=self.model,
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                temperature=0.3,
-                max_output_tokens=8000,
-            )
-        ):
-            if chunk.usage_metadata:
-                total_input = chunk.usage_metadata.prompt_token_count or 0
-                total_output = chunk.usage_metadata.candidates_token_count or 0
-                total_thinking = getattr(chunk.usage_metadata, 'thoughts_token_count', 0) or 0
-
-            if chunk.text:
-                yield chunk.text
-                full_text += chunk.text
-
-        # Update usage after streaming
-        cost = calculate_cost(total_input, total_output, total_thinking)
-        self._last_usage = UsageStats(
-            input_tokens=total_input,
-            output_tokens=total_output,
-            thinking_tokens=total_thinking,
-            cost_usd=cost
-        )
-
-        return full_text
+    def _extract_stats_from_text(self, text: str) -> Stats | None:
+        """Try to extract stats from text response (for streaming)."""
+        try:
+            if "{" in text and "}" in text:
+                start = text.find("{")
+                end = text.rfind("}") + 1
+                json_str = text[start:end]
+                data = json.loads(json_str)
+                if "stats" in data:
+                    return Stats(**data["stats"])
+        except:
+            pass
+        return None
 
     def get_usage(self) -> UsageStats:
         """Return usage from last generation."""

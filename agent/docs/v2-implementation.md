@@ -425,24 +425,292 @@ agent/
 
 ---
 
-## План реализации
+## План реализации (пошаговый)
 
-### Фаза 1: Инфраструктура
-- [ ] agent/state.py
-- [ ] config.py (CAPABILITIES)
-- [ ] modules/sql.py
+### Шаг 1: Типы и State ✅ → 🔄
+**Файл:** `agent/state.py`
 
-### Фаза 2: Агенты
-- [ ] understander
-- [ ] data_fetcher
-- [ ] analyst
-- [ ] validator
+Добавить новые типы:
+```python
+class Intent(TypedDict):
+    type: Literal["data", "concept", "strategy", "mixed"]
+    symbol: str | None
+    period_start: str | None   # ISO date
+    period_end: str | None     # ISO date
+    analysis_types: list[str]  # ["stats", "extremes", "events"]
+    strategy: StrategyDef | None
+    concept: str | None
+    needs_clarification: bool
+    clarification_question: str | None
 
-### Фаза 3: Граф
-- [ ] graph.py
-- [ ] routing
-- [ ] тесты
+class Stats(TypedDict, total=False):
+    period_start: str
+    period_end: str
+    trading_days: int
+    open_price: float
+    close_price: float
+    change_pct: float
+    max_price: float
+    min_price: float
+    total_volume: int
+    avg_volume: float
+```
 
-### Фаза 4: Бэктест
-- [ ] modules/backtest.py
-- [ ] стратегии
+Обновить `AgentState`:
+- Добавить `intent: Intent | None`
+- Добавить `stats: Stats | None`
+- Добавить `missing_capabilities: list[str]`
+- Убрать `route` (заменяется на `intent.type`)
+
+---
+
+### Шаг 2: CAPABILITIES
+**Файл:** `agent/capabilities.py` (новый)
+
+```python
+CAPABILITIES = {
+    # Данные
+    "ohlcv": True,
+    "stats": True,
+    "extremes": True,
+    "hourly": True,
+
+    # Бэктест
+    "backtest": False,  # пока выключен
+
+    # Индикаторы
+    "rsi": False,
+    "macd": False,
+}
+
+# Описания для LLM
+CAPABILITY_DESCRIPTIONS = {
+    "stats": "Базовая статистика: open, close, high, low, volume за период",
+    "extremes": "Экстремумы: максимумы, минимумы, аномалии",
+    "hourly": "Почасовая разбивка статистики",
+    # ...
+}
+```
+
+---
+
+### Шаг 3: SQL модуль
+**Файл:** `agent/modules/sql.py` (новый)
+
+```python
+TEMPLATES = {
+    "stats": '''
+        SELECT
+            MIN(timestamp)::date as period_start,
+            MAX(timestamp)::date as period_end,
+            COUNT(DISTINCT timestamp::date) as trading_days,
+            (array_agg(open ORDER BY timestamp))[1] as open_price,
+            (array_agg(close ORDER BY timestamp DESC))[1] as close_price,
+            MAX(high) as max_price,
+            MIN(low) as min_price,
+            SUM(volume) as total_volume
+        FROM ohlcv_1min
+        WHERE symbol = $1
+          AND timestamp >= $2 AND timestamp < $3
+    ''',
+
+    "daily": '''
+        SELECT
+            timestamp::date as day,
+            (array_agg(open ORDER BY timestamp))[1] as open,
+            MAX(high) as high,
+            MIN(low) as low,
+            (array_agg(close ORDER BY timestamp DESC))[1] as close,
+            SUM(volume) as volume
+        FROM ohlcv_1min
+        WHERE symbol = $1
+          AND timestamp >= $2 AND timestamp < $3
+        GROUP BY day
+        ORDER BY day
+    ''',
+
+    "hourly": '''...''',
+    "extremes": '''...''',
+}
+
+def fetch(symbol: str, period_start: str, period_end: str, analysis_types: list[str]) -> dict:
+    """Выполняет SQL запросы по шаблонам."""
+    results = {}
+    for analysis in analysis_types:
+        template = TEMPLATES.get(analysis)
+        if template:
+            results[analysis] = execute_query(template, [symbol, period_start, period_end])
+    return results
+```
+
+---
+
+### Шаг 4: Understander (переписать Router)
+**Файл:** `agent/agents/understander.py`
+
+Заменяет текущий `router.py`. Ключевые изменения:
+- Возвращает структурированный `Intent`, не просто строку
+- Использует structured output (JSON mode)
+- Читает CAPABILITIES для понимания что доступно
+- Может запросить уточнение
+
+```python
+class Understander:
+    def __call__(self, state: AgentState) -> dict:
+        intent = self._parse_intent(state["question"])
+        return {"intent": intent}
+
+    def _parse_intent(self, question: str) -> Intent:
+        # LLM с JSON mode возвращает структурированный Intent
+        ...
+```
+
+---
+
+### Шаг 5: DataFetcher (переписать DataAgent)
+**Файл:** `agent/agents/data_fetcher.py`
+
+Заменяет текущий `data_agent.py`. Ключевые изменения:
+- **Без LLM** — чистый Python код
+- Читает `intent` и вызывает соответствующий модуль
+- Роутинг: `intent.type` → модуль
+
+```python
+from agent.modules import sql
+
+class DataFetcher:
+    def __call__(self, state: AgentState) -> dict:
+        intent = state["intent"]
+
+        if intent["type"] == "concept":
+            return {"data": {}}  # Данные не нужны
+
+        data = sql.fetch(
+            symbol=intent["symbol"],
+            period_start=intent["period_start"],
+            period_end=intent["period_end"],
+            analysis_types=intent["analysis_types"]
+        )
+
+        return {"data": data}
+```
+
+---
+
+### Шаг 6: Analyst (обновить)
+**Файл:** `agent/agents/analyst.py`
+
+Обновить текущий. Ключевые изменения:
+- Возвращает `response` + `stats`
+- Stats — структурированные данные для валидации
+- Использует JSON mode для stats
+
+```python
+class Analyst:
+    def __call__(self, state: AgentState) -> dict:
+        result = self._generate(state)
+        return {
+            "response": result["response"],
+            "stats": result["stats"],  # Новое!
+        }
+```
+
+---
+
+### Шаг 7: Validator (переписать)
+**Файл:** `agent/agents/validator.py`
+
+Ключевые изменения:
+- **Без LLM** — чистый Python код
+- Сравнивает `stats` с `data`
+- Возвращает конкретные расхождения
+
+```python
+class Validator:
+    def __call__(self, state: AgentState) -> dict:
+        stats = state.get("stats", {})
+        data = state.get("data", {})
+
+        issues = self._validate(stats, data)
+
+        if issues:
+            return {"validation": {"status": "rewrite", "issues": issues}}
+        return {"validation": {"status": "ok"}}
+
+    def _validate(self, stats: Stats, data: dict) -> list[str]:
+        issues = []
+
+        if "change_pct" in stats and "stats" in data:
+            actual = self._calc_change_pct(data["stats"])
+            if abs(stats["change_pct"] - actual) > 0.5:
+                issues.append(f"change_pct: LLM={stats['change_pct']}, actual={actual}")
+
+        return issues
+```
+
+---
+
+### Шаг 8: Граф (обновить)
+**Файл:** `agent/graph.py`
+
+- Заменить `router` → `understander`
+- Заменить `data_agent` → `data_fetcher`
+- Убрать `educator` (объединяется с analyst)
+- Упростить роутинг (по `intent.type`)
+
+---
+
+### Шаг 9: Тесты
+**Файл:** `tests/test_agents.py`
+
+- Тест Understander: вопрос → правильный Intent
+- Тест DataFetcher: Intent → правильные SQL
+- Тест Validator: stats vs data → issues
+
+---
+
+## Порядок выполнения
+
+| # | Задача | Файлы | Время |
+|---|--------|-------|-------|
+| 1 | Типы Intent, Stats | state.py | 15 мин |
+| 2 | CAPABILITIES | capabilities.py | 10 мин |
+| 3 | SQL модуль | modules/sql.py | 30 мин |
+| 4 | Understander | agents/understander.py | 45 мин |
+| 5 | DataFetcher | agents/data_fetcher.py | 20 мин |
+| 6 | Analyst + Stats | agents/analyst.py | 30 мин |
+| 7 | Validator | agents/validator.py | 20 мин |
+| 8 | Граф | graph.py | 30 мин |
+| 9 | Интеграция | api.py, тесты | 30 мин |
+
+**Итого:** ~4 часа работы
+
+---
+
+## Текущий статус
+
+- [x] Документ написан
+- [x] Шаг 1: Типы Intent, Stats ✅
+- [x] Шаг 2: CAPABILITIES ✅
+- [x] Шаг 3: SQL модуль ✅
+- [x] Шаг 4: Understander ✅
+- [x] Шаг 5: DataFetcher ✅
+- [x] Шаг 6: Analyst + Stats ✅
+- [x] Шаг 7: Validator (no LLM) ✅
+- [x] Шаг 8: Граф ✅
+- [ ] Шаг 9: Тесты
+
+### Дополнительно реализовано:
+- [x] PatternDef для сложных запросов (type="pattern")
+- [x] modules/patterns.py с 5 паттернами (consecutive_days, big_move, reversal, gap, range_breakout)
+- [x] Промпты в отдельных файлах (agent/prompts/understander.py, analyst.py)
+
+---
+
+## Миграция
+
+При переходе на v2:
+1. Старые агенты остаются в `agents/` пока не заменим
+2. Новые создаём параллельно
+3. После тестов — удаляем старые
+4. `educator.py` удаляется (логика в analyst)

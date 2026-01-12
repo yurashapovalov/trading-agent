@@ -38,12 +38,15 @@ import { DatabaseIcon, BrainIcon, CheckCircleIcon, RouteIcon } from "lucide-reac
 
 // Map agent names to icons
 const agentIcons: Record<string, any> = {
+  // v2 agents
+  understander: RouteIcon,
+  data_fetcher: DatabaseIcon,
+  analyst: BrainIcon,
+  validator: CheckCircleIcon,
+  // legacy agents
   router: RouteIcon,
   data_agent: DatabaseIcon,
-  analyst: BrainIcon,
-  analyst_no_data: BrainIcon,
   educator: BrainIcon,
-  validator: CheckCircleIcon,
 }
 
 function AgentStepsDisplay({ steps, isStreaming }: { steps: AgentStep[]; isStreaming?: boolean }) {

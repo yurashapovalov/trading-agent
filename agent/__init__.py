@@ -1,3 +1,3 @@
-"""Trading Analytics Agent"""
+"""Trading Analytics Agent - Multi-Agent v2"""
 
-__version__ = "0.1.0"
+__version__ = "2.0.0"

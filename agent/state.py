@@ -10,6 +10,98 @@ def merge_lists(a: list, b: list) -> list:
     return a + b
 
 
+# =============================================================================
+# Intent Types (from Understander)
+# =============================================================================
+
+class StrategyDef(TypedDict, total=False):
+    """Strategy definition for backtesting."""
+    name: str                     # "consecutive_down", "breakout", etc.
+    params: dict                  # {"down_days": 3, "hold_days": 1}
+
+
+class PatternDef(TypedDict, total=False):
+    """
+    Pattern definition for complex queries.
+
+    LLM parses user question into pattern name + params.
+    Pattern module executes the search efficiently in code.
+    """
+    name: str                     # "consecutive_days", "big_move", "reversal", etc.
+    params: dict                  # Pattern-specific parameters
+
+
+class Intent(TypedDict, total=False):
+    """
+    Structured intent parsed by Understander.
+
+    LLM parses user question into this structure.
+    DataFetcher uses this to decide what data to fetch.
+    """
+    # Type of request
+    type: Literal["data", "concept", "strategy", "pattern"]
+
+    # Data parameters (for type="data")
+    symbol: str | None            # "NQ", "ES", etc.
+    period_start: str | None      # ISO date "2025-01-01"
+    period_end: str | None        # ISO date "2025-01-31"
+    granularity: Literal["period", "daily", "hourly"] | None  # How to group data
+
+    # For pattern requests (type="pattern")
+    pattern: PatternDef | None    # Pattern name + params for complex queries
+
+    # For strategy/backtest requests (type="strategy")
+    strategy: StrategyDef | None
+
+    # For concept requests (type="concept")
+    concept: str | None           # "RSI", "MACD", "support/resistance"
+
+    # Clarification
+    needs_clarification: bool
+    clarification_question: str | None
+    suggestions: list[str]        # Suggested answers for clarification
+
+
+# =============================================================================
+# Stats Types (from Analyst, validated by Validator)
+# =============================================================================
+
+class Stats(TypedDict, total=False):
+    """
+    Structured statistics from Analyst response.
+
+    Analyst fills this with numbers from their response.
+    Validator checks these against actual data.
+    """
+    # Period info
+    period_start: str
+    period_end: str
+    trading_days: int
+
+    # Price stats
+    open_price: float
+    close_price: float
+    change_pct: float             # Percentage change
+    change_points: float          # Absolute change
+    max_price: float
+    min_price: float
+
+    # Volume stats
+    total_volume: int
+    avg_daily_volume: float
+
+    # Backtest stats (if applicable)
+    total_return_pct: float
+    trades_count: int
+    win_rate: float
+    max_drawdown_pct: float
+    sharpe_ratio: float
+
+
+# =============================================================================
+# Existing Types
+# =============================================================================
+
 class SQLResult(TypedDict, total=False):
     """Result of a SQL query execution."""
     query: str
@@ -47,18 +139,22 @@ class AgentState(TypedDict, total=False):
 
     # Input
     question: str
+    chat_history: list[dict]      # Previous messages for context
 
-    # Router output
-    route: Literal["data", "concept", "hypothetical"] | None
+    # Understander output (replaces route)
+    intent: Intent | None
+    clarification_attempts: int
 
-    # Data Agent output
-    sql_queries: list[SQLResult]
-    data: dict  # Aggregated data for Analyst
+    # DataFetcher output
+    sql_queries: list[SQLResult]  # Keep for logging
+    data: dict                    # Aggregated data for Analyst
+    missing_capabilities: list[str]  # Features we don't support yet
 
-    # Output Agent response
+    # Analyst output
     response: str
+    stats: Stats | None           # Structured stats for validation
 
-    # Validation
+    # Validator output
     validation: ValidationResult
     validation_attempts: int
 
@@ -81,7 +177,8 @@ class AgentState(TypedDict, total=False):
 def create_initial_state(
     question: str,
     user_id: str,
-    session_id: str = "default"
+    session_id: str = "default",
+    chat_history: list[dict] | None = None
 ) -> AgentState:
     """Create initial state for a new request."""
     return AgentState(
@@ -89,12 +186,21 @@ def create_initial_state(
         user_id=user_id,
         session_id=session_id,
         question=question,
-        route=None,
+        chat_history=chat_history or [],
+        # Understander
+        intent=None,
+        clarification_attempts=0,
+        # DataFetcher
         sql_queries=[],
         data={},
+        missing_capabilities=[],
+        # Analyst
         response="",
+        stats=None,
+        # Validator
         validation=ValidationResult(status="ok", issues=[], feedback=""),
         validation_attempts=0,
+        # Meta
         was_interrupted=False,
         interrupt_reason="",
         agents_used=[],
@@ -108,3 +214,15 @@ def create_initial_state(
         total_duration_ms=0,
         error=None
     )
+
+
+# =============================================================================
+# Helper functions
+# =============================================================================
+
+def get_intent_type(state: AgentState) -> str:
+    """Get intent type from state, with fallback."""
+    intent = state.get("intent")
+    if intent:
+        return intent.get("type", "data")
+    return "data"

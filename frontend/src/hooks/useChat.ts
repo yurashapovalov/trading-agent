@@ -21,12 +21,15 @@ function tracesToAgentSteps(traces: any[]): AgentStep[] {
   if (!traces || traces.length === 0) return []
 
   const agentMessages: Record<string, string> = {
+    // v2 agents
+    understander: "Understanding question...",
+    data_fetcher: "Fetching data...",
+    analyst: "Analyzing data...",
+    validator: "Validating response...",
+    // legacy (for old logs)
     router: "Determining question type...",
     data_agent: "Fetching data...",
-    analyst: "Analyzing data...",
-    analyst_no_data: "Analyzing scenario...",
     educator: "Preparing explanation...",
-    validator: "Validating response...",
   }
 
   return traces.map((trace) => {
@@ -183,8 +186,9 @@ export function useChat() {
                   stepsCollected.push(newStep)
                   setCurrentSteps((prev) => [...prev, newStep])
                 } else if (event.type === "step_end") {
-                  if (event.agent === "router") {
-                    route = event.result?.route as string | undefined
+                  // v2: understander returns type as route
+                  if (event.agent === "understander" || event.agent === "router") {
+                    route = (event.result?.type || event.result?.route) as string | undefined
                   }
                   const stepIndex = stepsCollected.findIndex(
                     (s) => s.agent === event.agent && s.status === "running"

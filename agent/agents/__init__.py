@@ -1,9 +1,8 @@
-"""Concrete agent implementations."""
+"""Agent implementations for v2 architecture."""
 
-from agent.agents.router import Router
-from agent.agents.data_agent import DataAgent
+from agent.agents.understander import Understander
+from agent.agents.data_fetcher import DataFetcher
 from agent.agents.analyst import Analyst
-from agent.agents.educator import Educator
 from agent.agents.validator import Validator
 
-__all__ = ["Router", "DataAgent", "Analyst", "Educator", "Validator"]
+__all__ = ["Understander", "DataFetcher", "Analyst", "Validator"]

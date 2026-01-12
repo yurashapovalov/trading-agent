@@ -1,214 +1,202 @@
-"""Validator agent - checks responses against data for hallucinations."""
+"""
+Validator agent - checks Stats against actual data.
 
-import json
-import re
-from google import genai
-from google.genai import types
+No LLM here. Pure Python validation.
+If stats don't match data, returns "rewrite" status.
+"""
 
-import config
-from agent.state import AgentState, ValidationResult, UsageStats
-from agent.prompts import get_prompt
-from agent.pricing import calculate_cost
+from agent.state import AgentState, Stats, ValidationResult
 
 
-def extract_json(text: str) -> dict | None:
-    """Extract JSON from text that may contain markdown code blocks or other text."""
-    text = text.strip()
-
-    # Try to find JSON in code blocks first
-    code_block_match = re.search(r'```(?:json)?\s*\n?(.*?)\n?```', text, re.DOTALL)
-    if code_block_match:
-        try:
-            return json.loads(code_block_match.group(1).strip())
-        except json.JSONDecodeError:
-            pass
-
-    # Try to find raw JSON object
-    json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', text, re.DOTALL)
-    if json_match:
-        try:
-            return json.loads(json_match.group(0))
-        except json.JSONDecodeError:
-            pass
-
-    # Last resort: try parsing the whole text
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        return None
+# Tolerance for floating point comparisons
+TOLERANCE_PCT = 0.5  # 0.5% tolerance for percentages
+TOLERANCE_PRICE = 0.01  # $0.01 tolerance for prices
 
 
 class Validator:
     """
-    Validates responses against the source data.
+    Validates Analyst's Stats against actual data.
 
-    This agent:
-    1. Compares the response to the actual data
-    2. Checks for hallucinated facts, dates, percentages
-    3. Returns validation status and feedback
-
-    NOT based on BaseOutputAgent because it has special return type.
+    No LLM - just code comparing numbers.
+    Returns status: "ok" or "rewrite" with issues list.
     """
 
     name = "validator"
-    agent_type = "validator"
-
-    # Maximum validation attempts before forcing approval
+    agent_type = "validation"
     max_attempts = 3
 
-    def __init__(self):
-        self.client = genai.Client(api_key=config.GOOGLE_API_KEY)
-        # Use same model as analyst for consistent validation
-        self.model = config.GEMINI_MODEL
-        self._last_usage = UsageStats(
-            input_tokens=0,
-            output_tokens=0,
-            thinking_tokens=0,
-            cost_usd=0.0
-        )
-
-    def _format_data(self, state: AgentState) -> str:
-        """Format data for validation prompt."""
-        sql_queries = state.get("sql_queries", [])
-
-        parts = []
-        for query in sql_queries:
-            if query.get("rows"):
-                parts.append(json.dumps(query["rows"][:50], indent=2, default=str))
-
-        return "\n".join(parts) if parts else "{}"
-
-    def validate(self, state: AgentState) -> ValidationResult:
-        """
-        Validate the response against the data.
-
-        Returns:
-            ValidationResult with status, issues, and feedback
-        """
-        response = state.get("response", "")
-        data_str = self._format_data(state)
+    def __call__(self, state: AgentState) -> dict:
+        """Validate stats against data."""
+        stats = state.get("stats") or {}
+        data = state.get("data", {})
+        intent = state.get("intent", {})
+        intent_type = intent.get("type", "data")
         attempts = state.get("validation_attempts", 0)
 
-        # If max attempts reached, force approval
+        # Max attempts reached - auto approve
         if attempts >= self.max_attempts:
-            return ValidationResult(
-                status="ok",
-                issues=["Max validation attempts reached, auto-approved"],
-                feedback=""
-            )
+            return {
+                "validation": ValidationResult(
+                    status="ok",
+                    issues=["Max validation attempts reached"],
+                    feedback=""
+                ),
+                "agents_used": [self.name],
+            }
 
-        # For concept/hypothetical routes, skip detailed validation
-        route = state.get("route")
-        if route in ["concept", "hypothetical"]:
-            return ValidationResult(
+        # No stats or concept type - nothing to validate
+        if not stats or intent_type == "concept":
+            return {
+                "validation": ValidationResult(
+                    status="ok",
+                    issues=[],
+                    feedback=""
+                ),
+                "agents_used": [self.name],
+            }
+
+        # Validate based on data type
+        if intent_type == "pattern":
+            issues = self._validate_pattern(stats, data)
+        else:
+            issues = self._validate_data(stats, data)
+
+        # Build result
+        if issues:
+            return {
+                "validation": ValidationResult(
+                    status="rewrite",
+                    issues=issues,
+                    feedback=self._format_feedback(issues)
+                ),
+                "agents_used": [self.name],
+            }
+
+        return {
+            "validation": ValidationResult(
                 status="ok",
                 issues=[],
                 feedback=""
-            )
+            ),
+            "agents_used": [self.name],
+        }
 
-        prompt = get_prompt("validator", data=data_str, response=response)
+    def _validate_data(self, stats: dict, data: dict) -> list[str]:
+        """Validate stats for type=data queries."""
+        issues = []
+
+        rows = data.get("rows", [])
+        if not rows:
+            return issues
+
+        # Check if already aggregated (period granularity has open_price)
+        # vs daily/hourly format (has open, close, high, low)
+        first_row = rows[0]
+        is_period_format = "open_price" in first_row
+
+        if is_period_format:
+            # Already aggregated from SQL period query
+            actual = first_row
+        else:
+            # Daily/hourly rows - need to aggregate
+            actual = self._aggregate_rows(rows)
+
+        issues.extend(self._compare_row(stats, actual))
+        return issues
+
+    def _validate_pattern(self, stats: dict, data: dict) -> list[str]:
+        """Validate stats for type=pattern queries."""
+        issues = []
+
+        # Check matches_count if mentioned
+        if "matches_count" in stats:
+            actual = data.get("matches_count", 0)
+            if stats["matches_count"] != actual:
+                issues.append(
+                    f"matches_count: reported {stats['matches_count']}, actual {actual}"
+                )
+
+        return issues
+
+    def _compare_row(self, stats: dict, actual: dict) -> list[str]:
+        """Compare stats against actual data row."""
+        issues = []
+
+        # Map of stat fields to data fields with tolerances
+        field_map = {
+            "change_pct": ("change_pct", TOLERANCE_PCT),
+            "trading_days": ("trading_days", 0),
+            "open_price": ("open_price", TOLERANCE_PRICE),
+            "close_price": ("close_price", TOLERANCE_PRICE),
+            "max_price": ("max_price", TOLERANCE_PRICE),
+            "min_price": ("min_price", TOLERANCE_PRICE),
+            "total_volume": ("total_volume", 0),
+            "change_points": ("change_points", TOLERANCE_PRICE),
+        }
+
+        for stat_field, (data_field, tolerance) in field_map.items():
+            if stat_field not in stats:
+                continue
+
+            stat_value = stats[stat_field]
+            actual_value = actual.get(data_field)
+
+            if actual_value is None:
+                continue
+
+            if not self._values_match(stat_value, actual_value, tolerance):
+                issues.append(
+                    f"{stat_field}: reported {stat_value}, actual {actual_value}"
+                )
+
+        return issues
+
+    def _aggregate_rows(self, rows: list[dict]) -> dict:
+        """Aggregate daily/hourly rows into period stats."""
+        if not rows:
+            return {}
+
+        sorted_rows = sorted(rows, key=lambda r: r.get("date", ""))
+
+        return {
+            "trading_days": len(rows),
+            "open_price": sorted_rows[0].get("open"),
+            "close_price": sorted_rows[-1].get("close"),
+            "max_price": max(r.get("high", 0) for r in rows),
+            "min_price": min(r.get("low", float("inf")) for r in rows),
+            "total_volume": sum(r.get("volume", 0) for r in rows),
+            "change_pct": self._calc_change_pct(sorted_rows),
+        }
+
+    def _calc_change_pct(self, rows: list[dict]) -> float | None:
+        """Calculate percentage change from first to last row."""
+        if not rows:
+            return None
+
+        first_open = rows[0].get("open")
+        last_close = rows[-1].get("close")
+
+        if not first_open or not last_close:
+            return None
+
+        return round((last_close - first_open) / first_open * 100, 2)
+
+    def _values_match(self, a, b, tolerance: float) -> bool:
+        """Check if two values match within tolerance."""
+        if a is None or b is None:
+            return True
 
         try:
-            result = self.client.models.generate_content(
-                model=self.model,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    temperature=0,
-                    max_output_tokens=500,
-                )
-            )
+            a = float(a)
+            b = float(b)
+        except (TypeError, ValueError):
+            return str(a) == str(b)
 
-            # Track usage
-            if result.usage_metadata:
-                input_tokens = result.usage_metadata.prompt_token_count or 0
-                output_tokens = result.usage_metadata.candidates_token_count or 0
-                thinking_tokens = getattr(result.usage_metadata, 'thoughts_token_count', 0) or 0
-                cost = calculate_cost(input_tokens, output_tokens, thinking_tokens)
+        if tolerance == 0:
+            return a == b
 
-                self._last_usage = UsageStats(
-                    input_tokens=input_tokens,
-                    output_tokens=output_tokens,
-                    thinking_tokens=thinking_tokens,
-                    cost_usd=cost
-                )
+        return abs(a - b) <= tolerance
 
-            # Parse JSON response using robust extraction
-            validation = extract_json(result.text)
-
-            if validation is None:
-                # If can't parse, assume ok
-                return ValidationResult(
-                    status="ok",
-                    issues=["Validation response not parseable"],
-                    feedback=""
-                )
-
-            return ValidationResult(
-                status=validation.get("status", "ok"),
-                issues=validation.get("issues", []),
-                feedback=validation.get("feedback", "")
-            )
-        except Exception as e:
-            # On error, don't block - approve with warning
-            return ValidationResult(
-                status="ok",
-                issues=[f"Validation error: {str(e)}"],
-                feedback=""
-            )
-
-    def __call__(self, state: AgentState) -> dict:
-        """
-        Process state and return updates.
-
-        This is called by LangGraph when the node executes.
-        """
-        import time
-        start_time = time.time()
-
-        validation = self.validate(state)
-        duration_ms = int((time.time() - start_time) * 1000)
-
-        # Merge usage stats
-        current_usage = state.get("usage", {})
-        merged_usage = UsageStats(
-            input_tokens=current_usage.get("input_tokens", 0) + self._last_usage.get("input_tokens", 0),
-            output_tokens=current_usage.get("output_tokens", 0) + self._last_usage.get("output_tokens", 0),
-            thinking_tokens=current_usage.get("thinking_tokens", 0) + self._last_usage.get("thinking_tokens", 0),
-            cost_usd=current_usage.get("cost_usd", 0.0) + self._last_usage.get("cost_usd", 0.0),
-        )
-
-        return {
-            "validation": validation,
-            "validation_attempts": state.get("validation_attempts", 0) + 1,
-            "usage": merged_usage,
-            "agents_used": [self.name],
-            "step_number": state.get("step_number", 0) + 1,
-        }
-
-    def get_usage(self) -> UsageStats:
-        """Return usage from last validation."""
-        return self._last_usage
-
-    def get_trace_data(
-        self,
-        state: AgentState,
-        validation: ValidationResult,
-        duration_ms: int
-    ) -> dict:
-        """Return data for request_traces logging."""
-        return {
-            "agent_name": self.name,
-            "agent_type": self.agent_type,
-            "input_data": {
-                "response_length": len(state.get("response", "")),
-                "data_rows": sum(q.get("row_count", 0) for q in state.get("sql_queries", []))
-            },
-            "output_data": {"validation": dict(validation)},
-            "validation_status": validation.get("status"),
-            "validation_issues": validation.get("issues"),
-            "validation_feedback": validation.get("feedback"),
-            "input_tokens": self._last_usage.get("input_tokens", 0),
-            "output_tokens": self._last_usage.get("output_tokens", 0),
-            "cost_usd": self._last_usage.get("cost_usd", 0.0),
-            "duration_ms": duration_ms,
-        }
+    def _format_feedback(self, issues: list[str]) -> str:
+        """Format issues into feedback string."""
+        return "Validation errors:\n" + "\n".join(f"- {issue}" for issue in issues)

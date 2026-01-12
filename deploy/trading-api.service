@@ -3,9 +3,9 @@ Description=Trading Agent API
 After=network.target
 
 [Service]
-WorkingDirectory=/root/trading-agent/trading-agent
-EnvironmentFile=/root/trading-agent/trading-agent/.env
-ExecStart=/root/trading-agent/trading-agent/.venv/bin/uvicorn api:app --host 127.0.0.1 --port 8000
+WorkingDirectory=/root/stock
+EnvironmentFile=/root/stock/.env
+ExecStart=/root/stock/venv/bin/uvicorn api:app --host 127.0.0.1 --port 8000
 Restart=always
 
 [Install]

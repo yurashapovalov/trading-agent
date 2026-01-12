@@ -1,206 +1,83 @@
-# Deploy Trading Agent to VPS
+# Deployment
 
-## 1. Buy VPS
+## Infrastructure
 
-Recommended:
-- **Hetzner** (cheapest): https://hetzner.cloud → CX22 (2 vCPU, 4GB RAM) — €4/month
-- **DigitalOcean**: https://digitalocean.com → Basic Droplet — $6/month
+- **Server**: Hetzner VPS (37.27.204.135:2222)
+- **Path**: `/root/stock`
+- **Service**: `trading-api` (systemd)
+- **Auto-deploy**: GitHub Actions on push to `main`
 
-Choose **Ubuntu 22.04** or **24.04**.
+## Auto Deployment
 
----
+Push to `main` branch triggers automatic deployment:
 
-## 2. Connect to Server
-
-```bash
-ssh root@YOUR_SERVER_IP
+```yaml
+# .github/workflows/deploy.yml
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'agent/**'
+      - 'data/**'
+      - 'api.py'
+      - 'config.py'
 ```
 
----
+GitHub Actions will:
+1. SSH to server
+2. `git pull origin main`
+3. `pip install -r requirements.txt`
+4. `systemctl restart trading-api`
 
-## 3. Install Dependencies
-
-```bash
-# Update system
-apt update && apt upgrade -y
-
-# Install Python
-apt install -y python3.12 python3.12-venv python3-pip git
-
-# Create app user (optional but recommended)
-useradd -m -s /bin/bash trading
-su - trading
-```
-
----
-
-## 4. Clone and Setup
+## Manual Deployment
 
 ```bash
-# Clone your repo
-git clone https://github.com/YOUR_USERNAME/stock.git
-cd stock
-
-# Create virtual environment
-python3.12 -m venv .venv
-source .venv/bin/activate
-
-# Install dependencies
+ssh -p 2222 root@37.27.204.135
+cd /root/stock
+git pull
+source venv/bin/activate
 pip install -r requirements.txt
+systemctl restart trading-api
 ```
 
----
-
-## 5. Configure
+## Check Status
 
 ```bash
-# Create .env file with your Anthropic API key
-echo "ANTHROPIC_API_KEY=sk-ant-xxxxx" > .env
+# Service status
+systemctl status trading-api
+
+# Logs
+journalctl -u trading-api -f
+
+# Test API
+curl http://localhost:8000/
 ```
 
----
+## Environment Variables
 
-## 6. Load Data
+Server `.env` file (`/root/stock/.env`):
 
 ```bash
-# Initialize database
-python -m agent.main init
-
-# Load your CSV data
-python -m agent.main load data/CL_train.csv --symbol CL
-
-# Verify
-python -m agent.main info
+GOOGLE_API_KEY=...
+GEMINI_MODEL=gemini-2.0-flash
+SUPABASE_URL=...
+SUPABASE_SERVICE_KEY=...
+DATABASE_PATH=data/trading.duckdb
 ```
 
----
+## Frontend
 
-## 7. Test Locally
-
-```bash
-# Run server
-python api.py
-
-# In another terminal, test:
-curl -X POST "http://localhost:8000/chat" \
-  -H "Content-Type: application/json" \
-  -d '{"message": "найди SHORT входы на CL"}'
-```
-
----
-
-## 8. Run in Production
-
-### Option A: Simple (systemd service)
-
-```bash
-# Create service file
-sudo tee /etc/systemd/system/trading-agent.service << EOF
-[Unit]
-Description=Trading Agent API
-After=network.target
-
-[Service]
-User=trading
-WorkingDirectory=/home/trading/stock
-Environment="PATH=/home/trading/stock/.venv/bin"
-ExecStart=/home/trading/stock/.venv/bin/uvicorn api:app --host 0.0.0.0 --port 8000
-Restart=always
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-# Enable and start
-sudo systemctl enable trading-agent
-sudo systemctl start trading-agent
-
-# Check status
-sudo systemctl status trading-agent
-```
-
-### Option B: With Nginx (recommended for production)
-
-```bash
-# Install nginx
-sudo apt install -y nginx
-
-# Configure
-sudo tee /etc/nginx/sites-available/trading << EOF
-server {
-    listen 80;
-    server_name YOUR_DOMAIN_OR_IP;
-
-    location / {
-        proxy_pass http://127.0.0.1:8000;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-    }
-}
-EOF
-
-sudo ln -s /etc/nginx/sites-available/trading /etc/nginx/sites-enabled/
-sudo nginx -t
-sudo systemctl reload nginx
-```
-
----
-
-## 9. API Endpoints
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/` | Health check |
-| POST | `/chat` | Send message to agent |
-| POST | `/reset` | Reset conversation |
-| GET | `/data` | Get loaded data info |
-
-### Example Request
-
-```bash
-curl -X POST "http://YOUR_SERVER:8000/chat" \
-  -H "Content-Type: application/json" \
-  -d '{"message": "протестируй вход в 09:00 SHORT со стопом 20 тиков"}'
-```
-
-### Example Response
-
-```json
-{
-  "response": "Результат бэктеста:\n- Всего сделок: 10\n- Winrate: 80%\n...",
-  "session_id": "default"
-}
-```
-
----
-
-## 10. Add HTTPS (optional)
-
-```bash
-# Install certbot
-sudo apt install -y certbot python3-certbot-nginx
-
-# Get certificate (replace with your domain)
-sudo certbot --nginx -d yourdomain.com
-
-# Auto-renewal is set up automatically
-```
-
----
+Frontend is on Vercel, auto-deploys from `frontend/` folder.
 
 ## Troubleshooting
 
-### Check logs
 ```bash
-sudo journalctl -u trading-agent -f
-```
+# Restart service
+systemctl restart trading-api
 
-### Restart service
-```bash
-sudo systemctl restart trading-agent
-```
+# Check Python errors
+journalctl -u trading-api -n 100
 
-### Check if port is open
-```bash
-sudo ufw allow 8000  # or 80 for nginx
+# Test locally
+python api.py
 ```
