@@ -93,7 +93,7 @@ export default function Chat() {
   }
 
   return (
-    <div className="relative flex h-dvh w-full flex-col divide-y overflow-hidden">
+    <div className="relative flex h-dvh w-full flex-col overflow-hidden">
       {/* Header */}
       <header className="flex items-center justify-between px-4 py-2">
         <h1 className="text-sm font-medium">Trading Analytics</h1>
@@ -112,7 +112,7 @@ export default function Chat() {
       <Conversation>
         <ConversationContent className="max-w-2xl mx-auto">
           {messages.map((message, index) => (
-            <Message from={message.role} key={index}>
+            <Message from={message.role} key={index} className="max-w-full">
               <div>
                 {/* Agent steps before assistant message */}
                 {message.role === "assistant" && message.agent_steps && message.agent_steps.length > 0 && (
@@ -138,7 +138,7 @@ export default function Chat() {
 
           {/* Streaming state */}
           {currentSteps.length > 0 && (
-            <Message from="assistant">
+            <Message from="assistant" className="max-w-full">
               <div>
                 <AgentStepsDisplay steps={currentSteps} isStreaming />
               </div>
@@ -146,7 +146,7 @@ export default function Chat() {
           )}
 
           {streamingText && (
-            <Message from="assistant">
+            <Message from="assistant" className="max-w-full">
               <MessageContent>
                 <MessageResponse>{streamingText}</MessageResponse>
               </MessageContent>
@@ -164,12 +164,13 @@ export default function Chat() {
       </Conversation>
 
       {/* Bottom: Suggestions + Input */}
-      <div className="grid shrink-0 gap-4 pt-4">
+      <div className="mx-auto w-full max-w-2xl shrink-0 space-y-4 px-4 pb-4 pt-4">
         {!isLoading && suggestions.length > 0 && (
-          <Suggestions className="px-4">
+          <Suggestions>
             {suggestions.map((suggestion) => (
               <Suggestion
                 key={suggestion}
+                variant="ghost"
                 onClick={() => handleSuggestionClick(suggestion)}
                 suggestion={suggestion}
               />
@@ -177,8 +178,7 @@ export default function Chat() {
           </Suggestions>
         )}
 
-        <div className="w-full px-4 pb-4">
-          <PromptInput onSubmit={handleSubmit}>
+        <PromptInput onSubmit={handleSubmit}>
             <PromptInputBody>
               <PromptInputTextarea
                 value={text}
@@ -201,7 +201,6 @@ export default function Chat() {
               )}
             </PromptInputFooter>
           </PromptInput>
-        </div>
       </div>
     </div>
   )
