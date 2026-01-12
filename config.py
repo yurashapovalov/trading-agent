@@ -27,6 +27,10 @@ CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-haiku-4-5-20251001")
 # Supabase
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
+SUPABASE_JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET")  # From Supabase Dashboard > Settings > API
+
+# CORS - allowed origins for frontend
+ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000").split(",")
 
 # Chat settings
 CHAT_HISTORY_LIMIT = 10  # Number of recent messages to include as context

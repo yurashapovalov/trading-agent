@@ -25,10 +25,10 @@ app = FastAPI(
     version="2.0.0"
 )
 
-# Allow frontend to connect from any origin (adjust for production)
+# CORS configuration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production: ["https://yourdomain.com"]
+    allow_origins=config.ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -43,9 +43,22 @@ def get_user_id(authorization: Optional[str] = Header(None)) -> Optional[str]:
 
     token = authorization.split(" ")[1]
     try:
-        payload = jwt.decode(token, options={"verify_signature": False})
+        # Verify JWT signature with Supabase secret
+        if config.SUPABASE_JWT_SECRET:
+            payload = jwt.decode(
+                token,
+                config.SUPABASE_JWT_SECRET,
+                algorithms=["HS256"],
+                audience="authenticated"
+            )
+        else:
+            # Fallback for local development without JWT secret (NOT for production!)
+            print("WARNING: JWT signature verification disabled - set SUPABASE_JWT_SECRET!")
+            payload = jwt.decode(token, options={"verify_signature": False})
         return payload.get("sub")
-    except jwt.DecodeError:
+    except jwt.ExpiredSignatureError:
+        return None
+    except jwt.InvalidTokenError:
         return None
 
 
