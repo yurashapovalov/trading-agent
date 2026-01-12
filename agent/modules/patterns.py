@@ -8,9 +8,29 @@ No LLM here. Pure Python + SQL.
 """
 
 import duckdb
+import numpy as np
 from typing import Any, Callable
 
 import config
+
+
+def _convert_numpy_types(data: list[dict]) -> list[dict]:
+    """Convert numpy types to Python native types for JSON serialization."""
+    def convert_value(v):
+        if isinstance(v, (np.integer, np.int64, np.int32)):
+            return int(v)
+        elif isinstance(v, (np.floating, np.float64, np.float32)):
+            return float(v)
+        elif isinstance(v, np.ndarray):
+            return v.tolist()
+        elif isinstance(v, np.bool_):
+            return bool(v)
+        return v
+
+    return [
+        {k: convert_value(v) for k, v in row.items()}
+        for row in data
+    ]
 
 
 # =============================================================================
@@ -425,6 +445,9 @@ def search(
 
             # Run pattern search
             matches = pattern_fn(df, **params)
+
+            # Convert numpy types to Python native types
+            matches = _convert_numpy_types(matches)
 
             return {
                 "pattern": pattern_name,
