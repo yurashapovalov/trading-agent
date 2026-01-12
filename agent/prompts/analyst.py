@@ -69,6 +69,32 @@ Consider the chat history for context when answering follow-up questions.
 </task>
 """
 
+USER_PROMPT_SEARCH = """<chat_history>
+{chat_history}
+</chat_history>
+
+<data>
+{data}
+</data>
+
+<search_condition>
+{search_condition}
+</search_condition>
+
+<task>
+Question: {question}
+
+IMPORTANT: First, filter the data to find rows matching the search_condition.
+Then analyze the matching rows and respond with JSON containing "response" and "stats".
+
+Steps:
+1. Go through each row in the data
+2. Check if it matches the search_condition
+3. List ALL matching rows in your response
+4. Include total count of matches
+</task>
+"""
+
 USER_PROMPT_PATTERN = """<pattern_results>
 Pattern: {pattern_name}
 Period: {period_start} to {period_end}
@@ -121,6 +147,7 @@ def get_analyst_prompt(
     previous_response: str = "",
     issues: list = None,
     chat_history: list = None,
+    search_condition: str = None,
 ) -> str:
     """
     Build complete prompt for Analyst.
@@ -128,10 +155,11 @@ def get_analyst_prompt(
     Args:
         question: User's question
         data: Data from DataFetcher
-        intent_type: "data", "pattern", or "concept"
+        intent_type: "data" or "concept"
         previous_response: Previous response if rewriting
         issues: Validation issues if rewriting
         chat_history: Previous messages for context
+        search_condition: Natural language condition for filtering data
 
     Returns:
         Complete prompt string
@@ -161,19 +189,12 @@ def get_analyst_prompt(
             question=question,
         )
 
-    # Pattern results
-    if intent_type == "pattern":
-        matches_str = ""
-        if data.get("matches"):
-            for m in data["matches"][:20]:  # Limit to 20 matches
-                matches_str += f"- {json.dumps(m, default=str)}\n"
-
-        return SYSTEM_PROMPT + "\n" + USER_PROMPT_PATTERN.format(
-            pattern_name=data.get("pattern", "unknown"),
-            period_start=data.get("period_start", ""),
-            period_end=data.get("period_end", ""),
-            matches_count=data.get("matches_count", 0),
-            matches=matches_str or "No matches found",
+    # Search query - Analyst filters the data
+    if search_condition:
+        return SYSTEM_PROMPT + "\n" + USER_PROMPT_SEARCH.format(
+            chat_history=history_str,
+            data=json.dumps(data, indent=2, default=str),
+            search_condition=search_condition,
             question=question,
         )
 

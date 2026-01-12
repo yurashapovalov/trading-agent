@@ -9,7 +9,7 @@ import time
 from typing import Any
 
 from agent.state import AgentState, Intent
-from agent.modules import sql, patterns
+from agent.modules import sql
 
 
 class DataFetcher:
@@ -18,9 +18,7 @@ class DataFetcher:
 
     Routes to appropriate module:
     - type="data" → sql.fetch()
-    - type="pattern" → patterns.search()
     - type="concept" → no data needed
-    - type="strategy" → backtest module (future)
     """
 
     name = "data_fetcher"
@@ -43,10 +41,6 @@ class DataFetcher:
         # Route to appropriate handler
         if intent_type == "concept":
             data = self._handle_concept(intent)
-        elif intent_type == "pattern":
-            data = self._handle_pattern(intent)
-        elif intent_type == "strategy":
-            data = self._handle_strategy(intent)
         else:  # "data" or default
             data = self._handle_data(intent)
 
@@ -76,43 +70,10 @@ class DataFetcher:
             granularity=granularity,
         )
 
-    def _handle_pattern(self, intent: Intent) -> dict[str, Any]:
-        """Handle type=pattern: search for patterns."""
-        symbol = intent.get("symbol", "NQ")
-        period_start = intent.get("period_start")
-        period_end = intent.get("period_end")
-        pattern = intent.get("pattern", {})
-
-        if not period_start or not period_end:
-            return {"error": "Missing period_start or period_end"}
-
-        pattern_name = pattern.get("name", "")
-        pattern_params = pattern.get("params", {})
-
-        if not pattern_name:
-            return {"error": "Missing pattern name"}
-
-        return patterns.search(
-            symbol=symbol,
-            period_start=period_start,
-            period_end=period_end,
-            pattern_name=pattern_name,
-            params=pattern_params,
-        )
-
     def _handle_concept(self, intent: Intent) -> dict[str, Any]:
         """Handle type=concept: no data needed."""
         return {
             "type": "concept",
             "concept": intent.get("concept", ""),
             "message": "No data needed for concept explanation",
-        }
-
-    def _handle_strategy(self, intent: Intent) -> dict[str, Any]:
-        """Handle type=strategy: backtest (future)."""
-        # TODO: Implement when backtest module is ready
-        return {
-            "type": "strategy",
-            "error": "Backtesting not implemented yet",
-            "missing_capabilities": ["backtest"],
         }

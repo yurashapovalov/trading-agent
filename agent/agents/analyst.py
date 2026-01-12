@@ -62,6 +62,7 @@ class Analyst:
             previous_response=previous_response,
             issues=issues,
             chat_history=chat_history,
+            search_condition=intent.get("search_condition"),
         )
 
         # Call LLM with JSON mode
@@ -128,6 +129,7 @@ class Analyst:
             intent_type=intent_type,
             previous_response=previous_response,
             issues=issues,
+            search_condition=intent.get("search_condition"),
         )
 
         full_text = ""

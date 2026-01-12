@@ -34,17 +34,6 @@ class StrategyDef(TypedDict, total=False):
     params: dict                  # {"down_days": 3, "hold_days": 1}
 
 
-class PatternDef(TypedDict, total=False):
-    """
-    Pattern definition for complex queries.
-
-    LLM parses user question into pattern name + params.
-    Pattern module executes the search efficiently in code.
-    """
-    name: str                     # "consecutive_days", "big_move", "reversal", etc.
-    params: dict                  # Pattern-specific parameters
-
-
 class Intent(TypedDict, total=False):
     """
     Structured intent parsed by Understander.
@@ -53,7 +42,7 @@ class Intent(TypedDict, total=False):
     DataFetcher uses this to decide what data to fetch.
     """
     # Type of request
-    type: Literal["data", "concept", "strategy", "pattern", "chitchat", "out_of_scope"]
+    type: Literal["data", "concept", "chitchat", "out_of_scope"]
 
     # Data parameters (for type="data")
     symbol: str | None            # "NQ", "ES", etc.
@@ -61,10 +50,10 @@ class Intent(TypedDict, total=False):
     period_end: str | None        # ISO date "2025-01-31"
     granularity: Literal["period", "daily", "hourly", "weekday", "monthly"] | None  # How to group data
 
-    # For pattern requests (type="pattern")
-    pattern: PatternDef | None    # Pattern name + params for complex queries
+    # For search queries (type="data" with search)
+    search_condition: str | None  # Natural language condition for Analyst to filter
 
-    # For strategy/backtest requests (type="strategy")
+    # For strategy/backtest requests (future)
     strategy: StrategyDef | None
 
     # For concept requests (type="concept")

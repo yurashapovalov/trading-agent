@@ -11,7 +11,7 @@ from google import genai
 from google.genai import types
 
 import config
-from agent.state import AgentState, Intent, PatternDef, UsageStats
+from agent.state import AgentState, Intent, UsageStats
 from agent.pricing import calculate_cost, GEMINI_2_5_FLASH_LITE
 from agent.capabilities import (
     get_capabilities_prompt,
@@ -109,7 +109,7 @@ class Understander:
                         "properties": {
                             "type": {
                                 "type": "string",
-                                "enum": ["data", "pattern", "concept", "strategy", "chitchat", "out_of_scope"]
+                                "enum": ["data", "concept", "chitchat", "out_of_scope"]
                             },
                             "symbol": {"type": "string"},
                             "period_start": {"type": "string"},
@@ -118,8 +118,7 @@ class Understander:
                                 "type": "string",
                                 "enum": ["period", "daily", "hourly", "weekday", "monthly"]
                             },
-                            "pattern_name": {"type": "string"},
-                            "pattern_params": {"type": "string"},  # JSON string
+                            "search_condition": {"type": "string"},  # Natural language condition for filtering
                             "concept": {"type": "string"},
                             "response_text": {"type": "string"},  # For chitchat/out_of_scope
                             "needs_clarification": {"type": "boolean"},
@@ -168,35 +167,20 @@ class Understander:
         }
 
         # Add type-specific fields
-        if intent_type in ("data", "pattern"):
+        if intent_type == "data":
             intent["period_start"] = data.get("period_start")
             intent["period_end"] = data.get("period_end")
+            intent["granularity"] = data.get("granularity") or DEFAULT_GRANULARITY
+            intent["search_condition"] = data.get("search_condition")
 
             # Default period if not specified
             if not intent["period_start"] or not intent["period_end"]:
-                if intent_type == "pattern":
-                    # Patterns search ALL available data by default
+                if intent.get("search_condition"):
+                    # Search queries use FULL data range by default
                     intent["period_start"], intent["period_end"] = self._full_data_range()
                 else:
-                    # Data queries use last month by default
+                    # Regular data queries use last month by default
                     intent["period_start"], intent["period_end"] = self._default_period()
-
-        if intent_type == "data":
-            intent["granularity"] = data.get("granularity") or DEFAULT_GRANULARITY
-
-        if intent_type == "pattern":
-            # Parse pattern_params from JSON string
-            pattern_params = {}
-            if data.get("pattern_params"):
-                try:
-                    pattern_params = json.loads(data["pattern_params"])
-                except json.JSONDecodeError:
-                    pass
-
-            intent["pattern"] = PatternDef(
-                name=data.get("pattern_name", ""),
-                params=pattern_params
-            )
 
         if intent_type == "concept":
             intent["concept"] = data.get("concept", "")
