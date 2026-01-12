@@ -11,7 +11,10 @@
 ## Principle
 
 LLM решает ЧТО нужно сделать (какие данные, за какой период, есть ли условие поиска).
-Код потом решает КАК это сделать.
+Следующие агенты решают КАК это сделать:
+- SQL Agent генерирует SQL запрос
+- DataFetcher выполняет запрос
+- Analyst анализирует результат
 
 ## Input
 
@@ -71,8 +74,11 @@ Intent(
 ```
 
 - `search_condition` - описание условия на natural language
-- Analyst получит все дневные данные и отфильтрует по условию
-- Никаких хардкоженных паттернов - любое условие работает
+- SQL Agent конвертирует это в SQL запрос
+- DataFetcher выполняет SQL и возвращает отфильтрованные данные
+- Analyst анализирует результат
+
+**Важно:** Understander только описывает ЧТО искать. SQL Agent решает КАК это выразить в SQL.
 
 ## Period Defaults
 
@@ -117,9 +123,19 @@ Q: "Как NQ вел себя в январе?"
 
 Q: "Найди дни когда падение >2%"
 → type=data, granularity=daily, search_condition="days where change_pct < -2%"
+
+Q: "Найди падения после роста"
+→ type=data, granularity=daily, search_condition="days where change_pct < -2% AND previous day change_pct > +1%"
 </examples>
 
 <task>
 {question}
 </task>
+```
+
+## Usage Tracking
+
+```python
+usage = understander.get_usage()
+# UsageStats(input_tokens=2190, output_tokens=51, cost_usd=0.00024)
 ```

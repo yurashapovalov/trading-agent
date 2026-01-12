@@ -4,43 +4,110 @@ Multi-agent trading analytics system.
 
 ## Core Principle
 
-**LLM решает ЧТО, код решает КАК**
+**LLM решает ЧТО, код решает КАК и ПРОВЕРЯЕТ**
 
 | Agent | Type | Purpose |
 |-------|------|---------|
 | Understander | LLM | Парсит вопрос → Intent |
-| DataFetcher | Code | Intent → данные из БД |
-| Analyst | LLM | Данные → ответ + Stats (включая фильтрацию по search_condition) |
+| SQL Agent | LLM | Intent → SQL запрос |
+| SQL Validator | Code | Проверяет SQL |
+| DataFetcher | Code | Выполняет SQL → данные |
+| Analyst | LLM | Данные → ответ + Stats |
 | Validator | Code | Проверяет Stats |
+
+## Architecture Symmetry
+
+```
+┌─────────────┐     ┌─────────────────┐
+│  SQL Agent  │ ←── │  SQL Validator  │
+│   (LLM)     │ ──→ │     (Code)      │
+└─────────────┘     └────────┬────────┘
+                             │
+                             ▼
+                    ┌─────────────────┐
+                    │   DataFetcher   │
+                    │     (Code)      │
+                    └────────┬────────┘
+                             │
+                             ▼
+┌─────────────┐     ┌─────────────────┐
+│   Analyst   │ ←── │    Validator    │
+│   (LLM)     │ ──→ │     (Code)      │
+└─────────────┘     └─────────────────┘
+```
+
+**Симметрия:**
+- SQL Agent генерирует SQL → SQL Validator проверяет
+- Analyst генерирует ответ → Validator проверяет
+
+**DataFetcher** - центральный хаб, выполняет валидный SQL и отдаёт данные.
 
 ## Data Flow
 
+### Standard Query (без search_condition)
+
 ```
-User Question
+User Question: "Как NQ вел себя в январе 2024?"
      │
      ▼
 ┌─────────────────┐
-│  Understander   │  "Как NQ в январе?" → Intent(type=data, daily)
-└────────┬────────┘  "Найди падения >2%" → Intent(type=data, daily, search_condition="...")
-         │
-         ▼
-┌─────────────────┐
-│  DataFetcher    │  Intent → SQL → rows
+│  Understander   │  → Intent(type=data, daily, period=январь)
 └────────┬────────┘
          │
          ▼
 ┌─────────────────┐
-│    Analyst      │  rows + search_condition → filters → response + Stats
+│  DataFetcher    │  → стандартный SQL шаблон → 22 строки
 └────────┬────────┘
          │
          ▼
-┌─────────────────┐
-│   Validator     │  Stats vs Data → OK or Rewrite
-└────────┬────────┘
+┌─────────────────┐     ┌─────────────────┐
+│    Analyst      │ ←─→ │    Validator    │  retry loop
+└────────┬────────┘     └─────────────────┘
          │
          ▼
       Response
 ```
+
+### Search Query (с search_condition)
+
+```
+User Question: "Найди дни когда NQ упал >2% после роста >1%"
+     │
+     ▼
+┌─────────────────┐
+│  Understander   │  → Intent(search_condition="...")
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐     ┌─────────────────┐
+│   SQL Agent     │ ←─→ │  SQL Validator  │  retry loop
+└────────┬────────┘     └─────────────────┘
+         │ ✓ валидный SQL
+         ▼
+┌─────────────────┐
+│  DataFetcher    │  → выполняет SQL → 77 строк
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐     ┌─────────────────┐
+│    Analyst      │ ←─→ │    Validator    │  retry loop
+└────────┬────────┘     └─────────────────┘
+         │
+         ▼
+      Response
+```
+
+## Why This Architecture?
+
+**Проблема:** LLM ненадёжен для точных задач.
+- SQL Agent может сгенерировать неправильный SQL
+- Analyst может неправильно посчитать числа
+
+**Решение:** Код валидирует результаты LLM.
+- SQL Validator проверяет SQL перед выполнением
+- Validator проверяет Stats перед ответом
+
+**Результат:** Точные данные, надёжные ответы.
 
 ## Files Structure
 
@@ -48,47 +115,78 @@ User Question
 agent/
 ├── state.py             # AgentState, Intent, Stats
 ├── graph.py             # LangGraph pipeline
-├── capabilities.py      # DATA_CAPABILITIES
 ├── agents/
-│   ├── understander.py  # LLM
-│   ├── data_fetcher.py  # Code
-│   ├── analyst.py       # LLM
-│   └── validator.py     # Code
+│   ├── understander.py  # LLM - парсит вопрос
+│   ├── sql_agent.py     # LLM - генерирует SQL
+│   ├── sql_validator.py # Code - проверяет SQL
+│   ├── data_fetcher.py  # Code - выполняет SQL
+│   ├── analyst.py       # LLM - анализирует данные
+│   └── validator.py     # Code - проверяет stats
 ├── prompts/
 │   ├── understander.py
+│   ├── sql_agent.py
 │   └── analyst.py
 ├── modules/
-│   └── sql.py           # DuckDB queries
+│   └── sql.py           # DuckDB шаблоны запросов
 └── docs/
-    ├── overview.md      # (this file)
-    ├── agents/
-    │   ├── understander.md
-    │   ├── data_fetcher.md
-    │   ├── analyst.md
-    │   └── validator.md
-    └── modules/
-        └── sql.md
+    └── arhitecture/
+        ├── overview.md
+        └── agents/
+            ├── understander.md
+            ├── sql_agent.md
+            ├── sql_validator.md
+            ├── data_fetcher.md
+            ├── analyst.md
+            └── validator.md
 ```
 
-## Quick Start
+## Agent Types
 
-```python
-from agent.graph import TradingGraph
+| Type | Agents | Purpose |
+|------|--------|---------|
+| LLM | Understander, SQL Agent, Analyst | Понимание, генерация |
+| Code | SQL Validator, DataFetcher, Validator | Проверка, выполнение |
 
-graph = TradingGraph()
+## Validation Loops
 
-# Sync invoke
-result = graph.invoke(
-    question="Как NQ вел себя в январе 2024?",
-    user_id="user123",
-    session_id="session1"
-)
-print(result["response"])
+### SQL Validation Loop
+```
+SQL Agent generates SQL
+         │
+         ▼
+SQL Validator checks syntax, safety
+         │
+     ┌───┴───┐
+     │       │
+    OK     Rewrite
+     │       │
+     ▼       ▼
+DataFetcher  SQL Agent (fix errors)
+                 │
+                 ▼
+            SQL Validator (again)
+                 │
+            Max 3 attempts
+```
 
-# Stream SSE
-for event in graph.stream_sse(question, user_id, session_id):
-    if event["type"] == "text_delta":
-        print(event["content"], end="")
+### Response Validation Loop
+```
+Analyst generates response with Stats
+         │
+         ▼
+Validator checks Stats vs actual data
+         │
+     ┌───┴───┐
+     │       │
+    OK     Rewrite
+     │       │
+     ▼       ▼
+   END    Analyst (fix errors)
+              │
+              ▼
+          Validator (again)
+              │
+          Max 3 attempts
 ```
 
 ## Intent Types
@@ -100,22 +198,6 @@ for event in graph.stream_sse(question, user_id, session_id):
 | `chitchat` | Small talk | "Привет!" |
 | `out_of_scope` | Non-trading questions | "Какая погода?" |
 
-## Search Queries
-
-Для поисковых запросов ("найди", "когда", "покажи дни где..."):
-
-```python
-Intent(
-    type="data",
-    granularity="daily",
-    search_condition="days where change_pct < -2% AND previous day > +1%"
-)
-```
-
-- DataFetcher отдаёт ВСЕ дневные данные
-- Analyst фильтрует по search_condition
-- Никакого хардкода паттернов - любой запрос работает
-
 ## Granularity
 
 | Value | Returns | Use Case |
@@ -126,44 +208,40 @@ Intent(
 | `weekday` | 1 row per weekday | "Понедельник vs пятница" |
 | `monthly` | 1 row per month | "По месяцам за год" |
 
-## Validation Loop
+## Future: Technical Indicators
+
+Архитектура расширяется для сложных индикаторов:
 
 ```
-Analyst generates response with Stats
-           │
-           ▼
-Validator checks Stats vs actual data
-           │
-       ┌───┴───┐
-       │       │
-      OK     Rewrite
-       │       │
-       ▼       ▼
-      END   Analyst (fix errors)
-              │
-              ▼
-           Validator (again)
-              │
-           Max 3 attempts
+Understander
+     │
+     ├─── SQL Agent ────→ SQL Validator ───┐
+     ├─── RSI Agent ────→ RSI Validator ───┼──→ DataFetcher
+     ├─── MACD Agent ───→ MACD Validator ──┘
+     └─── Pattern Agent → Pattern Validator
+                                           │
+                                           ▼
+                                       Analyst
+                                           │
+                                           ▼
+                                       Validator
 ```
 
-## Testing
+Каждый LLM агент имеет свой Code валидатор.
 
-```bash
-python test_v2.py
-```
-
-## API
+## Quick Start
 
 ```python
-@app.post("/chat/stream")
-async def chat_stream(request: ChatRequest, user_id: str):
-    for event in trading_graph.stream_sse(
-        question=request.message,
-        user_id=user_id,
-        session_id=request.session_id
-    ):
-        yield f"data: {json.dumps(event)}\n\n"
+from agent.graph import TradingGraph
+
+graph = TradingGraph()
+
+result = graph.invoke(
+    question="Найди дни падения >2%",
+    user_id="user123",
+    session_id="session1"
+)
+print(result["response"])
 ```
 
 ## SSE Events
@@ -173,6 +251,8 @@ async def chat_stream(request: ChatRequest, user_id: str):
 | `step_start` | Agent starting |
 | `step_end` | Agent finished |
 | `text_delta` | Response chunk |
-| `validation` | Validation result |
+| `sql_generated` | SQL Agent generated query |
+| `sql_validated` | SQL Validator result |
+| `validation` | Response validation result |
 | `usage` | Token usage |
 | `done` | Complete |

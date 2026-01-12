@@ -6,29 +6,47 @@
 
 ## Purpose
 
-Интерпретирует данные и генерирует ответ пользователю со Stats для валидации.
-Также фильтрует данные по `search_condition` для поисковых запросов.
+Анализирует данные и генерирует ответ пользователю со Stats для валидации.
 
 ## Principle
 
-LLM анализирует данные и пишет ответ.
-Validator (код) потом проверит что числа в ответе совпадают с данными.
+- Analyst получает **уже отфильтрованные** данные от DataFetcher
+- Для search queries: SQL Agent отфильтровал → Analyst анализирует результат
+- Analyst НЕ фильтрует данные - он только анализирует и объясняет
+
+**Важно:** Фильтрация данных - работа SQL Agent + DataFetcher (код).
+Analyst получает готовый результат и пишет инсайты.
 
 ## Input
+
+### Standard Query
+
+```python
+{
+    "question": "Как NQ вел себя в январе 2024?",
+    "data": {
+        "rows": [...],  # 22 дня за январь
+        "row_count": 22,
+        "granularity": "daily"
+    },
+    "intent": Intent(type="data", ...)
+}
+```
+
+### Search Query (данные уже отфильтрованы)
 
 ```python
 {
     "question": "Найди дни когда NQ упал больше 2%",
     "data": {
-        "rows": [...],  # все дни за период
-        "row_count": 4500,
+        "rows": [...],  # 77 отфильтрованных строк
+        "row_count": 77,
         "granularity": "daily"
     },
     "intent": Intent(
         type="data",
         search_condition="days where change_pct < -2%"
-    ),
-    "validation": {...}  # если rewrite loop
+    )
 }
 ```
 
@@ -36,38 +54,13 @@ Validator (код) потом проверит что числа в ответе
 
 ```python
 {
-    "response": "Найдено 45 дней с падением более 2%:\n\n| Дата | Изменение |...",
+    "response": "Найдено 77 дней с падением более 2%:\n\n| Дата | Изменение |...",
     "stats": Stats(
-        matches_count=45,
+        matches_count=77,
+        max_drop_pct=-7.8,
         ...
     )
 }
-```
-
-## Search Condition Handling
-
-Если `intent.search_condition` задан:
-
-1. Analyst получает ВСЕ дневные данные
-2. Фильтрует по условию (например "change_pct < -2% AND previous day > +1%")
-3. Возвращает только совпадения в response
-
-Промпт для поиска:
-```xml
-<search_condition>
-days where change_pct < -2% AND previous day change_pct > +1%
-</search_condition>
-
-<task>
-IMPORTANT: First, filter the data to find rows matching the search_condition.
-Then analyze the matching rows and respond.
-
-Steps:
-1. Go through each row in the data
-2. Check if it matches the search_condition
-3. List ALL matching rows in your response
-4. Include total count of matches
-</task>
 ```
 
 ## Stats Structure
@@ -86,6 +79,38 @@ class Stats(TypedDict, total=False):
 ```
 
 **Важно:** Stats содержит только те числа, которые Analyst упоминает в ответе.
+
+## Response Format
+
+### Standard data query
+```
+В январе 2024 года индекс NQ показал рост на 2.53%.
+
+| Параметр | Значение |
+|----------|----------|
+| Открытие | 16,334 |
+| Закрытие | 16,747 |
+| Максимум | 17,152 |
+
+**Инсайты:**
+- Первая неделя была волатильной
+- Объём выше среднего на 15%
+```
+
+### Search query (данные уже отфильтрованы)
+```
+Найдено 77 дней с падением более 2%:
+
+| Дата | Изменение | Объём |
+|------|-----------|-------|
+| 2008-10-15 | -7.80% | 850,000 |
+| 2008-10-22 | -5.51% | 720,000 |
+...
+
+**Инсайты:**
+- Большинство падений пришлось на 2008 и 2022 годы
+- Средний объём в дни падения выше обычного на 40%
+```
 
 ## Rewrite Loop
 
@@ -114,12 +139,12 @@ class Analyst:
         question = state["question"]
         data = state["data"]
         intent = state["intent"]
-        search_condition = intent.get("search_condition")
 
         prompt = get_analyst_prompt(
             question=question,
             data=data,
-            search_condition=search_condition,
+            intent_type=intent.get("type"),
+            search_condition=intent.get("search_condition"),  # для контекста
             ...
         )
 
@@ -139,43 +164,45 @@ class Analyst:
         }
 ```
 
-## Response Types
+## Prompt Guidelines
 
-### Regular data query
-```
-В январе 2024 года (период 01.01-31.01) индекс NQ показал рост...
+```xml
+<role>
+You are a trading data analyst. Analyze data and write clear responses.
+</role>
 
-| Параметр | Значение |
-|----------|----------|
-| Изменение | +2.53% |
-| Торговых дней | 26 |
-```
+<constraints>
+1. ONLY use facts from the provided data
+2. The data is ALREADY filtered - just analyze what you receive
+3. Include trading insights and patterns
+4. Use markdown tables for presenting data
+</constraints>
 
-### Search query (with search_condition)
-```
-Найдено 45 дней с падением более 2%:
-
-| Дата | Изменение | Объём |
-|------|-----------|-------|
-| 2008-10-15 | -4.56% | 850000 |
-| 2008-10-22 | -3.21% | 720000 |
-...
-
-**Инсайты:**
-- Большинство падений пришлось на 2008 и 2020 годы (кризисы)
-- Средний объём в дни падения выше обычного на 40%
+<output_format>
+Return JSON with:
+- "response": plain text markdown (NOT JSON inside)
+- "stats": object with numbers you mentioned
+</output_format>
 ```
 
-### Concept explanation
-```
-## MACD (Moving Average Convergence Divergence)
+## Key Difference from Before
 
-MACD - это индикатор, который показывает...
-```
+**Before (broken):**
+- Analyst received ALL 5600 rows
+- Had to filter by search_condition
+- Missed 47 out of 77 matches
+
+**After (correct):**
+- SQL Agent generates filter query
+- DataFetcher executes, returns 77 rows
+- Analyst analyzes only filtered data
+- 100% accuracy
 
 ## Usage Tracking
 
 ```python
 usage = analyst.get_usage()
-# UsageStats(input_tokens=655, output_tokens=327, cost_usd=0.0062)
+# UsageStats(input_tokens=5000, output_tokens=1500, cost_usd=0.003)
 ```
+
+With filtered data, input tokens are much lower (5K vs 650K).
