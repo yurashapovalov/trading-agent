@@ -170,6 +170,7 @@ class AgentState(TypedDict, total=False):
     # Analyst output
     response: str
     stats: Stats | None           # Structured stats for validation
+    suggestions: list[str]        # Suggestions for clarification (from Responder)
 
     # Validator output
     validation: ValidationResult
@@ -217,6 +218,7 @@ def create_initial_state(
         # Analyst
         response="",
         stats=None,
+        suggestions=[],
         # Validator
         validation=ValidationResult(status="ok", issues=[], feedback=""),
         validation_attempts=0,
