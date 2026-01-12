@@ -567,14 +567,36 @@ class TradingGraph:
 
                 elif node_name == "__interrupt__":
                     # LangGraph interrupt event - clarification request
-                    # updates contains the interrupt data (question, suggestions)
-                    interrupt_data = updates[0] if isinstance(updates, list) else updates
-                    yield {
-                        "type": "clarification_needed",
-                        "question": interrupt_data.get("question", "Уточните вопрос"),
-                        "suggestions": interrupt_data.get("suggestions", []),
-                        "thread_id": f"{initial_state.get('user_id')}_{initial_state.get('session_id', 'default')}"
-                    }
+                    # updates can be: list of Interrupt objects, tuple, or dict
+                    try:
+                        # Handle list of Interrupt objects
+                        if isinstance(updates, (list, tuple)) and len(updates) > 0:
+                            first_item = updates[0]
+                            # Interrupt object has .value attribute
+                            if hasattr(first_item, 'value'):
+                                interrupt_data = first_item.value
+                            elif isinstance(first_item, dict):
+                                interrupt_data = first_item
+                            else:
+                                interrupt_data = {"question": str(first_item), "suggestions": []}
+                        elif isinstance(updates, dict):
+                            interrupt_data = updates
+                        else:
+                            interrupt_data = {"question": "Уточните вопрос", "suggestions": []}
+
+                        yield {
+                            "type": "clarification_needed",
+                            "question": interrupt_data.get("question", "Уточните вопрос"),
+                            "suggestions": interrupt_data.get("suggestions", []),
+                            "thread_id": f"{initial_state.get('user_id')}_{initial_state.get('session_id', 'default')}"
+                        }
+                    except Exception as e:
+                        yield {
+                            "type": "clarification_needed",
+                            "question": f"Уточните вопрос (error: {e})",
+                            "suggestions": [],
+                            "thread_id": f"{initial_state.get('user_id')}_{initial_state.get('session_id', 'default')}"
+                        }
                     # Don't emit done - we're waiting for user response
                     return
 
