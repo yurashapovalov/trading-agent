@@ -5,10 +5,28 @@ No LLM here. Just gets data, Analyst does the analysis.
 """
 
 import duckdb
+import numpy as np
 from datetime import datetime, timedelta
 from typing import Any, Literal
 
 import config
+
+
+def _convert_numpy_types(data: list[dict]) -> list[dict]:
+    """Convert numpy types to Python native types for JSON serialization."""
+    def convert_value(v):
+        if isinstance(v, (np.integer, np.int64, np.int32)):
+            return int(v)
+        elif isinstance(v, (np.floating, np.float64, np.float32)):
+            return float(v)
+        elif isinstance(v, np.ndarray):
+            return v.tolist()
+        return v
+
+    return [
+        {k: convert_value(v) for k, v in row.items()}
+        for row in data
+    ]
 
 
 # =============================================================================
@@ -192,6 +210,9 @@ def fetch(
                     df[col] = df[col].astype(str).str[:10]  # Keep only date part
 
             rows = df.to_dict(orient='records')
+
+            # Convert numpy types to Python native types for JSON serialization
+            rows = _convert_numpy_types(rows)
 
             return {
                 "granularity": granularity,
