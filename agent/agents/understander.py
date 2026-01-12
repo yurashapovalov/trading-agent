@@ -81,7 +81,7 @@ class Understander:
         # Format chat history
         history_str = ""
         if chat_history:
-            for msg in chat_history[-10:]:
+            for msg in chat_history[-config.CHAT_HISTORY_LIMIT:]:
                 role = "User" if msg.get("role") == "user" else "Assistant"
                 history_str += f"{role}: {msg.get('content', '')}\n"
 

@@ -28,6 +28,9 @@ CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-haiku-4-5-20251001")
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
 
+# Chat settings
+CHAT_HISTORY_LIMIT = 10  # Number of recent messages to include as context
+
 # Trading symbols config
 SYMBOLS = {
     "CL": {

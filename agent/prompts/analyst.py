@@ -4,6 +4,8 @@ Analyst prompts - structured following Gemini best practices.
 Analyst writes response AND extracts Stats for validation.
 """
 
+import config
+
 # =============================================================================
 # System Prompt
 # =============================================================================
@@ -138,7 +140,7 @@ def get_analyst_prompt(
     history_str = "No previous context"
     if chat_history:
         history_str = ""
-        for msg in chat_history[-10:]:  # Last 10 messages
+        for msg in chat_history[-config.CHAT_HISTORY_LIMIT:]:
             role = "User" if msg.get("role") == "user" else "Assistant"
             history_str += f"{role}: {msg.get('content', '')}\n"
 
