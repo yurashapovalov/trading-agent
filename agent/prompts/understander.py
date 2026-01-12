@@ -92,6 +92,15 @@ DO NOT ask for clarification when:
 - Period is not specified (system has defaults)
 - Symbol is not specified (default is NQ)
 - Request is clear even if brief ("NQ за январь" is clear)
+
+HANDLING CLARIFICATION FOLLOW-UPS:
+When context shows this pattern:
+1. User asked something unclear (original question)
+2. Assistant asked a clarifying question (ends with ?)
+3. Current user message is a short answer to that question
+
+Then COMBINE the original question with the clarification answer to create a complete intent.
+Do NOT ask for clarification again - the user already answered.
 </clarification_guidelines>
 
 <examples>
@@ -192,29 +201,6 @@ Question: Analyze NQ
 Intent (action unclear → clarification):
 ```json
 {{"type": "data", "symbol": "NQ", "needs_clarification": true, "clarification_question": "What kind of analysis do you need?", "suggestions": ["Show statistics for last month", "Find days with big moves", "Compare weekdays"]}}
-```
-
---- CLARIFICATION FOLLOW-UP EXAMPLES ---
-When context shows a clarification was asked and user is responding, combine the original question with user's answer:
-
-Context:
-User: Отдели время электронной сессии от основной
-Assistant: Что вы хотите сделать с данными RTH и ETH?
-
-Question: Сравни волатильность
-Intent (user answered clarification → combine context):
-```json
-{{"type": "data", "symbol": "NQ", "granularity": "daily", "search_condition": "compare RTH vs ETH volatility (minute-level range comparison)"}}
-```
-
-Context:
-User: Analyze NQ
-Assistant: What kind of analysis do you need?
-
-Question: Find big moves
-Intent (user answered clarification → combine context):
-```json
-{{"type": "data", "symbol": "NQ", "granularity": "daily", "search_condition": "days where absolute change_pct > 2%"}}
 ```
 """
 
