@@ -12,7 +12,7 @@ from google.genai import types
 
 import config
 from agent.state import AgentState, Intent, PatternDef, UsageStats
-from agent.pricing import calculate_cost
+from agent.pricing import calculate_cost, GEMINI_2_5_FLASH_LITE
 from agent.capabilities import (
     get_capabilities_prompt,
     DEFAULT_SYMBOL,
@@ -38,7 +38,7 @@ class Understander:
 
     def __init__(self):
         self.client = genai.Client(api_key=config.GOOGLE_API_KEY)
-        self.model = config.GEMINI_MODEL
+        self.model = config.GEMINI_LITE_MODEL
         self._last_usage = UsageStats(
             input_tokens=0,
             output_tokens=0,
@@ -137,7 +137,7 @@ class Understander:
             if response.usage_metadata:
                 input_tokens = response.usage_metadata.prompt_token_count or 0
                 output_tokens = response.usage_metadata.candidates_token_count or 0
-                cost = calculate_cost(input_tokens, output_tokens, 0)
+                cost = calculate_cost(input_tokens, output_tokens, 0, GEMINI_2_5_FLASH_LITE)
                 self._last_usage = UsageStats(
                     input_tokens=input_tokens,
                     output_tokens=output_tokens,

@@ -18,6 +18,12 @@ GEMINI_2_FLASH = {
     "output": 0.40,     # $/1M tokens
 }
 
+# Gemini 2.5 Flash Lite (cheapest option)
+GEMINI_2_5_FLASH_LITE = {
+    "input": 0.10,      # $/1M tokens (text/image/video)
+    "output": 0.40,     # $/1M tokens (including thinking)
+}
+
 # Claude Haiku 4.5
 CLAUDE_HAIKU = {
     "input": 1.00,      # $/1M tokens
