@@ -131,6 +131,9 @@ export function useChat() {
     async (text: string) => {
       if (!text.trim() || isLoading) return
 
+      // Clear any pending clarification
+      setClarification(null)
+
       setMessages((prev) => [...prev, { role: "user", content: text }])
       setIsLoading(true)
       setCurrentSteps([])
@@ -262,8 +265,15 @@ export function useChat() {
                     thinking_tokens: event.thinking_tokens,
                     cost: event.cost,
                   }
+                } else if (event.type === "clarification") {
+                  // Stateless clarification - show question with buttons
+                  setClarification({
+                    question: event.question,
+                    suggestions: event.suggestions,
+                    thread_id: "", // Not needed for stateless
+                  })
                 } else if (event.type === "clarification_needed") {
-                  // System is asking for clarification
+                  // Legacy: System is asking for clarification (interrupt-based)
                   setClarification({
                     question: event.question,
                     suggestions: event.suggestions,
@@ -271,7 +281,6 @@ export function useChat() {
                   })
                   setCurrentSteps([])
                   setIsLoading(false)
-                  // Don't add to messages yet - ClarificationMessage will show in UI
                 } else if (event.type === "done") {
                   setMessages((prev) => [
                     ...prev,

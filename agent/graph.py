@@ -521,28 +521,32 @@ class TradingGraph:
                     # Responder handles chitchat/out_of_scope/clarification
                     response = updates.get("response", "")
                     suggestions = updates.get("suggestions", [])
+                    is_clarification = len(suggestions) > 0
 
-                    # Stream response in chunks
-                    chunk_size = 50
-                    for i in range(0, len(response), chunk_size):
+                    # For clarification, emit special event with question and buttons
+                    if is_clarification:
+                        # Extract just the question (before "Варианты:")
+                        question = response.split("\n\nВарианты:")[0] if "\n\nВарианты:" in response else response
                         yield {
-                            "type": "text_delta",
-                            "agent": node_name,
-                            "content": response[i:i+chunk_size]
-                        }
-
-                    # Emit suggestions if present (for clarification)
-                    if suggestions:
-                        yield {
-                            "type": "suggestions",
+                            "type": "clarification",
+                            "question": question,
                             "suggestions": suggestions
                         }
+                    else:
+                        # Stream normal response in chunks
+                        chunk_size = 50
+                        for i in range(0, len(response), chunk_size):
+                            yield {
+                                "type": "text_delta",
+                                "agent": node_name,
+                                "content": response[i:i+chunk_size]
+                            }
 
                     yield {
                         "type": "step_end",
                         "agent": node_name,
                         "duration_ms": step_duration_ms,
-                        "result": {"response_length": len(response)},
+                        "result": {"response_length": len(response), "is_clarification": is_clarification},
                         "input": input_data,
                         "output": {"response": response, "suggestions": suggestions}
                     }

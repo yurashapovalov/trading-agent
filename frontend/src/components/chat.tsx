@@ -119,23 +119,17 @@ export default function Chat() {
     clarification,
     sendMessage,
     stopGeneration,
-    respondToClarification,
   } = useChat()
 
   const handleSubmit = (message: PromptInputMessage) => {
     if (!message.text?.trim()) return
-
-    // If clarification is pending, respond to it instead of sending new message
-    if (clarification) {
-      respondToClarification(message.text)
-    } else {
-      sendMessage(message.text)
-    }
+    sendMessage(message.text)
     setText("")
   }
 
   const handleClarificationSelect = (response: string) => {
-    respondToClarification(response)
+    // Stateless: just send as new message, context will be in chat_history
+    sendMessage(response)
   }
 
   const handleSuggestionClick = (suggestion: string) => {

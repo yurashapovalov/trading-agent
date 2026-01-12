@@ -54,5 +54,6 @@ export type SSEEvent =
   | { type: "suggestions"; suggestions: string[] }
   | { type: "usage"; input_tokens: number; output_tokens: number; thinking_tokens?: number; cost: number }
   | { type: "clarification_needed"; question: string; suggestions: string[]; thread_id: string }
+  | { type: "clarification"; question: string; suggestions: string[] }
   | { type: "done" }
   | { type: "error"; message: string }
