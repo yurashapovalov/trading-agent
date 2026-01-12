@@ -22,6 +22,7 @@ import {
   ChainOfThoughtStep,
 } from "@/components/ai/chain-of-thought"
 import { Suggestions, Suggestion } from "@/components/ai/suggestion"
+import { ClarificationMessage } from "@/components/ai/clarification-message"
 import {
   PromptInput,
   PromptInputBody,
@@ -115,14 +116,26 @@ export default function Chat() {
     currentSteps,
     streamingText,
     suggestions,
+    clarification,
     sendMessage,
     stopGeneration,
+    respondToClarification,
   } = useChat()
 
   const handleSubmit = (message: PromptInputMessage) => {
     if (!message.text?.trim()) return
-    sendMessage(message.text)
+
+    // If clarification is pending, respond to it instead of sending new message
+    if (clarification) {
+      respondToClarification(message.text)
+    } else {
+      sendMessage(message.text)
+    }
     setText("")
+  }
+
+  const handleClarificationSelect = (response: string) => {
+    respondToClarification(response)
   }
 
   const handleSuggestionClick = (suggestion: string) => {
@@ -190,6 +203,15 @@ export default function Chat() {
             </Message>
           )}
 
+          {/* Clarification request */}
+          {clarification && (
+            <ClarificationMessage
+              question={clarification.question}
+              suggestions={clarification.suggestions}
+              onSelect={handleClarificationSelect}
+            />
+          )}
+
           {isLoading && currentSteps.length === 0 && !streamingText && (
             <div className="flex items-center gap-2 text-muted-foreground">
               <Loader className="size-4" />
@@ -220,7 +242,7 @@ export default function Chat() {
               <PromptInputTextarea
                 value={text}
                 onChange={(e) => setText(e.target.value)}
-                placeholder="Ask about NQ futures..."
+                placeholder={clarification ? "Напишите свой ответ..." : "Ask about NQ futures..."}
               />
             </PromptInputBody>
             <PromptInputFooter>

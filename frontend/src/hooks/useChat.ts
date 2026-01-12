@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback } from "react"
 import { useAuth } from "@/components/auth-provider"
-import type { ChatMessage, AgentStep, ToolUsage, Usage, SSEEvent } from "@/types/chat"
+import type { ChatMessage, AgentStep, ToolUsage, Usage, SSEEvent, ClarificationRequest } from "@/types/chat"
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
 
@@ -79,6 +79,7 @@ export function useChat() {
   const [currentSteps, setCurrentSteps] = useState<AgentStep[]>([])
   const [streamingText, setStreamingText] = useState("")
   const [suggestions, setSuggestions] = useState<string[]>(DEFAULT_SUGGESTIONS)
+  const [clarification, setClarification] = useState<ClarificationRequest | null>(null)
   const abortControllerRef = useRef<AbortController | null>(null)
 
   const sessionIdRef = useRef<string>("")
@@ -261,6 +262,16 @@ export function useChat() {
                     thinking_tokens: event.thinking_tokens,
                     cost: event.cost,
                   }
+                } else if (event.type === "clarification_needed") {
+                  // System is asking for clarification
+                  setClarification({
+                    question: event.question,
+                    suggestions: event.suggestions,
+                    thread_id: event.thread_id,
+                  })
+                  setCurrentSteps([])
+                  setIsLoading(false)
+                  // Don't add to messages yet - ClarificationMessage will show in UI
                 } else if (event.type === "done") {
                   setMessages((prev) => [
                     ...prev,
@@ -318,13 +329,165 @@ export function useChat() {
     ])
   }, [])
 
+  const respondToClarification = useCallback(
+    async (response: string) => {
+      if (!clarification || isLoading) return
+
+      const threadId = clarification.thread_id
+
+      // Add clarification Q&A to messages
+      setMessages((prev) => [
+        ...prev,
+        { role: "assistant", content: clarification.question },
+        { role: "user", content: response },
+      ])
+
+      // Clear clarification state
+      setClarification(null)
+      setIsLoading(true)
+      setCurrentSteps([])
+      setStreamingText("")
+
+      abortControllerRef.current = new AbortController()
+
+      try {
+        const apiResponse = await fetch(`${API_URL}/chat/resume`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(session?.access_token && {
+              Authorization: `Bearer ${session.access_token}`,
+            }),
+          },
+          body: JSON.stringify({
+            thread_id: threadId,
+            user_response: response,
+          }),
+          signal: abortControllerRef.current.signal,
+        })
+
+        if (!apiResponse.body) throw new Error("No response body")
+
+        const reader = apiResponse.body.getReader()
+        const decoder = new TextDecoder()
+        let buffer = ""
+        const stepsCollected: AgentStep[] = []
+        let currentAgentName: string | null = null
+        let finalText = ""
+        let usageData: Usage | undefined
+        let route: string | undefined
+        let validationPassed: boolean | undefined
+
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+
+          buffer += decoder.decode(value, { stream: true })
+          const lines = buffer.split("\n")
+          buffer = lines.pop() || ""
+
+          for (const line of lines) {
+            if (line.startsWith("data: ")) {
+              try {
+                const event = JSON.parse(line.slice(6)) as SSEEvent
+
+                // Same event handling as sendMessage
+                if (event.type === "step_start") {
+                  currentAgentName = event.agent
+                  const newStep: AgentStep = {
+                    agent: event.agent,
+                    message: event.message,
+                    status: "running",
+                    tools: [],
+                  }
+                  stepsCollected.push(newStep)
+                  setCurrentSteps((prev) => [...prev, newStep])
+                } else if (event.type === "step_end") {
+                  if (event.agent === "understander" || event.agent === "router") {
+                    route = (event.result?.type || event.result?.route) as string | undefined
+                  }
+                  setCurrentSteps((prev) =>
+                    prev.map((s) =>
+                      s.agent === event.agent && s.status === "running"
+                        ? { ...s, status: "completed", result: event.result, durationMs: event.duration_ms }
+                        : s
+                    )
+                  )
+                } else if (event.type === "text_delta") {
+                  finalText += event.content
+                  setStreamingText((prev) => prev + event.content)
+                } else if (event.type === "suggestions") {
+                  if (event.suggestions && event.suggestions.length > 0) {
+                    setSuggestions(event.suggestions)
+                  }
+                } else if (event.type === "usage") {
+                  usageData = {
+                    input_tokens: event.input_tokens,
+                    output_tokens: event.output_tokens,
+                    thinking_tokens: event.thinking_tokens,
+                    cost: event.cost,
+                  }
+                } else if (event.type === "clarification_needed") {
+                  // Another clarification needed
+                  setClarification({
+                    question: event.question,
+                    suggestions: event.suggestions,
+                    thread_id: event.thread_id,
+                  })
+                  setCurrentSteps([])
+                  setIsLoading(false)
+                } else if (event.type === "done") {
+                  setMessages((prev) => [
+                    ...prev,
+                    {
+                      role: "assistant",
+                      content: stripSuggestions(finalText),
+                      agent_steps: [...stepsCollected],
+                      route,
+                      validation_passed: validationPassed,
+                      usage: usageData,
+                    },
+                  ])
+                  setCurrentSteps([])
+                  setStreamingText("")
+                } else if (event.type === "error") {
+                  setMessages((prev) => [
+                    ...prev,
+                    { role: "assistant", content: `Ошибка: ${event.message}` },
+                  ])
+                  setCurrentSteps([])
+                }
+              } catch (e) {
+                console.error("Failed to parse SSE event:", e)
+              }
+            }
+          }
+        }
+      } catch (error) {
+        if (error instanceof Error && error.name === "AbortError") return
+        setMessages((prev) => [
+          ...prev,
+          { role: "assistant", content: "Ошибка подключения к серверу" },
+        ])
+        setCurrentSteps([])
+        setStreamingText("")
+      } finally {
+        setIsLoading(false)
+        abortControllerRef.current = null
+      }
+    },
+    [clarification, isLoading, session?.access_token]
+  )
+
   return {
     messages,
     isLoading,
     currentSteps,
     streamingText,
     suggestions,
+    clarification,
     sendMessage,
     stopGeneration,
+    respondToClarification,
   }
 }

@@ -34,6 +34,13 @@ export type ChatMessage = {
   usage?: Usage
 }
 
+// Clarification request from backend
+export type ClarificationRequest = {
+  question: string
+  suggestions: string[]
+  thread_id: string
+}
+
 // SSE event types from backend
 export type SSEEvent =
   | { type: "step_start"; agent: string; message: string }
@@ -46,5 +53,6 @@ export type SSEEvent =
   | { type: "text_delta"; content: string }
   | { type: "suggestions"; suggestions: string[] }
   | { type: "usage"; input_tokens: number; output_tokens: number; thinking_tokens?: number; cost: number }
+  | { type: "clarification_needed"; question: string; suggestions: string[]; thread_id: string }
   | { type: "done" }
   | { type: "error"; message: string }
