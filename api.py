@@ -78,16 +78,16 @@ def root():
     return {"status": "ok", "service": "Trading Analytics Agent", "version": "2.0"}
 
 
-def get_recent_chat_history(user_id: str, session_id: str, limit: int = 6) -> list[dict]:
+def get_recent_chat_history(user_id: str, limit: int = 6) -> list[dict]:
     """Fetch recent chat history from Supabase for context."""
     if not supabase:
         return []
 
     try:
+        # Load by user_id only (no session filter until we implement multiple chats)
         result = supabase.table("chat_logs") \
             .select("question, response") \
             .eq("user_id", user_id) \
-            .eq("session_id", session_id) \
             .order("created_at", desc=True) \
             .limit(limit) \
             .execute()
@@ -129,7 +129,7 @@ async def chat_stream(request: ChatRequest, user_id: str = Depends(require_auth)
     print(f"[CHAT] Processing: {request.message[:50]}... for user {user_id[:8]}...")
 
     # Load recent chat history for context
-    chat_history = get_recent_chat_history(user_id, request.session_id or "default")
+    chat_history = get_recent_chat_history(user_id)
 
     async def generate():
         final_text = ""
