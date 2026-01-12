@@ -53,6 +53,17 @@ DuckDB syntax notes:
 - ROUND(value, 2) for rounding
 </duckdb_specifics>
 
+<date_parsing>
+When parsing time periods from search condition:
+- "January 2023" → date >= '2023-01-01' AND date < '2023-02-01' (only that month!)
+- "March 2024" → date >= '2024-03-01' AND date < '2024-04-01'
+- "Q1 2024" → date >= '2024-01-01' AND date < '2024-04-01'
+- "Q4 2023" → date >= '2023-10-01' AND date < '2024-01-01'
+- "2023" (full year) → date >= '2023-01-01' AND date < '2024-01-01'
+
+CRITICAL: "January 2023" means ONLY January of 2023 (31 days), NOT the entire year!
+</date_parsing>
+
 <query_structure>
 Always use this CTE structure:
 
@@ -123,6 +134,20 @@ SELECT
 FROM with_windows
 WHERE DAYOFWEEK(date) IN (1, 5)
 GROUP BY weekday
+
+Example 6: "compare January 2023 vs January 2024 volatility"
+→ Final SELECT:
+SELECT
+    CASE
+        WHEN date >= '2023-01-01' AND date < '2023-02-01' THEN 'Jan 2023'
+        WHEN date >= '2024-01-01' AND date < '2024-02-01' THEN 'Jan 2024'
+    END as period,
+    ROUND(AVG(range), 2) as avg_volatility,
+    COUNT(*) as days
+FROM with_windows
+WHERE (date >= '2023-01-01' AND date < '2023-02-01')
+   OR (date >= '2024-01-01' AND date < '2024-02-01')
+GROUP BY period
 </examples>
 
 <output_format>
