@@ -1,22 +1,45 @@
-# AskBar v2 Overview
+# Trading Analytics Agent v2
 
-Multi-agent trading analytics system.
+Multi-agent system for trading data analysis using natural language.
+
+## Tech Stack
+
+| Layer | Technology |
+|-------|-----------|
+| **LLM** | Gemini 2.5 Flash (Lite for Understander) |
+| **Framework** | LangGraph (state machine) |
+| **Backend** | FastAPI + SSE streaming |
+| **Frontend** | Next.js 15 + React |
+| **Database** | DuckDB (trading data) + Supabase (auth, logs) |
+| **Deploy** | Hetzner VPS (backend) + Vercel (frontend) |
 
 ## Core Principle
 
-**LLM решает ЧТО, код решает КАК и ПРОВЕРЯЕТ**
+**LLM decides WHAT, Code decides HOW and VALIDATES**
 
 | Agent | Type | Purpose |
 |-------|------|---------|
-| Understander | LLM | Парсит вопрос → Intent |
-| Clarification | Interrupt | Human-in-the-loop - уточняет вопрос |
-| SQL Agent | LLM | Intent → SQL запрос |
-| SQL Validator | Code | Проверяет SQL |
-| DataFetcher | Code | Выполняет SQL → данные |
-| Analyst | LLM | Данные → ответ + Stats |
-| Validator | Code | Проверяет Stats |
+| Understander | LLM (Gemini Lite) | Parses question → Intent |
+| Responder | Code | Returns chitchat/clarification |
+| SQL Agent | LLM | Intent → SQL query |
+| SQL Validator | Code | Validates SQL |
+| DataFetcher | Code | Executes SQL → data |
+| Analyst | LLM (Gemini Flash) | Data → response + Stats |
+| Validator | Code | Validates Stats |
 
-## Architecture Symmetry
+## Architecture
+
+```
+                    ┌─ chitchat/out_of_scope/clarification ─► Responder ──► END
+                    │
+Question ─► Understander ─┼────────────────────────────────────────────────────────────┐
+                    │                            ┌──────────────────────────────────────┤
+                    │                            │ (rewrite loop)                       │
+                    └─ data ─► SQL Agent ─► SQL Validator ─► DataFetcher ─► Analyst ─► Validator ─► END
+                                   ↑_______________|                           ↑____________| (rewrite loop)
+```
+
+### Symmetry Pattern
 
 ```
 ┌─────────────┐     ┌─────────────────┐
@@ -37,120 +60,136 @@ Multi-agent trading analytics system.
 └─────────────┘     └─────────────────┘
 ```
 
-**Симметрия:**
-- SQL Agent генерирует SQL → SQL Validator проверяет
-- Analyst генерирует ответ → Validator проверяет
-
-**DataFetcher** - центральный хаб, выполняет валидный SQL и отдаёт данные.
+- SQL Agent generates SQL → SQL Validator checks before execution
+- Analyst generates response → Validator checks stats against data
 
 ## Data Flow
 
-### Standard Query (без search_condition)
+### Standard Query (no search_condition)
 
 ```
-User Question: "Как NQ вел себя в январе 2024?"
+User: "How did NQ perform in January 2024?"
      │
      ▼
-┌─────────────────┐
-│  Understander   │  → Intent(type=data, daily, period=январь)
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│  DataFetcher    │  → стандартный SQL шаблон → 22 строки
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐     ┌─────────────────┐
-│    Analyst      │ ←─→ │    Validator    │  retry loop
-└────────┬────────┘     └─────────────────┘
-         │
-         ▼
-      Response
-```
-
-### Search Query (с search_condition)
-
-```
-User Question: "Найди дни когда NQ упал >2% после роста >1%"
+Understander → Intent(type=data, daily, period=january)
      │
      ▼
-┌─────────────────┐
-│  Understander   │  → Intent(search_condition="...")
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐     ┌─────────────────┐
-│   SQL Agent     │ ←─→ │  SQL Validator  │  retry loop
-└────────┬────────┘     └─────────────────┘
-         │ ✓ валидный SQL
-         ▼
-┌─────────────────┐
-│  DataFetcher    │  → выполняет SQL → 77 строк
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐     ┌─────────────────┐
-│    Analyst      │ ←─→ │    Validator    │  retry loop
-└────────┬────────┘     └─────────────────┘
-         │
-         ▼
-      Response
+DataFetcher → standard SQL template → 22 rows
+     │
+     ▼
+Analyst ←─→ Validator (retry loop)
+     │
+     ▼
+Response
 ```
 
-## Why This Architecture?
-
-**Проблема:** LLM ненадёжен для точных задач.
-- SQL Agent может сгенерировать неправильный SQL
-- Analyst может неправильно посчитать числа
-
-**Решение:** Код валидирует результаты LLM.
-- SQL Validator проверяет SQL перед выполнением
-- Validator проверяет Stats перед ответом
-
-**Результат:** Точные данные, надёжные ответы.
-
-## Files Structure
+### Search Query (with search_condition)
 
 ```
-agent/
-├── state.py             # AgentState, Intent, Stats
-├── graph.py             # LangGraph pipeline
-├── agents/
-│   ├── understander.py  # LLM - парсит вопрос
-│   ├── sql_agent.py     # LLM - генерирует SQL
-│   ├── sql_validator.py # Code - проверяет SQL
-│   ├── data_fetcher.py  # Code - выполняет SQL
-│   ├── analyst.py       # LLM - анализирует данные
-│   └── validator.py     # Code - проверяет stats
-├── prompts/
-│   ├── understander.py
-│   ├── sql_agent.py
-│   └── analyst.py
-├── modules/
-│   └── sql.py           # DuckDB шаблоны запросов
-└── docs/
-    └── arhitecture/
-        ├── overview.md
-        └── agents/
-            ├── understander.md
-            ├── sql_agent.md
-            ├── sql_validator.md
-            ├── data_fetcher.md
-            ├── analyst.md
-            └── validator.md
+User: "Find days when NQ dropped >2%"
+     │
+     ▼
+Understander → Intent(search_condition="days where change < -2%")
+     │
+     ▼
+SQL Agent ←─→ SQL Validator (retry loop)
+     │ valid SQL
+     ▼
+DataFetcher → executes SQL → 77 rows
+     │
+     ▼
+Analyst ←─→ Validator (retry loop)
+     │
+     ▼
+Response
 ```
 
-## Agent Types
+## Human-in-the-Loop (Stateless)
 
-| Type | Agents | Purpose |
-|------|--------|---------|
-| LLM | Understander, SQL Agent, Analyst | Понимание, генерация |
-| Code | SQL Validator, DataFetcher, Validator | Проверка, выполнение |
+When Understander cannot parse a question clearly, it returns `needs_clarification: true`.
+
+### Why Stateless?
+
+- Original approach used LangGraph `interrupt()`
+- Doesn't work on serverless (Vercel) - MemorySaver doesn't persist between requests
+- Stateless approach: clarification is just a normal response saved to chat_logs
+
+### Flow
+
+```
+User: "Покажи данные"
+         │
+         ▼
+    Understander
+         │
+    needs_clarification: true
+    clarification_question: "Какой символ и период?"
+    suggestions: ["NQ за последний месяц", "ES за 2024"]
+         │
+         ▼
+    Responder
+         │
+    Formats question + suggestions as response
+    Saves to chat_logs
+         │
+         ▼
+    Frontend shows ClarificationMessage with buttons
+         │
+         ▼
+User clicks: "NQ за последний месяц"
+         │
+         ▼
+    New message sent (just like normal)
+    Chat history includes clarification Q&A
+         │
+         ▼
+    Understander (sees context, combines with previous)
+         │
+         ▼
+    ... normal flow ...
+```
+
+### Context Preservation
+
+Clarification response is saved to `chat_logs.response` so subsequent questions see:
+```
+User: Отдели RTH от ETH
+Assistant: Что вы хотите сделать с данными RTH и ETH?
+Варианты:
+• Сравнить волатильность RTH и ETH
+• Сравнить объёмы по сессиям
+User: Сравнить волатильность RTH и ETH
+```
+
+### Guidelines for Understander
+
+1. **Use context before clarifying** - if previous conversation was about RTH vs ETH, assume follow-up questions are about the same
+2. **Combine follow-ups** - when user answers clarification, combine with original question
+3. **Max 3 clarification attempts** - after that, use defaults
+
+## Intent Types
+
+| Type | Description | Example |
+|------|-------------|---------|
+| `data` | Data queries + search | "Как NQ в январе?", "Найди падения >2%" |
+| `concept` | Explain concepts | "Что такое MACD?" |
+| `chitchat` | Small talk | "Привет!" |
+| `out_of_scope` | Non-trading questions | "Какая погода?" |
+
+## Granularity
+
+| Value | Returns | Use Case |
+|-------|---------|----------|
+| `period` | 1 aggregated row | "За месяц вырос на X%" |
+| `daily` | 1 row per day | "По дням", поиск паттернов |
+| `hourly` | 1 row per hour | "Какой час самый волатильный" |
+| `weekday` | 1 row per weekday | "Понедельник vs пятница" |
+| `monthly` | 1 row per month | "По месяцам за год" |
 
 ## Validation Loops
 
 ### SQL Validation Loop
+
 ```
 SQL Agent generates SQL
          │
@@ -171,6 +210,7 @@ DataFetcher  SQL Agent (fix errors)
 ```
 
 ### Response Validation Loop
+
 ```
 Analyst generates response with Stats
          │
@@ -190,94 +230,218 @@ Validator checks Stats vs actual data
           Max 3 attempts
 ```
 
-## Intent Types
+## SSE Events
 
-| Type | Description | Example |
-|------|-------------|---------|
-| `data` | Data queries + search | "Как NQ в январе?", "Найди падения >2%" |
-| `concept` | Explain concepts | "Что такое MACD?" |
-| `chitchat` | Small talk | "Привет!" |
-| `out_of_scope` | Non-trading questions | "Какая погода?" |
+| Type | Description |
+|------|-------------|
+| `step_start` | Agent starting work |
+| `step_end` | Agent finished (includes input/output for traces) |
+| `text_delta` | Response chunk (streaming) |
+| `clarification` | Need user input (shows buttons) |
+| `validation` | Response validation result |
+| `usage` | Token usage and cost |
+| `done` | Complete |
 
-## Human-in-the-Loop
+### clarification Event
 
-Когда Understander не может однозначно понять вопрос, он возвращает `needs_clarification: true`.
-
-### Flow
-
-```
-User: "Покажи данные"
-         │
-         ▼
-    Understander
-         │
-    needs_clarification: true
-    clarification_question: "Какой символ и период?"
-    suggestions: ["NQ за последний месяц", "ES за 2024"]
-         │
-         ▼
-    Clarification (interrupt)
-         │
-    ← ждём ответ пользователя →
-         │
-         ▼
-User: "NQ за январь 2024"
-         │
-         ▼
-    Understander (re-parse)
-         │
-         ▼
-    ... нормальный flow ...
+```json
+{
+  "type": "clarification",
+  "question": "Какой символ вас интересует?",
+  "suggestions": ["NQ", "ES", "RTH vs ETH"]
+}
 ```
 
-### Implementation
+Frontend shows `ClarificationMessage` component with question and suggestion buttons.
 
-Использует LangGraph `interrupt()` функцию:
+## Project Structure
+
+```
+trading-agent/
+├── api.py                    # FastAPI backend
+├── config.py                 # Environment config
+├── agent/
+│   ├── state.py              # AgentState, Intent, Stats types
+│   ├── graph.py              # LangGraph pipeline + TradingGraph wrapper
+│   ├── capabilities.py       # System capabilities description
+│   ├── pricing.py            # Token cost calculation
+│   ├── checkpointer.py       # LangGraph memory (MemorySaver)
+│   ├── agents/
+│   │   ├── understander.py   # LLM - parses question → Intent
+│   │   ├── sql_agent.py      # LLM - generates SQL from search_condition
+│   │   ├── sql_validator.py  # Code - validates SQL before execution
+│   │   ├── data_fetcher.py   # Code - executes SQL, fetches data
+│   │   ├── analyst.py        # LLM - analyzes data, writes response
+│   │   └── validator.py      # Code - validates stats against data
+│   ├── prompts/
+│   │   ├── understander.py   # Structured prompts with examples
+│   │   ├── sql_agent.py
+│   │   └── analyst.py
+│   ├── modules/
+│   │   ├── sql.py            # DuckDB query templates + helpers
+│   │   └── patterns.py       # Pattern detection (consecutive days, etc.)
+│   └── logging/
+│       └── supabase.py       # Request traces logging
+├── frontend/
+│   ├── src/
+│   │   ├── app/              # Next.js pages
+│   │   ├── components/
+│   │   │   ├── ai/           # Chat components (message, prompt-input, etc.)
+│   │   │   ├── ui/           # shadcn/ui components
+│   │   │   └── auth-provider.tsx
+│   │   ├── hooks/
+│   │   │   └── useChat.ts    # Chat state, SSE handling
+│   │   └── types/
+│   │       └── chat.ts       # ChatMessage, SSEEvent types
+│   └── ...
+└── data/
+    └── NQ_1min.parquet       # Trading data (NQ futures)
+```
+
+## Database Schema
+
+### Trading Data (DuckDB)
+
+```sql
+-- Minute-level OHLCV data
+CREATE TABLE nq_1min (
+    timestamp TIMESTAMP,
+    open DOUBLE,
+    high DOUBLE,
+    low DOUBLE,
+    close DOUBLE,
+    volume INTEGER
+);
+```
+
+### Application Data (Supabase)
+
+```sql
+-- Chat logs with traces
+CREATE TABLE chat_logs (
+    id SERIAL PRIMARY KEY,
+    user_id UUID REFERENCES auth.users(id),
+    request_id UUID,
+    session_id TEXT,
+    question TEXT,
+    response TEXT,
+    route TEXT,
+    agents_used TEXT[],
+    validation_attempts INT,
+    validation_passed BOOLEAN,
+    input_tokens INT,
+    output_tokens INT,
+    thinking_tokens INT,
+    cost_usd DECIMAL,
+    duration_ms INT,
+    model TEXT,
+    provider TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Agent traces for debugging
+CREATE TABLE request_traces (
+    id SERIAL PRIMARY KEY,
+    request_id UUID,
+    user_id UUID,
+    step_number INT,
+    agent_name TEXT,
+    input_data JSONB,
+    output_data JSONB,
+    duration_ms INT,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+```
+
+## Quick Start
+
+### Backend
+
+```bash
+cd /Users/yura/Development/stock
+source venv/bin/activate
+uvicorn api:app --reload --port 8000
+```
+
+### Frontend
+
+```bash
+cd frontend
+npm run dev
+```
+
+### Using the Graph Directly
 
 ```python
-def ask_clarification(state):
-    question = intent.get("clarification_question")
-    suggestions = intent.get("suggestions", [])
+from agent.graph import TradingGraph
 
-    # Прерывает flow, ждёт ответа
-    user_response = interrupt({
-        "question": question,
-        "suggestions": suggestions
-    })
+graph = TradingGraph()
 
-    return {"question": user_response}
-```
-
-### Resume
-
-```python
-# Frontend получает clarification_needed событие
-# После ответа пользователя:
-graph.resume_with_clarification(
-    user_response="NQ за январь 2024",
+# Synchronous
+result = graph.invoke(
+    question="Найди дни падения >2%",
     user_id="user123",
     session_id="session1"
 )
+print(result["response"])
+
+# Streaming (for SSE)
+for event in graph.stream_sse(
+    question="Как NQ в январе?",
+    user_id="user123"
+):
+    print(event)
 ```
 
-### Limits
+## Cost Tracking
 
-- Max 3 clarification attempts
-- После лимита - fallback to default Intent
+All LLM calls track usage and cost:
 
-## Granularity
+```python
+# Gemini 2.5 Flash
+GEMINI_2_5_FLASH = {
+    "input": 0.15 / 1_000_000,   # $0.15 per 1M tokens
+    "output": 0.60 / 1_000_000,  # $0.60 per 1M tokens
+    "thinking": 3.50 / 1_000_000 # $3.50 per 1M thinking tokens
+}
 
-| Value | Returns | Use Case |
-|-------|---------|----------|
-| `period` | 1 aggregated row | "За месяц вырос на X%" |
-| `daily` | 1 row per day | "По дням", поиск паттернов |
-| `hourly` | 1 row per hour | "Какой час самый волатильный" |
-| `weekday` | 1 row per weekday | "Понедельник vs пятница" |
-| `monthly` | 1 row per month | "По месяцам за год" |
+# Gemini 2.5 Flash Lite (for Understander)
+GEMINI_2_5_FLASH_LITE = {
+    "input": 0.075 / 1_000_000,
+    "output": 0.30 / 1_000_000,
+    "thinking": 0
+}
+```
 
-## Future: Technical Indicators
+Usage is aggregated across all agents and returned in `usage` SSE event.
 
-Архитектура расширяется для сложных индикаторов:
+## Deployment
+
+### GitHub Actions
+
+On push to `main`:
+1. SSH to Hetzner VPS
+2. `git pull`
+3. `docker-compose up -d --build`
+
+### Environment Variables
+
+```bash
+# Backend (.env)
+GOOGLE_API_KEY=...
+SUPABASE_URL=...
+SUPABASE_KEY=...
+DUCKDB_PATH=data/NQ_1min.parquet
+
+# Frontend (.env.local)
+NEXT_PUBLIC_API_URL=https://api.askbar.trade
+NEXT_PUBLIC_SUPABASE_URL=...
+NEXT_PUBLIC_SUPABASE_ANON_KEY=...
+```
+
+## Future Extensions
+
+### Technical Indicators
 
 ```
 Understander
@@ -294,46 +458,12 @@ Understander
                                        Validator
 ```
 
-Каждый LLM агент имеет свой Code валидатор.
+Each LLM agent has its own Code validator.
 
-## Quick Start
+### Multiple Symbols
 
-```python
-from agent.graph import TradingGraph
+Currently only NQ. Extend to ES, CL, GC, etc.
 
-graph = TradingGraph()
+### Backtesting
 
-result = graph.invoke(
-    question="Найди дни падения >2%",
-    user_id="user123",
-    session_id="session1"
-)
-print(result["response"])
-```
-
-## SSE Events
-
-| Type | Description |
-|------|-------------|
-| `step_start` | Agent starting |
-| `step_end` | Agent finished |
-| `text_delta` | Response chunk |
-| `sql_generated` | SQL Agent generated query |
-| `sql_validated` | SQL Validator result |
-| `validation` | Response validation result |
-| `clarification_needed` | Need user input (human-in-the-loop) |
-| `usage` | Token usage |
-| `done` | Complete |
-
-### clarification_needed Event
-
-```json
-{
-  "type": "clarification_needed",
-  "question": "Какой символ вас интересует?",
-  "suggestions": ["NQ", "ES"],
-  "thread_id": "user123_session1"
-}
-```
-
-Frontend должен показать вопрос пользователю и после ответа вызвать `resume_with_clarification()`.
+Strategy definition and walk-forward analysis.
