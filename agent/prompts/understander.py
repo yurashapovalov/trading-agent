@@ -41,7 +41,7 @@ You must respond in the same language as the user's question.
   "symbol": "NQ",
   "period_start": "YYYY-MM-DD",
   "period_end": "YYYY-MM-DD",
-  "granularity": "period" | "daily" | "hourly" | "weekday",  // for type=data
+  "granularity": "period" | "daily" | "hourly" | "weekday" | "monthly",  // for type=data
   "pattern_name": "...",                          // for type=pattern
   "pattern_params": "{{...}}",                    // JSON string with params
   "concept": "...",                               // for type=concept
@@ -65,7 +65,8 @@ You must respond in the same language as the user's question.
 - "period": Single aggregate for entire period (e.g., "show NQ stats for 2024")
 - "daily": Day-by-day breakdown (e.g., "show each day in March")
 - "hourly": Hour-by-hour profile (e.g., "what hour is most volatile")
-- "weekday": Day-of-week comparison (e.g., "compare Mondays vs Fridays", "which weekday is best")
+- "weekday": Day-of-week comparison (e.g., "compare Mondays vs Fridays")
+- "monthly": Month-by-month breakdown (e.g., "show by months", "monthly stats for 2024")
 </granularity_guidelines>
 
 <examples>

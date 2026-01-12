@@ -74,6 +74,39 @@ TEMPLATES = {
         ORDER BY hour
     """,
 
+    # One row per month (time-series)
+    "monthly": """
+        WITH daily AS (
+            SELECT
+                timestamp::date as date,
+                DATE_TRUNC('month', timestamp::date) as month,
+                FIRST(open ORDER BY timestamp) as open,
+                LAST(close ORDER BY timestamp) as close,
+                MAX(high) as high,
+                MIN(low) as low,
+                SUM(volume) as volume
+            FROM ohlcv_1min
+            WHERE symbol = $1
+              AND timestamp >= $2
+              AND timestamp < $3
+            GROUP BY date, DATE_TRUNC('month', timestamp::date)
+        )
+        SELECT
+            STRFTIME(month, '%Y-%m') as month,
+            COUNT(*) as trading_days,
+            ROUND(FIRST(open ORDER BY month), 2) as open_price,
+            ROUND(LAST(close ORDER BY month), 2) as close_price,
+            ROUND(MAX(high), 2) as max_price,
+            ROUND(MIN(low), 2) as min_price,
+            ROUND(SUM(volume), 0) as total_volume,
+            ROUND(AVG(high - low), 2) as avg_daily_range,
+            ROUND((LAST(close ORDER BY month) - FIRST(open ORDER BY month))
+                  / FIRST(open ORDER BY month) * 100, 2) as change_pct
+        FROM daily
+        GROUP BY month
+        ORDER BY month
+    """,
+
     # One row per day of week (aggregated across all weeks in period)
     "weekday": """
         WITH daily AS (
@@ -116,7 +149,7 @@ def fetch(
     symbol: str,
     period_start: str,
     period_end: str,
-    granularity: Literal["period", "daily", "hourly", "weekday"] = "daily"
+    granularity: Literal["period", "daily", "hourly", "weekday", "monthly"] = "daily"
 ) -> dict[str, Any]:
     """
     Fetch OHLCV data at specified granularity.
@@ -130,6 +163,7 @@ def fetch(
             - "daily": one row per day
             - "hourly": one row per hour (aggregated across days)
             - "weekday": one row per day of week (Mon-Fri stats)
+            - "monthly": one row per month (time-series)
 
     Returns:
         {
