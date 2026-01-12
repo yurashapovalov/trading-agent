@@ -78,7 +78,7 @@ def root():
     return {"status": "ok", "service": "Trading Analytics Agent", "version": "2.0"}
 
 
-def get_recent_chat_history(user_id: str, limit: int = 6) -> list[dict]:
+def get_recent_chat_history(user_id: str, limit: int = 10) -> list[dict]:
     """Fetch recent chat history from Supabase for context."""
     if not supabase:
         return []

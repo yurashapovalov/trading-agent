@@ -138,7 +138,7 @@ def get_analyst_prompt(
     history_str = "No previous context"
     if chat_history:
         history_str = ""
-        for msg in chat_history[-4:]:  # Last 4 messages
+        for msg in chat_history[-10:]:  # Last 10 messages
             role = "User" if msg.get("role") == "user" else "Assistant"
             history_str += f"{role}: {msg.get('content', '')}\n"
 
