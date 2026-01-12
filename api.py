@@ -132,14 +132,13 @@ async def chat_stream(request: ChatRequest, user_id: str = Depends(require_auth)
                     if agent_name == "understander":
                         route = event.get("result", {}).get("type")
 
-                    # Log trace step
+                    # Log trace step (use 'output' for full data, fallback to 'result')
                     await log_trace_step(
                         request_id=request_id,
                         user_id=user_id,
                         step_number=step_number,
                         agent_name=agent_name,
-                        agent_type=event.get("result", {}).get("type", "unknown"),
-                        output_data=event.get("result"),
+                        output_data=event.get("output") or event.get("result"),
                         duration_ms=duration_ms,
                     )
 

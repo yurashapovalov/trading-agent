@@ -74,37 +74,14 @@ CREATE TABLE IF NOT EXISTS request_traces (
 
     -- Step identification
     step_number INTEGER NOT NULL,
-    agent_name TEXT NOT NULL,             -- 'router', 'data_agent', 'analyst', 'educator', 'validator'
-    agent_type TEXT NOT NULL,             -- 'routing', 'data', 'output'
+    agent_name TEXT NOT NULL,             -- 'understander', 'data_fetcher', 'analyst', 'validator'
 
-    -- Agent I/O
-    input_data JSONB,
-    output_data JSONB,
-
-    -- SQL execution (for DATA agents)
-    sql_query TEXT,
-    sql_result JSONB,
-    sql_rows_returned INTEGER,
-    sql_error TEXT,
-
-    -- Validation (for Validator agent)
-    validation_status TEXT,               -- 'ok', 'rewrite', 'need_more_data'
-    validation_issues TEXT[],
-    validation_feedback TEXT,
-
-    -- LLM details
-    prompt_template TEXT,
-    model_used TEXT,
-    input_tokens INTEGER DEFAULT 0,
-    output_tokens INTEGER DEFAULT 0,
-    thinking_tokens INTEGER DEFAULT 0,
-    cost_usd DECIMAL(10, 6) DEFAULT 0,
+    -- Agent I/O (flexible JSONB for different agent types)
+    input_data JSONB,                     -- what came into the agent
+    output_data JSONB,                    -- what came out (includes usage, errors, etc.)
 
     -- Timing
-    started_at TIMESTAMPTZ,
-    finished_at TIMESTAMPTZ,
     duration_ms INTEGER,
-
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -113,11 +90,6 @@ CREATE INDEX IF NOT EXISTS idx_traces_request_id ON request_traces(request_id);
 CREATE INDEX IF NOT EXISTS idx_traces_user_id ON request_traces(user_id);
 CREATE INDEX IF NOT EXISTS idx_traces_created_at ON request_traces(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_traces_agent_name ON request_traces(agent_name);
-CREATE INDEX IF NOT EXISTS idx_traces_agent_type ON request_traces(agent_type);
-CREATE INDEX IF NOT EXISTS idx_traces_validation_status ON request_traces(validation_status)
-    WHERE validation_status IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_traces_sql_error ON request_traces(sql_error)
-    WHERE sql_error IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_traces_request_step ON request_traces(request_id, step_number);
 
 -- Row Level Security

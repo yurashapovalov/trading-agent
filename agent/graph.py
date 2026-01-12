@@ -253,16 +253,25 @@ class TradingGraph:
                 }
 
                 # Emit specific events based on node
+                # Each step_end has:
+                #   - result: summary for UI display
+                #   - output: full data for logging/traces
                 if node_name == "understander":
                     intent = updates.get("intent", {})
+                    usage = updates.get("usage", {})
                     yield {
                         "type": "step_end",
                         "agent": node_name,
                         "duration_ms": step_duration_ms,
                         "result": {
                             "type": intent.get("type"),
+                            "symbol": intent.get("symbol"),
+                            "period": f"{intent.get('period_start')} — {intent.get('period_end')}" if intent.get("period_start") else None,
                             "granularity": intent.get("granularity"),
-                            "pattern": intent.get("pattern", {}).get("name") if intent.get("pattern") else None,
+                        },
+                        "output": {
+                            "intent": intent,
+                            "usage": usage,
                         }
                     }
 
@@ -276,12 +285,14 @@ class TradingGraph:
                             "rows": data.get("row_count") or data.get("matches_count", 0),
                             "granularity": data.get("granularity"),
                             "pattern": data.get("pattern"),
-                        }
+                        },
+                        "output": data
                     }
 
                 elif node_name == "analyst":
                     response = updates.get("response", "")
                     stats = updates.get("stats", {})
+                    usage = updates.get("usage", {})
 
                     # Stream response in chunks
                     chunk_size = 50
@@ -299,6 +310,11 @@ class TradingGraph:
                         "result": {
                             "response_length": len(response),
                             "stats_count": len(stats) if stats else 0,
+                        },
+                        "output": {
+                            "response": response,
+                            "stats": stats,
+                            "usage": usage,
                         }
                     }
 
@@ -313,14 +329,30 @@ class TradingGraph:
                         "type": "step_end",
                         "agent": node_name,
                         "duration_ms": step_duration_ms,
-                        "result": {"status": validation.get("status")}
+                        "result": {"status": validation.get("status")},
+                        "output": validation
                     }
 
-                # Track final state
+                # Track final state (manually merge usage)
                 if final_state is None:
                     final_state = dict(updates)
                 else:
-                    final_state.update(updates)
+                    # Merge usage instead of overwriting
+                    if "usage" in updates and "usage" in final_state:
+                        old_usage = final_state.get("usage", {})
+                        new_usage = updates.get("usage", {})
+                        final_state["usage"] = {
+                            "input_tokens": (old_usage.get("input_tokens") or 0) + (new_usage.get("input_tokens") or 0),
+                            "output_tokens": (old_usage.get("output_tokens") or 0) + (new_usage.get("output_tokens") or 0),
+                            "thinking_tokens": (old_usage.get("thinking_tokens") or 0) + (new_usage.get("thinking_tokens") or 0),
+                            "cost_usd": (old_usage.get("cost_usd") or 0) + (new_usage.get("cost_usd") or 0),
+                        }
+                        # Update other fields without overwriting usage
+                        for key, value in updates.items():
+                            if key != "usage":
+                                final_state[key] = value
+                    else:
+                        final_state.update(updates)
 
         # Emit usage and done
         duration_ms = int((time.time() - start_time) * 1000)

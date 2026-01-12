@@ -35,69 +35,36 @@ async def log_trace_step(
     user_id: str,
     step_number: int,
     agent_name: str,
-    agent_type: str,
     input_data: dict | None = None,
     output_data: dict | None = None,
     duration_ms: int = 0,
-    started_at: datetime | None = None,
-    finished_at: datetime | None = None,
-    sql_query: str | None = None,
-    sql_result: Any | None = None,
-    sql_rows_returned: int | None = None,
-    sql_error: str | None = None,
-    validation_status: str | None = None,
-    validation_issues: list[str] | None = None,
-    validation_feedback: str | None = None,
-    prompt_template: str | None = None,
-    model_used: str | None = None,
-    input_tokens: int = 0,
-    output_tokens: int = 0,
-    thinking_tokens: int = 0,
-    cost_usd: float = 0.0,
 ):
     """
     Log a single agent step to request_traces.
 
-    Called after each agent completes its work.
+    All agent-specific data (usage, validation, sql) goes into input_data/output_data JSONB.
     """
     supabase = get_supabase()
     if not supabase:
         return
 
     try:
-        # Convert all data to JSON-serializable format
-        serializable_sql_result = make_json_serializable(sql_result)
         serializable_input = make_json_serializable(input_data)
         serializable_output = make_json_serializable(output_data)
 
-        # Truncate large fields to avoid storage issues
-        if serializable_sql_result and len(str(serializable_sql_result)) > 10000:
-            serializable_sql_result = str(serializable_sql_result)[:10000] + "... [truncated]"
+        # Truncate large output to avoid storage issues
+        output_str = json.dumps(serializable_output) if serializable_output else ""
+        if len(output_str) > 50000:
+            serializable_output = {"_truncated": True, "preview": output_str[:1000]}
 
         supabase.table("request_traces").insert({
             "request_id": request_id,
             "user_id": user_id,
             "step_number": step_number,
             "agent_name": agent_name,
-            "agent_type": agent_type,
             "input_data": serializable_input,
             "output_data": serializable_output,
             "duration_ms": duration_ms,
-            "started_at": started_at.isoformat() if started_at else None,
-            "finished_at": finished_at.isoformat() if finished_at else None,
-            "sql_query": sql_query,
-            "sql_result": serializable_sql_result,
-            "sql_rows_returned": sql_rows_returned,
-            "sql_error": sql_error,
-            "validation_status": validation_status,
-            "validation_issues": validation_issues,
-            "validation_feedback": validation_feedback,
-            "prompt_template": prompt_template,
-            "model_used": model_used,
-            "input_tokens": input_tokens,
-            "output_tokens": output_tokens,
-            "thinking_tokens": thinking_tokens,
-            "cost_usd": cost_usd,
         }).execute()
     except Exception as e:
         print(f"Failed to log trace step: {e}")
@@ -162,7 +129,6 @@ def log_trace_step_sync(
     user_id: str,
     step_number: int,
     agent_name: str,
-    agent_type: str,
     **kwargs
 ):
     """Synchronous version of log_trace_step for non-async contexts."""
@@ -170,18 +136,16 @@ def log_trace_step_sync(
     try:
         loop = asyncio.get_event_loop()
         if loop.is_running():
-            # If already in async context, create task
             asyncio.create_task(log_trace_step(
-                request_id, user_id, step_number, agent_name, agent_type, **kwargs
+                request_id, user_id, step_number, agent_name, **kwargs
             ))
         else:
             loop.run_until_complete(log_trace_step(
-                request_id, user_id, step_number, agent_name, agent_type, **kwargs
+                request_id, user_id, step_number, agent_name, **kwargs
             ))
     except RuntimeError:
-        # No event loop, run synchronously
         asyncio.run(log_trace_step(
-            request_id, user_id, step_number, agent_name, agent_type, **kwargs
+            request_id, user_id, step_number, agent_name, **kwargs
         ))
 
 
