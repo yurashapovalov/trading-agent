@@ -119,6 +119,46 @@ try:
 
 ## Medium Priority
 
+### 0. Clarification message shows usage/steps artifact
+
+**Problem:** When clarification is shown and user clicks a button, the old message with "2 steps" and token count remains as an artifact.
+
+**Screenshot:** User asks unclear question → sees "2 steps" + "3,177 / 123 · $0.0004" → then their follow-up answer → then actual response with "8 steps".
+
+**Root cause:**
+1. `done` event adds message to `messages` with `agent_steps` and `usage`
+2. `clarification` event shows ClarificationMessage with buttons
+3. User clicks → ClarificationMessage disappears
+4. But the old message artifact remains
+
+**File:** `frontend/src/hooks/useChat.ts`
+
+**Fix options:**
+
+A. Don't add usage/steps for clarification messages:
+```typescript
+} else if (event.type === "done") {
+  const isClarification = /* check if clarification was shown */;
+  setMessages((prev) => [
+    ...prev,
+    {
+      role: "assistant",
+      content: stripSuggestions(finalText),
+      agent_steps: isClarification ? undefined : [...stepsCollected],
+      usage: isClarification ? undefined : usageData,
+    },
+  ]);
+}
+```
+
+B. Track `isClarification` flag when `clarification` event received, use it in `done` handler.
+
+C. Don't add message at all for clarification (ClarificationMessage handles display).
+
+**Recommendation:** Option B - set flag when clarification event comes, check it in done handler.
+
+---
+
 ### 4. Extract duplicated SSE parsing logic
 
 **Problem:** Nearly identical SSE parsing in two places.
