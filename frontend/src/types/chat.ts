@@ -37,7 +37,7 @@ export type ChatMessage = {
 // SSE event types from backend
 export type SSEEvent =
   | { type: "step_start"; agent: string; message: string }
-  | { type: "step_end"; agent: string; result?: Record<string, unknown> }
+  | { type: "step_end"; agent: string; result?: Record<string, unknown>; duration_ms?: number }
   | { type: "tool_call"; tool: string; args: Record<string, unknown> }
   | { type: "sql_executed"; query: string; rows_found: number; error?: string; duration_ms: number }
   | { type: "validation"; status: "ok" | "failed" }

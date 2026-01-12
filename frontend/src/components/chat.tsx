@@ -34,12 +34,13 @@ import {
 import { Loader } from "@/components/ai/loader"
 
 import type { AgentStep } from "@/types/chat"
-import { DatabaseIcon, BrainIcon, CheckCircleIcon, RouteIcon } from "lucide-react"
+import { DatabaseIcon, BrainIcon, CheckCircleIcon, RouteIcon, MessageCircleIcon } from "lucide-react"
 
 // Map agent names to icons
 const agentIcons: Record<string, any> = {
   // v2 agents
   understander: RouteIcon,
+  responder: MessageCircleIcon,
   data_fetcher: DatabaseIcon,
   analyst: BrainIcon,
   validator: CheckCircleIcon,
@@ -47,6 +48,39 @@ const agentIcons: Record<string, any> = {
   router: RouteIcon,
   data_agent: DatabaseIcon,
   educator: BrainIcon,
+}
+
+function getStepDescription(step: AgentStep): string | undefined {
+  const parts: string[] = []
+
+  // Add duration if available
+  if (step.durationMs) {
+    parts.push(`${step.durationMs}ms`)
+  }
+
+  // Add result info based on agent type
+  if (step.result) {
+    if (step.agent === "understander") {
+      const type = step.result.type as string
+      const symbol = step.result.symbol as string
+      if (type) parts.push(`→ ${type}`)
+      if (symbol) parts.push(symbol)
+    } else if (step.agent === "data_fetcher") {
+      const rows = step.result.rows as number
+      if (rows !== undefined) parts.push(`${rows} rows`)
+    } else if (step.agent === "analyst") {
+      const len = step.result.response_length as number
+      if (len) parts.push(`${len} chars`)
+    } else if (step.agent === "validator") {
+      const status = step.result.status as string
+      if (status) parts.push(status === "ok" ? "✓" : "rewrite")
+    } else if (step.agent === "responder") {
+      const len = step.result.response_length as number
+      if (len) parts.push(`${len} chars`)
+    }
+  }
+
+  return parts.length > 0 ? parts.join(" · ") : undefined
 }
 
 function AgentStepsDisplay({ steps, isStreaming }: { steps: AgentStep[]; isStreaming?: boolean }) {
@@ -64,7 +98,7 @@ function AgentStepsDisplay({ steps, isStreaming }: { steps: AgentStep[]; isStrea
             label={step.message}
             status={step.status === "running" ? "active" : "complete"}
             icon={agentIcons[step.agent] || BrainIcon}
-            description={step.durationMs ? `${step.durationMs}ms` : undefined}
+            description={getStepDescription(step)}
           />
         ))}
       </ChainOfThoughtContent>

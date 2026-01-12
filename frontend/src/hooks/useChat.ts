@@ -198,12 +198,13 @@ export function useChat() {
                       ...stepsCollected[stepIndex],
                       status: "completed",
                       result: event.result,
+                      durationMs: event.duration_ms,
                     }
                   }
                   setCurrentSteps((prev) =>
                     prev.map((s) =>
                       s.agent === event.agent && s.status === "running"
-                        ? { ...s, status: "completed", result: event.result }
+                        ? { ...s, status: "completed", result: event.result, durationMs: event.duration_ms }
                         : s
                     )
                   )
