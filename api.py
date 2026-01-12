@@ -10,6 +10,7 @@ from typing import Optional
 from supabase import create_client
 
 from data import get_data_info, init_database
+from agent.logging.supabase import log_completion, log_trace_step
 import config
 
 # Initialize Supabase client
@@ -92,21 +93,24 @@ async def chat_stream(request: ChatRequest, user_id: str = Depends(require_auth)
     - done: completion
     """
     import asyncio
+    import uuid
+    from datetime import datetime
     from agent.graph import trading_graph
-    from agent.logging.supabase import log_completion
 
     print(f"[CHAT] Processing: {request.message[:50]}... for user {user_id[:8]}...")
 
     async def generate():
         final_text = ""
         usage_data = {}
-        request_id = None
+        request_id = str(uuid.uuid4())
         route = None
         agents_used = []
         sql_queries_count = 0
         total_rows = 0
         validation_attempts = 0
         validation_passed = None
+        step_number = 0
+        step_start_times = {}
 
         try:
             for event in trading_graph.stream_sse(
@@ -121,10 +125,34 @@ async def chat_stream(request: ChatRequest, user_id: str = Depends(require_auth)
                 event_type = event.get("type")
 
                 if event_type == "step_start":
-                    agents_used.append(event.get("agent"))
+                    agent_name = event.get("agent")
+                    agents_used.append(agent_name)
+                    step_start_times[agent_name] = datetime.now()
 
-                elif event_type == "step_end" and event.get("agent") == "understander":
-                    route = event.get("result", {}).get("type")
+                elif event_type == "step_end":
+                    agent_name = event.get("agent")
+                    step_number += 1
+
+                    # Get route from understander
+                    if agent_name == "understander":
+                        route = event.get("result", {}).get("type")
+
+                    # Calculate duration
+                    started_at = step_start_times.get(agent_name)
+                    duration_ms = int((datetime.now() - started_at).total_seconds() * 1000) if started_at else 0
+
+                    # Log trace step
+                    await log_trace_step(
+                        request_id=request_id,
+                        user_id=user_id,
+                        step_number=step_number,
+                        agent_name=agent_name,
+                        agent_type=event.get("result", {}).get("type", "unknown"),
+                        output_data=event.get("result"),
+                        duration_ms=duration_ms,
+                        started_at=started_at,
+                        finished_at=datetime.now(),
+                    )
 
                 elif event_type == "sql_executed":
                     sql_queries_count += 1
@@ -141,7 +169,6 @@ async def chat_stream(request: ChatRequest, user_id: str = Depends(require_auth)
                     usage_data = event
 
                 elif event_type == "done":
-                    request_id = event.get("request_id")
                     duration_ms = event.get("total_duration_ms", 0)
 
                     # Log to Supabase
