@@ -92,26 +92,43 @@ WHERE {filter_condition}
 ORDER BY date
 </query_structure>
 
+<critical_rules>
+1. NEVER add semicolon (;) at the end of the query
+2. NEVER use UNION to combine data rows with aggregate rows
+3. Keep queries simple - return rows, let Analyst calculate aggregates (AVG, SUM, etc.)
+4. For TOP N queries: just use ORDER BY + LIMIT, return the rows
+5. For comparisons (e.g., Monday vs Friday): return grouped/aggregated data
+</critical_rules>
+
 <examples>
 Example 1: "days where change_pct < -2%"
-Filter: change_pct < -2
+→ WHERE change_pct < -2
 
 Example 2: "days where change_pct < -2% AND previous day change_pct > +1%"
-Filter: change_pct < -2 AND prev_change_pct > 1
+→ WHERE change_pct < -2 AND prev_change_pct > 1
 
 Example 3: "gap up more than 1%"
-Filter: gap_pct > 1
+→ WHERE gap_pct > 1
 
-Example 4: "days with volume above 500000"
-Filter: volume > 500000
+Example 4: "top 5 days by volume"
+→ ORDER BY volume DESC LIMIT 5
+(Just return 5 rows, Analyst will calculate averages if needed)
 
-Example 5: "days where range > 100 points"
-Filter: range > 100
+Example 5: "compare Monday vs Friday volatility"
+→ Final SELECT:
+SELECT
+    CASE WHEN DAYOFWEEK(date) = 1 THEN 'Monday' ELSE 'Friday' END as weekday,
+    ROUND(AVG(range), 2) as avg_range,
+    COUNT(*) as days
+FROM with_windows
+WHERE DAYOFWEEK(date) IN (1, 5)
+GROUP BY weekday
 </examples>
 
 <output_format>
 Return ONLY the SQL query, nothing else.
 Do not include markdown code blocks or explanations.
+Do NOT add semicolon at the end.
 Just the raw SQL query.
 </output_format>
 """
