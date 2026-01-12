@@ -395,8 +395,8 @@ class TradingGraph:
                 #   - input: what agent received
                 #   - output: full data for logging/traces
                 if node_name == "understander":
-                    intent = updates.get("intent", {})
-                    usage = updates.get("usage", {})
+                    intent = updates.get("intent") or {}
+                    usage = updates.get("usage") or {}
                     yield {
                         "type": "step_end",
                         "agent": node_name,
@@ -419,7 +419,7 @@ class TradingGraph:
 
                 elif node_name == "sql_agent":
                     sql_query = updates.get("sql_query")
-                    usage = updates.get("usage", {})
+                    usage = updates.get("usage") or {}
                     yield {
                         "type": "step_end",
                         "agent": node_name,
@@ -437,7 +437,7 @@ class TradingGraph:
                     accumulated_state["sql_query"] = sql_query
 
                 elif node_name == "sql_validator":
-                    sql_validation = updates.get("sql_validation", {})
+                    sql_validation = updates.get("sql_validation") or {}
                     yield {
                         "type": "step_end",
                         "agent": node_name,
@@ -453,7 +453,7 @@ class TradingGraph:
                     accumulated_state["sql_validation"] = sql_validation
 
                 elif node_name == "data_fetcher":
-                    data = updates.get("data", {})
+                    data = updates.get("data") or {}
                     yield {
                         "type": "step_end",
                         "agent": node_name,
@@ -469,9 +469,9 @@ class TradingGraph:
                     accumulated_state["data"] = data
 
                 elif node_name == "analyst":
-                    response = updates.get("response", "")
-                    stats = updates.get("stats", {})
-                    usage = updates.get("usage", {})
+                    response = updates.get("response") or ""
+                    stats = updates.get("stats") or {}
+                    usage = updates.get("usage") or {}
 
                     # Stream response in chunks
                     chunk_size = 50
@@ -502,7 +502,7 @@ class TradingGraph:
                     accumulated_state["stats"] = stats
 
                 elif node_name == "validator":
-                    validation = updates.get("validation", {})
+                    validation = updates.get("validation") or {}
                     yield {
                         "type": "validation",
                         "status": validation.get("status", "ok"),
@@ -519,8 +519,8 @@ class TradingGraph:
 
                 elif node_name == "responder":
                     # Responder handles chitchat/out_of_scope/clarification
-                    response = updates.get("response", "")
-                    suggestions = updates.get("suggestions", [])
+                    response = updates.get("response") or ""
+                    suggestions = updates.get("suggestions") or []
                     is_clarification = len(suggestions) > 0
 
                     # For clarification, emit special event with question and buttons
@@ -559,8 +559,8 @@ class TradingGraph:
                 else:
                     # Merge usage instead of overwriting
                     if "usage" in updates and "usage" in final_state:
-                        old_usage = final_state.get("usage", {})
-                        new_usage = updates.get("usage", {})
+                        old_usage = final_state.get("usage") or {}
+                        new_usage = updates.get("usage") or {}
                         final_state["usage"] = {
                             "input_tokens": (old_usage.get("input_tokens") or 0) + (new_usage.get("input_tokens") or 0),
                             "output_tokens": (old_usage.get("output_tokens") or 0) + (new_usage.get("output_tokens") or 0),
@@ -576,7 +576,7 @@ class TradingGraph:
 
         # Emit usage and done
         duration_ms = int((time.time() - start_time) * 1000)
-        usage = final_state.get("usage", {}) if final_state else {}
+        usage = (final_state.get("usage") or {}) if final_state else {}
 
         yield {
             "type": "usage",
