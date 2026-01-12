@@ -42,7 +42,7 @@ class DataFetcher:
         intent_type = intent.get("type", "data")
 
         # Check for validated SQL from SQL Agent
-        sql_validation = state.get("sql_validation", {})
+        sql_validation = state.get("sql_validation") or {}
         sql_query = state.get("sql_query")
 
         # Route to appropriate handler

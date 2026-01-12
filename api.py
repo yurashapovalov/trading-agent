@@ -177,7 +177,8 @@ async def chat_stream(request: ChatRequest, user_id: str = Depends(require_auth)
 
                     # Get route from understander
                     if agent_name == "understander":
-                        route = event.get("result", {}).get("type")
+                        result = event.get("result") or {}
+                        route = result.get("type")
 
                     # Log trace step (use 'output' for full data, fallback to 'result')
                     await log_trace_step(
@@ -195,8 +196,8 @@ async def chat_stream(request: ChatRequest, user_id: str = Depends(require_auth)
 
                 elif event_type == "clarification":
                     # Save clarification question as response for context
-                    question = event.get("question", "")
-                    suggestions = event.get("suggestions", [])
+                    question = event.get("question") or ""
+                    suggestions = event.get("suggestions") or []
                     final_text = question
                     if suggestions:
                         final_text += "\n\nВарианты:\n" + "\n".join(f"• {s}" for s in suggestions)

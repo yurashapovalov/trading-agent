@@ -135,7 +135,7 @@ def after_understander(state: AgentState) -> Literal["responder", "sql_agent", "
 
 def after_sql_validation(state: AgentState) -> Literal["data_fetcher", "sql_agent"]:
     """Route based on SQL validation result."""
-    sql_validation = state.get("sql_validation", {})
+    sql_validation = state.get("sql_validation") or {}
     status = sql_validation.get("status", "ok")
     step_number = state.get("step_number", 0)
 
@@ -151,7 +151,7 @@ def after_sql_validation(state: AgentState) -> Literal["data_fetcher", "sql_agen
 
 def after_validation(state: AgentState) -> Literal["end", "analyst"]:
     """Decide whether to end or rewrite."""
-    validation = state.get("validation", {})
+    validation = state.get("validation") or {}
     status = validation.get("status", "ok")
     attempts = state.get("validation_attempts", 0)
 

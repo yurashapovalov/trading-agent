@@ -41,13 +41,13 @@ class Analyst:
     def __call__(self, state: AgentState) -> dict:
         """Generate analysis with stats."""
         question = state.get("question", "")
-        data = state.get("data", {})
+        data = state.get("data") or {}
         intent = state.get("intent") or {}
         intent_type = intent.get("type", "data")
-        chat_history = state.get("chat_history", [])
+        chat_history = state.get("chat_history") or []
 
         # Check if rewrite needed
-        validation = state.get("validation", {})
+        validation = state.get("validation") or {}
         previous_response = ""
         issues = []
         if validation.get("status") == "rewrite":
@@ -82,7 +82,7 @@ class Analyst:
             # Parse JSON response
             result = json.loads(response_obj.text)
             response_text = result.get("response", "")
-            stats = result.get("stats", {})
+            stats = result.get("stats") or {}
 
         except json.JSONDecodeError:
             # Fallback: treat entire response as text
@@ -109,12 +109,12 @@ class Analyst:
         so we collect full response and parse at the end.
         """
         question = state.get("question", "")
-        data = state.get("data", {})
-        intent = state.get("intent", {})
+        data = state.get("data") or {}
+        intent = state.get("intent") or {}
         intent_type = intent.get("type", "data")
 
         # Check if rewrite needed
-        validation = state.get("validation", {})
+        validation = state.get("validation") or {}
         previous_response = ""
         issues = []
         if validation.get("status") == "rewrite":
