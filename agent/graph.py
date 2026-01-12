@@ -237,6 +237,11 @@ class TradingGraph:
         }
 
         final_state = None
+        # Track accumulated state for input_data
+        accumulated_state = {
+            "question": question,
+            "chat_history": chat_history,
+        }
 
         for event in self.app.stream(initial_state, config, stream_mode="updates"):
             for node_name, updates in event.items():
@@ -244,6 +249,9 @@ class TradingGraph:
                 current_time = time.time()
                 step_duration_ms = int((current_time - last_step_time) * 1000)
                 last_step_time = current_time
+
+                # Build input_data based on what this agent received
+                input_data = self._get_agent_input(node_name, accumulated_state)
 
                 # Emit step_start
                 yield {
@@ -255,6 +263,7 @@ class TradingGraph:
                 # Emit specific events based on node
                 # Each step_end has:
                 #   - result: summary for UI display
+                #   - input: what agent received
                 #   - output: full data for logging/traces
                 if node_name == "understander":
                     intent = updates.get("intent", {})
@@ -269,11 +278,14 @@ class TradingGraph:
                             "period": f"{intent.get('period_start')} — {intent.get('period_end')}" if intent.get("period_start") else None,
                             "granularity": intent.get("granularity"),
                         },
+                        "input": input_data,
                         "output": {
                             "intent": intent,
                             "usage": usage,
                         }
                     }
+                    # Update accumulated state
+                    accumulated_state["intent"] = intent
 
                 elif node_name == "data_fetcher":
                     data = updates.get("data", {})
@@ -286,8 +298,11 @@ class TradingGraph:
                             "granularity": data.get("granularity"),
                             "pattern": data.get("pattern"),
                         },
+                        "input": input_data,
                         "output": data
                     }
+                    # Update accumulated state
+                    accumulated_state["data"] = data
 
                 elif node_name == "analyst":
                     response = updates.get("response", "")
@@ -311,12 +326,16 @@ class TradingGraph:
                             "response_length": len(response),
                             "stats_count": len(stats) if stats else 0,
                         },
+                        "input": input_data,
                         "output": {
                             "response": response,
                             "stats": stats,
                             "usage": usage,
                         }
                     }
+                    # Update accumulated state
+                    accumulated_state["response"] = response
+                    accumulated_state["stats"] = stats
 
                 elif node_name == "validator":
                     validation = updates.get("validation", {})
@@ -330,6 +349,7 @@ class TradingGraph:
                         "agent": node_name,
                         "duration_ms": step_duration_ms,
                         "result": {"status": validation.get("status")},
+                        "input": input_data,
                         "output": validation
                     }
 
@@ -380,6 +400,29 @@ class TradingGraph:
             "validator": "Validating response...",
         }
         return messages.get(agent, f"Running {agent}...")
+
+    def _get_agent_input(self, agent: str, state: dict) -> dict:
+        """Get input data for agent based on accumulated state."""
+        if agent == "understander":
+            return {
+                "question": state.get("question"),
+            }
+        elif agent == "data_fetcher":
+            return {
+                "intent": state.get("intent"),
+            }
+        elif agent == "analyst":
+            return {
+                "question": state.get("question"),
+                "data": state.get("data"),
+            }
+        elif agent == "validator":
+            return {
+                "response": state.get("response"),
+                "stats": state.get("stats"),
+                "data": state.get("data"),
+            }
+        return {}
 
 
 # Singleton instance

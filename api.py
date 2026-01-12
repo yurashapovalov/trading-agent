@@ -138,6 +138,7 @@ async def chat_stream(request: ChatRequest, user_id: str = Depends(require_auth)
                         user_id=user_id,
                         step_number=step_number,
                         agent_name=agent_name,
+                        input_data=event.get("input"),
                         output_data=event.get("output") or event.get("result"),
                         duration_ms=duration_ms,
                     )
