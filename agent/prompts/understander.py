@@ -92,6 +92,17 @@ DO NOT ask for clarification when:
 - Period is not specified (system has defaults)
 - Symbol is not specified (default is NQ)
 - Request is clear even if brief ("NQ за январь" is clear)
+- Context provides the missing information (see USING CONTEXT below)
+
+USING CONTEXT FROM CHAT HISTORY:
+Before asking for clarification, check if the context already contains the answer:
+- If previous conversation was about RTH vs ETH, and user asks "compare volumes" → assume RTH vs ETH
+- If previous question specified a time period, and new question is related → use same period
+- If context establishes a clear topic (symbol, session type, analysis type), carry it forward
+
+Example: User discussed RTH/ETH volatility, then asks "Сопоставь объемы" (compare volumes)
+→ DON'T ask clarification, assume user means RTH vs ETH volumes
+→ Intent: type="data", search_condition="compare volumes between RTH and ETH sessions"
 
 HANDLING CLARIFICATION FOLLOW-UPS:
 When context shows this pattern:
