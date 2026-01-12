@@ -4,80 +4,74 @@ import { useState } from "react"
 import { useAuth } from "@/components/auth-provider"
 import { useChat } from "@/hooks/useChat"
 
-// shadcn-io/ai components
+// AI components
 import {
   Conversation,
   ConversationContent,
   ConversationScrollButton,
-} from "@/components/ui/shadcn-io/ai/conversation"
-import { Message, MessageContent } from "@/components/ui/shadcn-io/ai/message"
-import { Response } from "@/components/ui/shadcn-io/ai/response"
+} from "@/components/ai/conversation"
 import {
-  Reasoning,
-  ReasoningTrigger,
-  ReasoningContent,
-} from "@/components/ui/shadcn-io/ai/reasoning"
-import { Suggestions, Suggestion } from "@/components/ui/shadcn-io/ai/suggestion"
+  Message,
+  MessageContent,
+  MessageResponse,
+} from "@/components/ai/message"
+import {
+  ChainOfThought,
+  ChainOfThoughtHeader,
+  ChainOfThoughtContent,
+  ChainOfThoughtStep,
+} from "@/components/ai/chain-of-thought"
+import { Suggestions, Suggestion } from "@/components/ai/suggestion"
 import {
   PromptInput,
-  PromptInputTextarea,
-  PromptInputToolbar,
-  PromptInputTools,
+  PromptInputBody,
+  PromptInputFooter,
   PromptInputSubmit,
-} from "@/components/ui/shadcn-io/ai/prompt-input"
-import { Loader } from "@/components/ui/shadcn-io/ai/loader"
-import { Actions } from "@/components/ui/shadcn-io/ai/actions"
+  PromptInputTextarea,
+  PromptInputTools,
+  type PromptInputMessage,
+} from "@/components/ai/prompt-input"
+import { Loader } from "@/components/ai/loader"
 
 import type { AgentStep } from "@/types/chat"
+import { DatabaseIcon, BrainIcon, CheckCircleIcon, RouteIcon } from "lucide-react"
 
-function AgentSteps({ steps, isStreaming }: { steps: AgentStep[]; isStreaming?: boolean }) {
-  if (steps.length === 0) return null
-
-  // Combine all steps into one reasoning block
-  const combinedContent = steps
-    .map((step) => {
-      let content = `**${step.message}**`
-      if (step.result) {
-        content += `\n\`\`\`json\n${JSON.stringify(step.result, null, 2)}\n\`\`\``
-      }
-      if (step.tools && step.tools.length > 0) {
-        step.tools.forEach((tool) => {
-          content += `\n\n*${tool.name}:*\n\`\`\`json\n${JSON.stringify(tool.input, null, 2)}\n\`\`\``
-          if (tool.result) {
-            content += `\n\`\`\`json\n${JSON.stringify(tool.result, null, 2)}\n\`\`\``
-          }
-        })
-      }
-      return content
-    })
-    .join("\n\n---\n\n")
-
-  return (
-    <Reasoning isStreaming={isStreaming} defaultOpen={isStreaming}>
-      <ReasoningTrigger title={isStreaming ? "Thinking..." : `${steps.length} steps`} />
-      <ReasoningContent>{combinedContent}</ReasoningContent>
-    </Reasoning>
-  )
+// Map agent names to icons
+const agentIcons: Record<string, any> = {
+  router: RouteIcon,
+  data_agent: DatabaseIcon,
+  analyst: BrainIcon,
+  analyst_no_data: BrainIcon,
+  educator: BrainIcon,
+  validator: CheckCircleIcon,
 }
 
-function UsageDisplay({ usage }: { usage: { input_tokens: number; output_tokens: number; thinking_tokens?: number; cost: number } }) {
+function AgentStepsDisplay({ steps, isStreaming }: { steps: AgentStep[]; isStreaming?: boolean }) {
+  if (steps.length === 0) return null
+
   return (
-    <Actions className="mt-2">
-      <span className="text-xs text-muted-foreground">
-        {usage.input_tokens.toLocaleString()}
-        {" / "}
-        {usage.output_tokens.toLocaleString()}
-        {usage.thinking_tokens ? ` / ${usage.thinking_tokens.toLocaleString()}` : ""}
-        {" - $"}
-        {usage.cost.toFixed(4)}
-      </span>
-    </Actions>
+    <ChainOfThought defaultOpen={isStreaming}>
+      <ChainOfThoughtHeader>
+        {isStreaming ? "Thinking..." : `${steps.length} steps`}
+      </ChainOfThoughtHeader>
+      <ChainOfThoughtContent>
+        {steps.map((step, index) => (
+          <ChainOfThoughtStep
+            key={index}
+            label={step.message}
+            status={step.status === "running" ? "active" : "complete"}
+            icon={agentIcons[step.agent] || BrainIcon}
+            description={step.durationMs ? `${step.durationMs}ms` : undefined}
+          />
+        ))}
+      </ChainOfThoughtContent>
+    </ChainOfThought>
   )
 }
 
 export default function Chat() {
   const { user, signOut } = useAuth()
-  const [input, setInput] = useState("")
+  const [text, setText] = useState("")
   const {
     messages,
     isLoading,
@@ -88,12 +82,10 @@ export default function Chat() {
     stopGeneration,
   } = useChat()
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault()
-    if (input.trim()) {
-      sendMessage(input)
-      setInput("")
-    }
+  const handleSubmit = (message: PromptInputMessage) => {
+    if (!message.text?.trim()) return
+    sendMessage(message.text)
+    setText("")
   }
 
   const handleSuggestionClick = (suggestion: string) => {
@@ -101,9 +93,9 @@ export default function Chat() {
   }
 
   return (
-    <div className="flex flex-col h-dvh bg-background">
+    <div className="relative flex h-dvh w-full flex-col divide-y overflow-hidden">
       {/* Header */}
-      <header className="flex items-center justify-between px-4 py-2 border-b border-border">
+      <header className="flex items-center justify-between px-4 py-2">
         <h1 className="text-sm font-medium">Trading Analytics</h1>
         <div className="flex items-center gap-3">
           <span className="text-xs text-muted-foreground">{user?.email}</span>
@@ -116,46 +108,54 @@ export default function Chat() {
         </div>
       </header>
 
-      {/* Messages with auto-scroll */}
-      <Conversation className="flex-1">
-        <ConversationContent className="max-w-2xl mx-auto py-6 space-y-6">
+      {/* Conversation */}
+      <Conversation>
+        <ConversationContent className="max-w-2xl mx-auto">
           {messages.map((message, index) => (
-            <div key={index}>
-              {/* Agent steps for assistant messages */}
-              {message.role === "assistant" && message.agent_steps && (
-                <AgentSteps steps={message.agent_steps} />
-              )}
+            <Message from={message.role} key={index}>
+              <div>
+                {/* Agent steps before assistant message */}
+                {message.role === "assistant" && message.agent_steps && message.agent_steps.length > 0 && (
+                  <AgentStepsDisplay steps={message.agent_steps} />
+                )}
 
-              {/* Message */}
-              <Message from={message.role}>
+                {/* Message content */}
                 <MessageContent>
-                  <Response>{message.content}</Response>
+                  <MessageResponse>{message.content}</MessageResponse>
                 </MessageContent>
-              </Message>
 
-              {/* Usage stats */}
-              {message.role === "assistant" && message.usage && (
-                <UsageDisplay usage={message.usage} />
-              )}
-            </div>
+                {/* Usage stats */}
+                {message.role === "assistant" && message.usage && (
+                  <div className="mt-2 text-xs text-muted-foreground">
+                    {message.usage.input_tokens.toLocaleString()} / {message.usage.output_tokens.toLocaleString()}
+                    {message.usage.thinking_tokens ? ` / ${message.usage.thinking_tokens.toLocaleString()}` : ""}
+                    {" · $"}{message.usage.cost.toFixed(4)}
+                  </div>
+                )}
+              </div>
+            </Message>
           ))}
 
-          {/* Current streaming */}
+          {/* Streaming state */}
           {currentSteps.length > 0 && (
-            <AgentSteps steps={currentSteps} isStreaming />
+            <Message from="assistant">
+              <div>
+                <AgentStepsDisplay steps={currentSteps} isStreaming />
+              </div>
+            </Message>
           )}
 
           {streamingText && (
             <Message from="assistant">
               <MessageContent>
-                <Response>{streamingText}</Response>
+                <MessageResponse>{streamingText}</MessageResponse>
               </MessageContent>
             </Message>
           )}
 
           {isLoading && currentSteps.length === 0 && !streamingText && (
             <div className="flex items-center gap-2 text-muted-foreground">
-              <Loader size={16} />
+              <Loader className="size-4" />
               <span className="text-sm">Thinking...</span>
             </div>
           )}
@@ -163,43 +163,43 @@ export default function Chat() {
         <ConversationScrollButton />
       </Conversation>
 
-      {/* Suggestions + Input */}
-      <div className="border-t border-border">
-        <div className="max-w-2xl mx-auto px-4 py-4 space-y-3">
-          {/* Suggestions */}
-          {!isLoading && suggestions.length > 0 && (
-            <Suggestions className="mb-3">
-              {suggestions.map((suggestion) => (
-                <Suggestion
-                  key={suggestion}
-                  suggestion={suggestion}
-                  onClick={handleSuggestionClick}
-                />
-              ))}
-            </Suggestions>
-          )}
+      {/* Bottom: Suggestions + Input */}
+      <div className="grid shrink-0 gap-4 pt-4">
+        {!isLoading && suggestions.length > 0 && (
+          <Suggestions className="px-4">
+            {suggestions.map((suggestion) => (
+              <Suggestion
+                key={suggestion}
+                onClick={() => handleSuggestionClick(suggestion)}
+                suggestion={suggestion}
+              />
+            ))}
+          </Suggestions>
+        )}
 
-          {/* Input */}
+        <div className="w-full px-4 pb-4">
           <PromptInput onSubmit={handleSubmit}>
-            <PromptInputTextarea
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              placeholder="Ask about NQ futures..."
-            />
-            <PromptInputToolbar>
+            <PromptInputBody>
+              <PromptInputTextarea
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                placeholder="Ask about NQ futures..."
+              />
+            </PromptInputBody>
+            <PromptInputFooter>
               <PromptInputTools />
               {isLoading ? (
                 <button
                   type="button"
                   onClick={stopGeneration}
-                  className="inline-flex items-center justify-center rounded-md bg-destructive px-3 py-1.5 text-sm font-medium text-destructive-foreground hover:bg-destructive/90"
+                  className="rounded-md bg-destructive px-3 py-1.5 text-sm font-medium text-destructive-foreground hover:bg-destructive/90"
                 >
                   Stop
                 </button>
               ) : (
-                <PromptInputSubmit disabled={!input.trim()} />
+                <PromptInputSubmit disabled={!text.trim()} />
               )}
-            </PromptInputToolbar>
+            </PromptInputFooter>
           </PromptInput>
         </div>
       </div>
