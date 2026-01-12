@@ -6,7 +6,7 @@
 
 ## Purpose
 
-Получает данные на основе Intent. Роутинг к нужному модулю.
+Получает данные на основе Intent. Роутинг к SQL модулю.
 
 ## Principle
 
@@ -41,12 +41,10 @@ DataFetcher (код) выполняет КАК получить данные.
 
 ## Routing Table
 
-| Intent Type | Module | Function |
-|-------------|--------|----------|
-| `data` | `agent.modules.sql` | `sql.fetch()` |
-| `pattern` | `agent.modules.patterns` | `patterns.search()` |
-| `concept` | — | Возвращает имя концепции |
-| `strategy` | — | Не реализовано |
+| Intent Type | Handler | Result |
+|-------------|---------|--------|
+| `data` | `sql.fetch()` | OHLCV данные |
+| `concept` | — | `{type: "concept", concept: "..."}` |
 
 ## Handler: Data
 
@@ -64,7 +62,7 @@ def _handle_data(self, intent: Intent) -> dict:
 ```python
 {
     "rows": [
-        {"date": "2024-01-02", "open": 17019, "high": 17038, ...},
+        {"date": "2024-01-02", "open": 17019, "high": 17038, "change_pct": -1.84, ...},
         ...
     ],
     "row_count": 26,
@@ -72,32 +70,8 @@ def _handle_data(self, intent: Intent) -> dict:
 }
 ```
 
-## Handler: Pattern
-
-```python
-def _handle_pattern(self, intent: Intent) -> dict:
-    pattern = intent["pattern"]
-    return patterns.search(
-        symbol=intent["symbol"],
-        period_start=intent["period_start"],
-        period_end=intent["period_end"],
-        pattern_name=pattern["name"],
-        params=pattern["params"]
-    )
-```
-
-Возвращает:
-```python
-{
-    "pattern": "big_move",
-    "params": {"threshold_pct": 2.0},
-    "matches": [
-        {"date": "2024-03-15", "change_pct": 2.5, "direction": "up"},
-        ...
-    ],
-    "matches_count": 5
-}
-```
+**Важно:** Для поисковых запросов DataFetcher возвращает ВСЕ данные.
+Фильтрация по `search_condition` происходит в Analyst.
 
 ## Handler: Concept
 
@@ -111,16 +85,6 @@ def _handle_concept(self, intent: Intent) -> dict:
 ```
 
 Для концепций данные из БД не нужны - Analyst объяснит из своих знаний.
-
-## Handler: Strategy (Future)
-
-```python
-def _handle_strategy(self, intent: Intent) -> dict:
-    return {
-        "type": "strategy",
-        "error": "Backtesting not implemented yet"
-    }
-```
 
 ## Error Handling
 
@@ -150,8 +114,6 @@ class DataFetcher:
 
         if intent_type == "concept":
             data = self._handle_concept(intent)
-        elif intent_type == "pattern":
-            data = self._handle_pattern(intent)
         else:
             data = self._handle_data(intent)
 

@@ -10,7 +10,7 @@ Multi-agent trading analytics system.
 |-------|------|---------|
 | Understander | LLM | Парсит вопрос → Intent |
 | DataFetcher | Code | Intent → данные из БД |
-| Analyst | LLM | Данные → ответ + Stats |
+| Analyst | LLM | Данные → ответ + Stats (включая фильтрацию по search_condition) |
 | Validator | Code | Проверяет Stats |
 
 ## Data Flow
@@ -21,16 +21,16 @@ User Question
      ▼
 ┌─────────────────┐
 │  Understander   │  "Как NQ в январе?" → Intent(type=data, daily)
+└────────┬────────┘  "Найди падения >2%" → Intent(type=data, daily, search_condition="...")
+         │
+         ▼
+┌─────────────────┐
+│  DataFetcher    │  Intent → SQL → rows
 └────────┬────────┘
          │
          ▼
 ┌─────────────────┐
-│  DataFetcher    │  Intent → SQL → 26 rows
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│    Analyst      │  26 rows → "NQ вырос на 2.53%..." + Stats
+│    Analyst      │  rows + search_condition → filters → response + Stats
 └────────┬────────┘
          │
          ▼
@@ -58,8 +58,7 @@ agent/
 │   ├── understander.py
 │   └── analyst.py
 ├── modules/
-│   ├── sql.py           # DuckDB queries
-│   └── patterns.py      # Pattern search
+│   └── sql.py           # DuckDB queries
 └── docs/
     ├── overview.md      # (this file)
     ├── agents/
@@ -68,8 +67,7 @@ agent/
     │   ├── analyst.md
     │   └── validator.md
     └── modules/
-        ├── sql.md
-        └── patterns.md
+        └── sql.md
 ```
 
 ## Quick Start
@@ -97,18 +95,36 @@ for event in graph.stream_sse(question, user_id, session_id):
 
 | Type | Description | Example |
 |------|-------------|---------|
-| `data` | Price/volume queries | "Как NQ в январе?" |
-| `pattern` | Pattern search | "Дни с ростом >2%" |
+| `data` | Data queries + search | "Как NQ в январе?", "Найди падения >2%" |
 | `concept` | Explain concepts | "Что такое MACD?" |
-| `strategy` | Backtest (future) | — |
+| `chitchat` | Small talk | "Привет!" |
+| `out_of_scope` | Non-trading questions | "Какая погода?" |
+
+## Search Queries
+
+Для поисковых запросов ("найди", "когда", "покажи дни где..."):
+
+```python
+Intent(
+    type="data",
+    granularity="daily",
+    search_condition="days where change_pct < -2% AND previous day > +1%"
+)
+```
+
+- DataFetcher отдаёт ВСЕ дневные данные
+- Analyst фильтрует по search_condition
+- Никакого хардкода паттернов - любой запрос работает
 
 ## Granularity
 
 | Value | Returns | Use Case |
 |-------|---------|----------|
 | `period` | 1 aggregated row | "За месяц вырос на X%" |
-| `daily` | 1 row per day | "По дням показать" |
-| `hourly` | 1 row per hour | "Внутри дня" |
+| `daily` | 1 row per day | "По дням", поиск паттернов |
+| `hourly` | 1 row per hour | "Какой час самый волатильный" |
+| `weekday` | 1 row per weekday | "Понедельник vs пятница" |
+| `monthly` | 1 row per month | "По месяцам за год" |
 
 ## Validation Loop
 

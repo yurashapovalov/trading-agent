@@ -2,7 +2,7 @@
 
 **File:** `agent/agents/understander.py`
 
-**Type:** LLM (Gemini 2.0 Flash)
+**Type:** LLM (Gemini 2.5 Flash Lite)
 
 ## Purpose
 
@@ -10,7 +10,7 @@
 
 ## Principle
 
-LLM решает ЧТО нужно сделать (какие данные, за какой период, какой паттерн искать).
+LLM решает ЧТО нужно сделать (какие данные, за какой период, есть ли условие поиска).
 Код потом решает КАК это сделать.
 
 ## Input
@@ -27,13 +27,12 @@ LLM решает ЧТО нужно сделать (какие данные, за
 ```python
 {
     "intent": Intent(
-        type="data",           # data | pattern | concept | strategy
+        type="data",           # data | concept | chitchat | out_of_scope
         symbol="NQ",
         period_start="2024-01-01",
         period_end="2024-01-31",
-        granularity="daily",   # period | daily | hourly
-        pattern=None,          # PatternDef for type="pattern"
-        concept=None,          # str for type="concept"
+        granularity="daily",   # period | daily | hourly | weekday | monthly
+        search_condition=None, # or "days where change_pct < -2%"
     )
 }
 ```
@@ -42,10 +41,10 @@ LLM решает ЧТО нужно сделать (какие данные, за
 
 | Type | Когда | Пример вопроса |
 |------|-------|----------------|
-| `data` | Вопросы про цены/объемы | "Как NQ вел себя в январе?" |
-| `pattern` | Поиск паттернов | "Покажи дни когда NQ вырос больше 2%" |
+| `data` | Вопросы про данные или поиск | "Как NQ в январе?", "Найди падения >2%" |
 | `concept` | Объяснение концепций | "Что такое MACD?" |
-| `strategy` | Бэктест стратегий | (будущее) |
+| `chitchat` | Приветствия, благодарности | "Привет!", "Спасибо!" |
+| `out_of_scope` | Не про трейдинг | "Какая погода?" |
 
 ## Granularity
 
@@ -53,30 +52,34 @@ LLM выбирает granularity в зависимости от вопроса:
 
 | Granularity | Когда | Ответ |
 |-------------|-------|-------|
-| `period` | "За месяц" / "В 2024" | 1 агрегированная строка |
-| `daily` | "По дням" / детальный анализ | 1 строка на день |
-| `hourly` | "Внутри дня" | 1 строка на час |
+| `period` | "За месяц" / общая статистика | 1 агрегированная строка |
+| `daily` | "По дням" / поиск паттернов | 1 строка на день |
+| `hourly` | "По часам" / внутридневной профиль | 1 строка на час |
+| `weekday` | "По дням недели" | 1 строка на день недели |
+| `monthly` | "По месяцам" | 1 строка на месяц |
 
-## Pattern Detection
+## Search Queries
 
-Если вопрос про паттерны, Understander возвращает:
+Для поисковых запросов ("найди", "когда", "покажи дни где..."):
 
 ```python
 Intent(
-    type="pattern",
-    pattern=PatternDef(
-        name="big_move",
-        params={"threshold_pct": 2.0, "direction": "up"}
-    )
+    type="data",
+    granularity="daily",  # всегда daily для поиска
+    search_condition="days where change_pct < -2% AND previous day change_pct > +1%"
 )
 ```
 
-Доступные паттерны:
-- `consecutive_days` - N дней подряд вверх/вниз
-- `big_move` - дни с большим изменением (>N%)
-- `reversal` - внутридневной разворот
-- `gap` - гэп вверх/вниз
-- `range_breakout` - пробой диапазона
+- `search_condition` - описание условия на natural language
+- Analyst получит все дневные данные и отфильтрует по условию
+- Никаких хардкоженных паттернов - любое условие работает
+
+## Period Defaults
+
+- Если период указан → используем его
+- Если период НЕ указан:
+  - Для поиска (search_condition есть) → ВСЕ доступные данные
+  - Для обычных запросов → последний месяц
 
 ## Implementation Details
 
@@ -93,32 +96,27 @@ class Understander:
 
 - Использует Gemini с JSON mode для структурированного вывода
 - Промпт в `agent/prompts/understander.py`
-- При ошибке возвращает default intent (data, period, last month)
-- Максимум 3 попытки уточнения если вопрос непонятен
+- При ошибке возвращает default intent (data, daily, last month)
 
 ## Prompt Structure
 
 ```xml
 <role>
-You are a trading data analyst...
+You are a trading question parser...
 </role>
 
 <constraints>
-- Only use available patterns
-- Default to last month if no period
-- Respond in user's language
+- Always return valid JSON
+- Use granularity="daily" for search queries
+- Set search_condition for "find/search" questions
 </constraints>
-
-<capabilities>
-{DATA_CAPABILITIES}
-</capabilities>
 
 <examples>
 Q: "Как NQ вел себя в январе?"
 → type=data, granularity=daily
 
-Q: "Покажи дни когда рост больше 2%"
-→ type=pattern, pattern=big_move
+Q: "Найди дни когда падение >2%"
+→ type=data, granularity=daily, search_condition="days where change_pct < -2%"
 </examples>
 
 <task>
