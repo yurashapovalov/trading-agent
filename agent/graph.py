@@ -221,6 +221,7 @@ class TradingGraph:
 
         start_time = time.time()
         step_number = 0
+        last_step_time = start_time
 
         initial_state = create_initial_state(
             question=question,
@@ -240,6 +241,9 @@ class TradingGraph:
         for event in self.app.stream(initial_state, config, stream_mode="updates"):
             for node_name, updates in event.items():
                 step_number += 1
+                current_time = time.time()
+                step_duration_ms = int((current_time - last_step_time) * 1000)
+                last_step_time = current_time
 
                 # Emit step_start
                 yield {
@@ -254,6 +258,7 @@ class TradingGraph:
                     yield {
                         "type": "step_end",
                         "agent": node_name,
+                        "duration_ms": step_duration_ms,
                         "result": {
                             "type": intent.get("type"),
                             "granularity": intent.get("granularity"),
@@ -266,6 +271,7 @@ class TradingGraph:
                     yield {
                         "type": "step_end",
                         "agent": node_name,
+                        "duration_ms": step_duration_ms,
                         "result": {
                             "rows": data.get("row_count") or data.get("matches_count", 0),
                             "granularity": data.get("granularity"),
@@ -289,6 +295,7 @@ class TradingGraph:
                     yield {
                         "type": "step_end",
                         "agent": node_name,
+                        "duration_ms": step_duration_ms,
                         "result": {
                             "response_length": len(response),
                             "stats_count": len(stats) if stats else 0,
@@ -305,6 +312,7 @@ class TradingGraph:
                     yield {
                         "type": "step_end",
                         "agent": node_name,
+                        "duration_ms": step_duration_ms,
                         "result": {"status": validation.get("status")}
                     }
 

@@ -94,7 +94,6 @@ async def chat_stream(request: ChatRequest, user_id: str = Depends(require_auth)
     """
     import asyncio
     import uuid
-    from datetime import datetime
     from agent.graph import trading_graph
 
     print(f"[CHAT] Processing: {request.message[:50]}... for user {user_id[:8]}...")
@@ -110,7 +109,6 @@ async def chat_stream(request: ChatRequest, user_id: str = Depends(require_auth)
         validation_attempts = 0
         validation_passed = None
         step_number = 0
-        step_start_times = {}
 
         try:
             for event in trading_graph.stream_sse(
@@ -125,21 +123,16 @@ async def chat_stream(request: ChatRequest, user_id: str = Depends(require_auth)
                 event_type = event.get("type")
 
                 if event_type == "step_start":
-                    agent_name = event.get("agent")
-                    agents_used.append(agent_name)
-                    step_start_times[agent_name] = datetime.now()
+                    agents_used.append(event.get("agent"))
 
                 elif event_type == "step_end":
                     agent_name = event.get("agent")
                     step_number += 1
+                    duration_ms = event.get("duration_ms", 0)
 
                     # Get route from understander
                     if agent_name == "understander":
                         route = event.get("result", {}).get("type")
-
-                    # Calculate duration
-                    started_at = step_start_times.get(agent_name)
-                    duration_ms = int((datetime.now() - started_at).total_seconds() * 1000) if started_at else 0
 
                     # Log trace step
                     await log_trace_step(
@@ -150,8 +143,6 @@ async def chat_stream(request: ChatRequest, user_id: str = Depends(require_auth)
                         agent_type=event.get("result", {}).get("type", "unknown"),
                         output_data=event.get("result"),
                         duration_ms=duration_ms,
-                        started_at=started_at,
-                        finished_at=datetime.now(),
                     )
 
                 elif event_type == "sql_executed":

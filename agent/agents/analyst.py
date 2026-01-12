@@ -93,6 +93,7 @@ class Analyst:
         return {
             "response": response_text,
             "stats": Stats(**stats) if stats else None,
+            "usage": self._last_usage,
             "agents_used": [self.name],
             "step_number": state.get("step_number", 0) + 1,
             "validation_attempts": state.get("validation_attempts", 0) + 1,

@@ -11,7 +11,8 @@ from google import genai
 from google.genai import types
 
 import config
-from agent.state import AgentState, Intent, PatternDef
+from agent.state import AgentState, Intent, PatternDef, UsageStats
+from agent.pricing import calculate_cost
 from agent.capabilities import (
     get_capabilities_prompt,
     DEFAULT_SYMBOL,
@@ -38,6 +39,12 @@ class Understander:
     def __init__(self):
         self.client = genai.Client(api_key=config.GOOGLE_API_KEY)
         self.model = "gemini-2.0-flash"
+        self._last_usage = UsageStats(
+            input_tokens=0,
+            output_tokens=0,
+            thinking_tokens=0,
+            cost_usd=0.0
+        )
 
     def __call__(self, state: AgentState) -> dict:
         """Parse question and return Intent."""
@@ -124,6 +131,18 @@ class Understander:
                     }
                 )
             )
+
+            # Track usage
+            if response.usage_metadata:
+                input_tokens = response.usage_metadata.prompt_token_count or 0
+                output_tokens = response.usage_metadata.candidates_token_count or 0
+                cost = calculate_cost(input_tokens, output_tokens, 0)
+                self._last_usage = UsageStats(
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    thinking_tokens=0,
+                    cost_usd=cost
+                )
 
             # Parse JSON response
             data = json.loads(response.text)
