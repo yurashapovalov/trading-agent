@@ -223,7 +223,7 @@ async def chat_history(user_id: str = Depends(require_auth), limit: int = 50):
         if request_ids:
             # Fetch all traces for these requests in one query
             traces_result = supabase.table("request_traces") \
-                .select("request_id, step_number, agent_name, agent_type, input_data, output_data, sql_query, sql_result, sql_rows_returned, validation_status, duration_ms") \
+                .select("request_id, step_number, agent_name, input_data, output_data, duration_ms") \
                 .in_("request_id", request_ids) \
                 .order("step_number") \
                 .execute()
