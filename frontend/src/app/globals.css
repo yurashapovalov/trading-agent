@@ -186,7 +186,13 @@
 }
 
 html {
-  font-size: 15px;
+  font-size: 16px;
+}
+
+@media (min-width: 768px) {
+  html {
+    font-size: 15px;
+  }
 }
 
 html,
