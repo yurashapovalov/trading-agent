@@ -1,6 +1,7 @@
 """FastAPI server for Trading Agent - Multi-Agent Architecture"""
 
 import json
+import math
 import jwt
 from fastapi import FastAPI, HTTPException, Header, Depends
 from fastapi.middleware.cors import CORSMiddleware
@@ -12,6 +13,20 @@ from supabase import create_client
 from data import get_data_info, init_database
 from agent.logging.supabase import log_completion, log_trace_step
 import config
+
+
+def clean_for_json(obj):
+    """Recursively replace NaN/Infinity with None for valid JSON."""
+    if isinstance(obj, dict):
+        return {k: clean_for_json(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [clean_for_json(v) for v in obj]
+    elif isinstance(obj, float):
+        if math.isnan(obj) or math.isinf(obj):
+            return None
+        return obj
+    return obj
+
 
 # Initialize Supabase client
 supabase = create_client(config.SUPABASE_URL, config.SUPABASE_SERVICE_KEY) if config.SUPABASE_URL else None
@@ -161,7 +176,7 @@ async def chat_stream(request: ChatRequest, user_id: str = Depends(require_auth)
                 session_id=request.session_id or "default",
                 chat_history=chat_history
             ):
-                yield f"data: {json.dumps(event, default=str)}\n\n"
+                yield f"data: {json.dumps(clean_for_json(event), default=str)}\n\n"
                 await asyncio.sleep(0)  # Force flush
 
                 # Collect data for logging
