@@ -14,7 +14,6 @@ export default function ChatPanelContainer() {
     isLoading,
     currentSteps,
     streamingText,
-    suggestions,
     clarification,
     sendMessage,
     stopGeneration,
@@ -30,10 +29,6 @@ export default function ChatPanelContainer() {
     sendMessage(response)
   }
 
-  const handleSuggestionClick = (suggestion: string) => {
-    setText(suggestion)
-  }
-
   return (
     <ChatPanel
       header={
@@ -46,13 +41,11 @@ export default function ChatPanelContainer() {
       isLoading={isLoading}
       currentSteps={currentSteps}
       streamingText={streamingText}
-      suggestions={suggestions}
       clarification={clarification}
       inputText={text}
       onInputChange={setText}
       onSubmit={handleSubmit}
       onStop={stopGeneration}
-      onSuggestionClick={handleSuggestionClick}
       onClarificationSelect={handleClarificationSelect}
     />
   )

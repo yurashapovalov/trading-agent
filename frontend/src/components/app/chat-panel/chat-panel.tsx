@@ -14,7 +14,6 @@ import {
   ChainOfThoughtContent,
   ChainOfThoughtStep,
 } from "@/components/ai/chain-of-thought"
-import { Suggestions, Suggestion } from "@/components/ai/suggestion"
 import { ClarificationMessage } from "@/components/ai/clarification-message"
 import {
   PromptInput,
@@ -101,13 +100,11 @@ type ChatPanelProps = {
   isLoading: boolean
   currentSteps: AgentStep[]
   streamingText: string
-  suggestions: string[]
   clarification: ClarificationRequest | null
   inputText: string
   onInputChange: (text: string) => void
   onSubmit: () => void
   onStop: () => void
-  onSuggestionClick: (suggestion: string) => void
   onClarificationSelect: (response: string) => void
 }
 
@@ -117,13 +114,11 @@ export function ChatPanel({
   isLoading,
   currentSteps,
   streamingText,
-  suggestions,
   clarification,
   inputText,
   onInputChange,
   onSubmit,
   onStop,
-  onSuggestionClick,
   onClarificationSelect,
 }: ChatPanelProps) {
   return (
@@ -189,21 +184,8 @@ export function ChatPanel({
         <ConversationScrollButton />
       </Conversation>
 
-      {/* Bottom: Suggestions + Input */}
-      <div className="mx-auto w-full max-w-2xl shrink-0 space-y-4 px-4 pb-4 pt-4">
-        {!isLoading && suggestions.length > 0 && (
-          <Suggestions>
-            {suggestions.map((suggestion) => (
-              <Suggestion
-                key={suggestion}
-                variant="ghost"
-                onClick={() => onSuggestionClick(suggestion)}
-                suggestion={suggestion}
-              />
-            ))}
-          </Suggestions>
-        )}
-
+      {/* Bottom: Input */}
+      <div className="mx-auto w-full max-w-2xl shrink-0 px-4 pb-4 pt-4">
         <PromptInput onSubmit={onSubmit}>
           <PromptInputBody>
             <PromptInputTextarea

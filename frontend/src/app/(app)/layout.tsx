@@ -29,7 +29,7 @@ export default async function Layout({
       {...(defaultRightWidth && { defaultRightWidth })}
     >
       <LeftPanelContainer />
-      <SidebarInset>
+      <SidebarInset className="overflow-hidden">
         {children}
       </SidebarInset>
       <RightPanelContainer />
