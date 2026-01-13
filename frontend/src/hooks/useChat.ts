@@ -251,6 +251,11 @@ export function useChat() {
                   }
                 } else if (event.type === "validation") {
                   validationPassed = event.status === "ok"
+                  // Reset text on rewrite to avoid concatenating multiple attempts
+                  if (event.status === "rewrite") {
+                    finalText = ""
+                    setStreamingText("")
+                  }
                 } else if (event.type === "text_delta") {
                   finalText += event.content
                   setStreamingText((prev) => prev + event.content)

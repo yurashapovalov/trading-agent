@@ -220,6 +220,9 @@ async def chat_stream(request: ChatRequest, user_id: str = Depends(require_auth)
                 elif event_type == "validation":
                     validation_attempts += 1
                     validation_passed = event.get("status") == "ok"
+                    # Reset text on rewrite to avoid concatenating multiple attempts
+                    if event.get("status") == "rewrite":
+                        final_text = ""
 
                 elif event_type == "usage":
                     usage_data = event

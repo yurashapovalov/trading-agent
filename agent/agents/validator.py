@@ -89,12 +89,27 @@ class Validator:
         if not rows:
             return issues
 
-        # Check if already aggregated (period granularity has open_price)
-        # vs daily/hourly format (has open, close, high, low)
         first_row = rows[0]
+
+        # Detect data format:
+        # 1. SQL aggregated results (correlation, statistics) - has fields like trading_days, corr_*, avg_*
+        # 2. Period format (aggregated by data_fetcher) - has open_price
+        # 3. Raw daily/hourly rows - has open, close, high, low
+
+        # Check for SQL aggregated results (statistics queries)
+        aggregated_prefixes = ("corr_", "avg_", "stddev_", "total_", "sum_", "min_", "max_")
+        is_sql_aggregated = (
+            "trading_days" in first_row and
+            len(rows) == 1 and
+            any(key.startswith(aggregated_prefixes) for key in first_row.keys())
+        )
+
         is_period_format = "open_price" in first_row
 
-        if is_period_format:
+        if is_sql_aggregated:
+            # SQL already computed aggregates - use values directly
+            actual = first_row
+        elif is_period_format:
             # Already aggregated from SQL period query
             actual = first_row
         else:

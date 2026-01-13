@@ -47,7 +47,7 @@ export type SSEEvent =
   | { type: "step_end"; agent: string; result?: Record<string, unknown>; duration_ms?: number }
   | { type: "tool_call"; tool: string; args: Record<string, unknown> }
   | { type: "sql_executed"; query: string; rows_found: number; error?: string; duration_ms: number }
-  | { type: "validation"; status: "ok" | "failed" }
+  | { type: "validation"; status: "ok" | "rewrite" | "failed" }
   | { type: "tool_start"; name: string; input: Record<string, unknown> }
   | { type: "tool_end"; name: string; input: Record<string, unknown>; result: unknown; duration_ms: number }
   | { type: "text_delta"; content: string }
