@@ -113,14 +113,31 @@ field_map = {
 Validator определяет формат данных автоматически:
 
 ```python
-# Period format (aggregated)
+# 1. SQL-aggregated format (statistics queries)
+# Когда SQL уже посчитал агрегаты (CORR, AVG, STDDEV)
+{"trading_days": 5601, "corr_volume_change": -0.09, "avg_volume": 319342, ...}
+
+# 2. Period format (aggregated by DataFetcher)
 {"open_price": 17019, "close_price": 17449, ...}
 
-# Daily format
+# 3. Daily format (raw rows)
 {"open": 17019, "close": 17007, "high": 17038, ...}
 ```
 
-Если daily - агрегирует перед проверкой.
+**Логика определения:**
+```python
+# SQL-aggregated: 1 строка + trading_days + prefixes (corr_, avg_, stddev_, etc.)
+is_sql_aggregated = (
+    "trading_days" in first_row and
+    len(rows) == 1 and
+    any(key.startswith(("corr_", "avg_", "stddev_", "total_")) for key in first_row)
+)
+
+# Period format: есть open_price
+is_period_format = "open_price" in first_row
+
+# Daily: всё остальное → агрегируем перед проверкой
+```
 
 ## Aggregation Logic
 

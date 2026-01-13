@@ -2,7 +2,7 @@
 
 **File:** `agent/agents/sql_agent.py`
 
-**Type:** LLM (Gemini 2.5 Flash)
+**Type:** LLM (Gemini 2.5 Flash Lite — дешёвая модель для генерации SQL)
 
 ## Purpose
 
@@ -304,7 +304,7 @@ class SQLAgent:
 
     def __init__(self):
         self.client = genai.Client(api_key=config.GOOGLE_API_KEY)
-        self.model = "gemini-2.5-flash"  # Дешёвая модель, задача узкая
+        self.model = config.GEMINI_LITE_MODEL  # Дешёвая модель для SQL генерации
 
     def __call__(self, state: AgentState) -> dict:
         intent = state["intent"]
@@ -330,7 +330,11 @@ class SQLAgent:
 
 ```python
 usage = sql_agent.get_usage()
-# UsageStats(input_tokens=1200, output_tokens=350, cost_usd=0.0008)
+# UsageStats(input_tokens=2700, output_tokens=400, cost_usd=0.00043)
 ```
 
-SQL Agent использует мало токенов - промпт компактный, задача чёткая.
+SQL Agent использует `GEMINI_2_5_FLASH_LITE` pricing:
+- Input: $0.10 / 1M tokens
+- Output: $0.40 / 1M tokens
+
+Дешевле чем основная модель в ~6 раз.

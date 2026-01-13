@@ -398,20 +398,25 @@ for event in graph.stream_sse(
 All LLM calls track usage and cost:
 
 ```python
-# Gemini 2.5 Flash
-GEMINI_2_5_FLASH = {
-    "input": 0.15 / 1_000_000,   # $0.15 per 1M tokens
-    "output": 0.60 / 1_000_000,  # $0.60 per 1M tokens
-    "thinking": 3.50 / 1_000_000 # $3.50 per 1M thinking tokens
+# Gemini 3 Flash Preview (for Analyst - needs reasoning)
+GEMINI_3_FLASH = {
+    "input": 0.50,      # $0.50 per 1M tokens
+    "output": 3.00,     # $3.00 per 1M tokens (includes thinking)
 }
 
-# Gemini 2.5 Flash Lite (for Understander)
+# Gemini 2.5 Flash Lite (for Understander, SQL Agent - simple tasks)
 GEMINI_2_5_FLASH_LITE = {
-    "input": 0.075 / 1_000_000,
-    "output": 0.30 / 1_000_000,
-    "thinking": 0
+    "input": 0.10,      # $0.10 per 1M tokens
+    "output": 0.40,     # $0.40 per 1M tokens
 }
 ```
+
+**Agent → Pricing mapping:**
+| Agent | Model | Pricing |
+|-------|-------|---------|
+| Understander | GEMINI_LITE_MODEL | GEMINI_2_5_FLASH_LITE |
+| SQL Agent | GEMINI_LITE_MODEL | GEMINI_2_5_FLASH_LITE |
+| Analyst | GEMINI_MODEL | GEMINI_3_FLASH |
 
 Usage is aggregated across all agents and returned in `usage` SSE event.
 

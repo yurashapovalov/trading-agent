@@ -91,10 +91,12 @@ class Stats(TypedDict, total=False):
 | Открытие | 16,334 |
 | Закрытие | 16,747 |
 | Максимум | 17,152 |
+```
 
-**Инсайты:**
-- Первая неделя была волатильной
-- Объём выше среднего на 15%
+**Инсайты добавляются только если есть неочевидные паттерны:**
+```
+**Торговые идеи:** (опционально)
+- Высокий объём коррелирует с волатильностью, но не с направлением
 ```
 
 ### Search query (данные уже отфильтрованы)
@@ -106,11 +108,9 @@ class Stats(TypedDict, total=False):
 | 2008-10-15 | -7.80% | 850,000 |
 | 2008-10-22 | -5.51% | 720,000 |
 ...
-
-**Инсайты:**
-- Большинство падений пришлось на 2008 и 2022 годы
-- Средний объём в дни падения выше обычного на 40%
 ```
+
+Инсайты добавляются если анализ выявил неочевидные закономерности.
 
 ## Rewrite Loop
 
@@ -174,8 +174,9 @@ You are a trading data analyst. Analyze data and write clear responses.
 <constraints>
 1. ONLY use facts from the provided data
 2. The data is ALREADY filtered - just analyze what you receive
-3. Include trading insights and patterns
-4. Use markdown tables for presenting data
+3. If analysis reveals non-obvious patterns, add 1-2 brief trading insights
+4. Skip insights if the answer is straightforward
+5. Use markdown tables for presenting data
 </constraints>
 
 <output_format>
