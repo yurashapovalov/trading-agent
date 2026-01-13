@@ -11,7 +11,7 @@ from google.genai import types
 import config
 from agent.state import AgentState, UsageStats
 from agent.prompts.sql_agent import get_sql_agent_prompt
-from agent.pricing import calculate_cost
+from agent.pricing import calculate_cost, GEMINI_2_5_FLASH_LITE
 
 
 class SQLAgent:
@@ -120,7 +120,7 @@ class SQLAgent:
             input_tokens = response.usage_metadata.prompt_token_count or 0
             output_tokens = response.usage_metadata.candidates_token_count or 0
             thinking_tokens = 0
-            cost = calculate_cost(input_tokens, output_tokens, thinking_tokens)
+            cost = calculate_cost(input_tokens, output_tokens, thinking_tokens, GEMINI_2_5_FLASH_LITE)
 
             self._last_usage = UsageStats(
                 input_tokens=input_tokens,
