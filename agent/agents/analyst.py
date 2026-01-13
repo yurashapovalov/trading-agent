@@ -4,6 +4,8 @@ Analyst agent - interprets data and generates responses with Stats.
 Returns:
 - response: User-facing markdown response
 - stats: Structured numbers for validation
+
+Supports real-time streaming via LangGraph's get_stream_writer().
 """
 
 import json
@@ -13,8 +15,16 @@ from google.genai import types
 
 import config
 from agent.state import AgentState, Stats, UsageStats
-from agent.prompts.analyst import get_analyst_prompt
+from agent.prompts.analyst import get_analyst_prompt, get_analyst_prompt_streaming
 from agent.pricing import calculate_cost
+
+# LangGraph streaming support
+try:
+    from langgraph.config import get_stream_writer
+    HAS_STREAM_WRITER = True
+except ImportError:
+    HAS_STREAM_WRITER = False
+    get_stream_writer = None
 
 
 class Analyst:
@@ -39,7 +49,12 @@ class Analyst:
         )
 
     def __call__(self, state: AgentState) -> dict:
-        """Generate analysis with stats."""
+        """
+        Generate analysis with stats.
+
+        Uses real-time streaming when running inside LangGraph graph.
+        Falls back to batch generation otherwise.
+        """
         question = state.get("question", "")
         data = state.get("data") or {}
         intent = state.get("intent") or {}
@@ -54,18 +69,87 @@ class Analyst:
             previous_response = state.get("response", "")
             issues = validation.get("issues", [])
 
-        # Build prompt
-        prompt = get_analyst_prompt(
-            question=question,
-            data=data,
-            intent_type=intent_type,
-            previous_response=previous_response,
-            issues=issues,
-            chat_history=chat_history,
-            search_condition=intent.get("search_condition"),
-        )
+        # Try to get stream writer (only works inside LangGraph execution)
+        writer = None
+        if HAS_STREAM_WRITER:
+            try:
+                writer = get_stream_writer()
+            except Exception:
+                pass  # Not in streaming context
 
-        # Call LLM with JSON mode
+        if writer:
+            # Real-time streaming mode - use simpler prompt without JSON requirement
+            prompt = get_analyst_prompt_streaming(
+                question=question,
+                data=data,
+                chat_history=chat_history,
+                search_condition=intent.get("search_condition"),
+            )
+            return self._generate_with_streaming(prompt, writer, state)
+        else:
+            # Batch mode - use full prompt with JSON/stats
+            prompt = get_analyst_prompt(
+                question=question,
+                data=data,
+                intent_type=intent_type,
+                previous_response=previous_response,
+                issues=issues,
+                chat_history=chat_history,
+                search_condition=intent.get("search_condition"),
+            )
+            return self._generate_batch(prompt, state)
+
+    def _generate_with_streaming(self, prompt: str, writer, state: AgentState) -> dict:
+        """Generate response with real-time streaming via LangGraph."""
+        full_text = ""
+        total_input = 0
+        total_output = 0
+
+        try:
+            for chunk in self.client.models.generate_content_stream(
+                model=self.model,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    temperature=0.3,
+                )
+            ):
+                # Track usage from last chunk
+                if chunk.usage_metadata:
+                    total_input = chunk.usage_metadata.prompt_token_count or 0
+                    total_output = chunk.usage_metadata.candidates_token_count or 0
+
+                # Emit text chunk in real-time
+                if chunk.text:
+                    writer({"type": "text_delta", "agent": self.name, "content": chunk.text})
+                    full_text += chunk.text
+
+            # Update usage stats
+            cost = calculate_cost(total_input, total_output, 0)
+            self._last_usage = UsageStats(
+                input_tokens=total_input,
+                output_tokens=total_output,
+                thinking_tokens=0,
+                cost_usd=cost
+            )
+
+            # Try to extract stats from streamed text
+            stats = self._extract_stats_from_text(full_text)
+
+        except Exception as e:
+            full_text = f"Error generating response: {e}"
+            stats = None
+
+        return {
+            "response": full_text,
+            "stats": stats,
+            "usage": self._last_usage,
+            "agents_used": [self.name],
+            "step_number": state.get("step_number", 0) + 1,
+            "validation_attempts": state.get("validation_attempts", 0) + 1,
+        }
+
+    def _generate_batch(self, prompt: str, state: AgentState) -> dict:
+        """Generate response in batch mode (no streaming)."""
         try:
             response_obj = self.client.models.generate_content(
                 model=self.model,
@@ -85,7 +169,6 @@ class Analyst:
             stats = result.get("stats") or {}
 
         except json.JSONDecodeError:
-            # Fallback: treat entire response as text
             response_text = response_obj.text if response_obj else ""
             stats = {}
         except Exception as e:

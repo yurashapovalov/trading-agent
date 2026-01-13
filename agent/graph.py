@@ -21,8 +21,7 @@ Note: SQL Agent only runs if search_condition exists in Intent.
 
 from typing import Literal
 from langgraph.graph import StateGraph, START, END
-# Note: Command and interrupt not used in stateless clarification approach
-# from langgraph.types import Command, interrupt
+from langgraph.types import Command
 
 from agent.state import AgentState, create_initial_state
 from agent.agents.understander import Understander
@@ -47,9 +46,26 @@ validator = Validator()
 # Node Functions
 # =============================================================================
 
-def understand_question(state: AgentState) -> dict:
-    """Understander node - parses question into Intent."""
-    return understander(state)
+def understand_question(state: AgentState) -> Command:
+    """
+    Understander node - parses question into Intent and routes to next node.
+    Uses Command API to combine state update with routing decision.
+    """
+    result = understander(state)
+    intent = result.get("intent") or {}
+    intent_type = intent.get("type", "data")
+
+    # Determine next node based on intent
+    if intent.get("needs_clarification"):
+        next_node = "responder"
+    elif intent_type in ("chitchat", "out_of_scope", "concept"):
+        next_node = "responder"
+    elif intent.get("search_condition"):
+        next_node = "sql_agent"
+    else:
+        next_node = "data_fetcher"
+
+    return Command(update=result, goto=next_node)
 
 
 def generate_sql(state: AgentState) -> dict:
@@ -112,26 +128,7 @@ def simple_respond(state: AgentState) -> dict:
 # Conditional Edges
 # =============================================================================
 
-def after_understander(state: AgentState) -> Literal["responder", "sql_agent", "data_fetcher"]:
-    """Route based on intent type after understanding."""
-    intent = state.get("intent") or {}
-    intent_type = intent.get("type", "data")
-
-    # Clarification goes to responder (stateless approach)
-    if intent.get("needs_clarification"):
-        return "responder"
-
-    # Non-data types go to responder
-    if intent_type in ("chitchat", "out_of_scope", "concept"):
-        return "responder"
-
-    # If search_condition exists, use SQL Agent
-    if intent.get("search_condition"):
-        return "sql_agent"
-
-    # Otherwise go directly to DataFetcher
-    return "data_fetcher"
-
+# Note: after_understander removed - routing now in understand_question via Command API
 
 def after_sql_validation(state: AgentState) -> Literal["data_fetcher", "sql_agent"]:
     """Route based on SQL validation result."""
@@ -186,16 +183,7 @@ def build_graph() -> StateGraph:
     # START → understander
     graph.add_edge(START, "understander")
 
-    # Conditional routing after understander
-    graph.add_conditional_edges(
-        "understander",
-        after_understander,
-        {
-            "responder": "responder",
-            "sql_agent": "sql_agent",
-            "data_fetcher": "data_fetcher",
-        }
-    )
+    # Note: understander uses Command API for dynamic routing (no add_conditional_edges needed)
 
     # Responder → END (no validation needed for chitchat/clarification)
     graph.add_edge("responder", END)
@@ -311,6 +299,10 @@ class TradingGraph:
         """
         Run the graph with streaming.
         Yields events for each step.
+
+        Note: For production reliability, can add durability="sync" to stream():
+            self.app.stream(..., durability="sync")
+        Modes: "exit" (fast), "async" (balanced), "sync" (reliable checkpoint per step)
         """
         initial_state = create_initial_state(
             question=question,
@@ -365,15 +357,23 @@ class TradingGraph:
             }
         }
 
-        final_state = None
         # Track accumulated state for input_data
         accumulated_state = {
             "question": question,
             "chat_history": chat_history,
         }
 
-        for event in self.app.stream(initial_state, config, stream_mode="updates"):
-            for node_name, updates in event.items():
+        # Use both "updates" and "custom" stream modes for real-time streaming
+        for event in self.app.stream(initial_state, config, stream_mode=["updates", "custom"]):
+            stream_type, data = event
+
+            # Custom events (text_delta from agents) - yield directly
+            if stream_type == "custom":
+                yield data
+                continue
+
+            # Updates events - process node outputs
+            for node_name, updates in data.items():
                 step_number += 1
                 current_time = time.time()
                 step_duration_ms = int((current_time - last_step_time) * 1000)
@@ -473,14 +473,8 @@ class TradingGraph:
                     stats = updates.get("stats") or {}
                     usage = updates.get("usage") or {}
 
-                    # Stream response in chunks
-                    chunk_size = 50
-                    for i in range(0, len(response), chunk_size):
-                        yield {
-                            "type": "text_delta",
-                            "agent": node_name,
-                            "content": response[i:i+chunk_size]
-                        }
+                    # Note: text_delta events now come from custom stream mode (real-time)
+                    # No fake chunking needed here
 
                     yield {
                         "type": "step_end",
@@ -553,30 +547,10 @@ class TradingGraph:
                     # Update accumulated state
                     accumulated_state["response"] = response
 
-                # Track final state (manually merge usage)
-                if final_state is None:
-                    final_state = dict(updates)
-                else:
-                    # Merge usage instead of overwriting
-                    if "usage" in updates and "usage" in final_state:
-                        old_usage = final_state.get("usage") or {}
-                        new_usage = updates.get("usage") or {}
-                        final_state["usage"] = {
-                            "input_tokens": (old_usage.get("input_tokens") or 0) + (new_usage.get("input_tokens") or 0),
-                            "output_tokens": (old_usage.get("output_tokens") or 0) + (new_usage.get("output_tokens") or 0),
-                            "thinking_tokens": (old_usage.get("thinking_tokens") or 0) + (new_usage.get("thinking_tokens") or 0),
-                            "cost_usd": (old_usage.get("cost_usd") or 0) + (new_usage.get("cost_usd") or 0),
-                        }
-                        # Update other fields without overwriting usage
-                        for key, value in updates.items():
-                            if key != "usage":
-                                final_state[key] = value
-                    else:
-                        final_state.update(updates)
-
-        # Emit usage and done
+        # Get final state with accumulated usage from graph (reducers already applied)
         duration_ms = int((time.time() - start_time) * 1000)
-        usage = (final_state.get("usage") or {}) if final_state else {}
+        final_state = self.app.get_state(config)
+        usage = (final_state.values.get("usage") or {}) if final_state else {}
 
         yield {
             "type": "usage",

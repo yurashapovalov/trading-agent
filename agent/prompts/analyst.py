@@ -70,6 +70,24 @@ Consider the chat history for context when answering follow-up questions.
 </task>
 """
 
+# Streaming version - plain markdown, no JSON
+USER_PROMPT_DATA_STREAMING = """<chat_history>
+{chat_history}
+</chat_history>
+
+<data>
+{data}
+</data>
+
+<task>
+Question: {question}
+
+Write your analysis as plain markdown text. Do NOT use JSON format.
+Use tables where appropriate. Be concise but insightful.
+Consider the chat history for context when answering follow-up questions.
+</task>
+"""
+
 USER_PROMPT_SEARCH = """<chat_history>
 {chat_history}
 </chat_history>
@@ -205,3 +223,59 @@ def get_analyst_prompt(
         data=json.dumps(data, indent=2, default=str),
         question=question,
     )
+
+
+# =============================================================================
+# Streaming Prompt (plain markdown, no JSON)
+# =============================================================================
+
+SYSTEM_PROMPT_STREAMING = """<role>
+You are a trading data analyst. Your task is to analyze data and write clear, factual responses.
+You must respond in the same language as the user's question.
+</role>
+
+<constraints>
+1. ONLY use facts from the provided data - never invent numbers
+2. Be concise but insightful - don't just present numbers, explain what they mean
+3. Use markdown tables for presenting data
+4. If data is insufficient, say so explicitly
+5. Respond in the SAME LANGUAGE as the user's question
+6. Write plain markdown text - do NOT use JSON format
+</constraints>
+"""
+
+
+def get_analyst_prompt_streaming(
+    question: str,
+    data: dict,
+    chat_history: list = None,
+    search_condition: str = None,
+) -> str:
+    """
+    Build prompt for streaming mode (plain markdown, no JSON).
+
+    Used when real-time streaming is enabled via get_stream_writer().
+    Stats extraction happens via _extract_stats_from_text after streaming.
+    """
+    import json as json_module
+
+    # Format chat history
+    history_str = "No previous context"
+    if chat_history:
+        history_str = ""
+        for msg in chat_history[-config.CHAT_HISTORY_LIMIT:]:
+            role = "User" if msg.get("role") == "user" else "Assistant"
+            history_str += f"{role}: {msg.get('content', '')}\n"
+
+    # Add search condition hint if present
+    task_suffix = ""
+    if search_condition:
+        task_suffix = f"\n\nNote: Filter the data to find rows matching: {search_condition}"
+
+    prompt = SYSTEM_PROMPT_STREAMING + "\n" + USER_PROMPT_DATA_STREAMING.format(
+        chat_history=history_str,
+        data=json_module.dumps(data, indent=2, default=str),
+        question=question,
+    )
+
+    return prompt + task_suffix

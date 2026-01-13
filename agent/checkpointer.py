@@ -62,7 +62,9 @@ def get_postgres_checkpointer() -> Optional[BaseCheckpointSaver]:
     try:
         from langgraph.checkpoint.postgres import PostgresSaver
 
-        return PostgresSaver.from_conn_string(database_url)
+        saver = PostgresSaver.from_conn_string(database_url)
+        saver.setup()  # Create checkpoint tables if not exist
+        return saver
     except Exception as e:
         print(f"WARNING: Failed to create Postgres checkpointer: {e}")
         print("Falling back to SQLite")
