@@ -1,10 +1,3 @@
-"use client"
-
-import { useState } from "react"
-import { useAuth } from "@/components/auth-provider"
-import { useChat } from "@/hooks/useChat"
-
-// AI components
 import {
   Conversation,
   ConversationContent,
@@ -30,22 +23,19 @@ import {
   PromptInputSubmit,
   PromptInputTextarea,
   PromptInputTools,
-  type PromptInputMessage,
 } from "@/components/ai/prompt-input"
 import { Loader } from "@/components/ai/loader"
 
-import type { AgentStep } from "@/types/chat"
+import type { AgentStep, ChatMessage, ClarificationRequest } from "@/types/chat"
 import { DatabaseIcon, BrainIcon, CheckCircleIcon, RouteIcon, MessageCircleIcon } from "lucide-react"
 
 // Map agent names to icons
 const agentIcons: Record<string, any> = {
-  // v2 agents
   understander: RouteIcon,
   responder: MessageCircleIcon,
   data_fetcher: DatabaseIcon,
   analyst: BrainIcon,
   validator: CheckCircleIcon,
-  // legacy agents
   router: RouteIcon,
   data_agent: DatabaseIcon,
   educator: BrainIcon,
@@ -54,12 +44,10 @@ const agentIcons: Record<string, any> = {
 function getStepDescription(step: AgentStep): string | undefined {
   const parts: string[] = []
 
-  // Add duration if available
   if (step.durationMs) {
     parts.push(`${step.durationMs}ms`)
   }
 
-  // Add result info based on agent type
   if (step.result) {
     if (step.agent === "understander") {
       const type = step.result.type as string
@@ -107,50 +95,40 @@ function AgentStepsDisplay({ steps, isStreaming }: { steps: AgentStep[]; isStrea
   )
 }
 
-export default function Chat() {
-  const { user, signOut } = useAuth()
-  const [text, setText] = useState("")
-  const {
-    messages,
-    isLoading,
-    currentSteps,
-    streamingText,
-    suggestions,
-    clarification,
-    sendMessage,
-    stopGeneration,
-  } = useChat()
+type ChatPanelProps = {
+  header?: React.ReactNode
+  messages: ChatMessage[]
+  isLoading: boolean
+  currentSteps: AgentStep[]
+  streamingText: string
+  suggestions: string[]
+  clarification: ClarificationRequest | null
+  inputText: string
+  onInputChange: (text: string) => void
+  onSubmit: () => void
+  onStop: () => void
+  onSuggestionClick: (suggestion: string) => void
+  onClarificationSelect: (response: string) => void
+}
 
-  const handleSubmit = (message: PromptInputMessage) => {
-    if (!message.text?.trim()) return
-    sendMessage(message.text)
-    setText("")
-  }
-
-  const handleClarificationSelect = (response: string) => {
-    // Stateless: just send as new message, context will be in chat_history
-    sendMessage(response)
-  }
-
-  const handleSuggestionClick = (suggestion: string) => {
-    setText(suggestion)
-  }
-
+export function ChatPanel({
+  header,
+  messages,
+  isLoading,
+  currentSteps,
+  streamingText,
+  suggestions,
+  clarification,
+  inputText,
+  onInputChange,
+  onSubmit,
+  onStop,
+  onSuggestionClick,
+  onClarificationSelect,
+}: ChatPanelProps) {
   return (
-    <div className="relative flex h-dvh w-full flex-col overflow-hidden">
-      {/* Header */}
-      <header className="flex items-center justify-between px-4 py-2">
-        <h1 className="text-sm font-medium">Trading Analytics</h1>
-        <div className="flex items-center gap-3">
-          <span className="text-xs text-muted-foreground">{user?.email}</span>
-          <button
-            onClick={signOut}
-            className="text-xs text-muted-foreground hover:text-foreground"
-          >
-            Sign out
-          </button>
-        </div>
-      </header>
+    <div className="relative flex h-full w-full flex-col overflow-hidden">
+      {header}
 
       {/* Conversation */}
       <Conversation>
@@ -158,17 +136,14 @@ export default function Chat() {
           {messages.map((message, index) => (
             <Message from={message.role} key={index} className="max-w-full">
               <div>
-                {/* Agent steps before assistant message */}
                 {message.role === "assistant" && message.agent_steps && message.agent_steps.length > 0 && (
                   <AgentStepsDisplay steps={message.agent_steps} />
                 )}
 
-                {/* Message content */}
                 <MessageContent>
                   <MessageResponse>{message.content}</MessageResponse>
                 </MessageContent>
 
-                {/* Usage stats */}
                 {message.role === "assistant" && message.usage && (
                   <div className="mt-2 text-xs text-muted-foreground">
                     {message.usage.input_tokens.toLocaleString()} / {message.usage.output_tokens.toLocaleString()}
@@ -180,7 +155,6 @@ export default function Chat() {
             </Message>
           ))}
 
-          {/* Streaming state */}
           {currentSteps.length > 0 && (
             <Message from="assistant" className="max-w-full">
               <div>
@@ -197,12 +171,11 @@ export default function Chat() {
             </Message>
           )}
 
-          {/* Clarification request */}
           {clarification && (
             <ClarificationMessage
               question={clarification.question}
               suggestions={clarification.suggestions}
-              onSelectSuggestion={handleClarificationSelect}
+              onSelectSuggestion={onClarificationSelect}
             />
           )}
 
@@ -224,36 +197,36 @@ export default function Chat() {
               <Suggestion
                 key={suggestion}
                 variant="ghost"
-                onClick={() => handleSuggestionClick(suggestion)}
+                onClick={() => onSuggestionClick(suggestion)}
                 suggestion={suggestion}
               />
             ))}
           </Suggestions>
         )}
 
-        <PromptInput onSubmit={handleSubmit}>
-            <PromptInputBody>
-              <PromptInputTextarea
-                value={text}
-                onChange={(e) => setText(e.target.value)}
-                placeholder={clarification ? "Напишите свой ответ..." : "Ask about NQ futures..."}
-              />
-            </PromptInputBody>
-            <PromptInputFooter>
-              <PromptInputTools />
-              {isLoading ? (
-                <button
-                  type="button"
-                  onClick={stopGeneration}
-                  className="rounded-md bg-destructive px-3 py-1.5 text-sm font-medium text-destructive-foreground hover:bg-destructive/90"
-                >
-                  Stop
-                </button>
-              ) : (
-                <PromptInputSubmit disabled={!text.trim()} />
-              )}
-            </PromptInputFooter>
-          </PromptInput>
+        <PromptInput onSubmit={onSubmit}>
+          <PromptInputBody>
+            <PromptInputTextarea
+              value={inputText}
+              onChange={(e) => onInputChange(e.target.value)}
+              placeholder={clarification ? "Напишите свой ответ..." : "Ask about NQ futures..."}
+            />
+          </PromptInputBody>
+          <PromptInputFooter>
+            <PromptInputTools />
+            {isLoading ? (
+              <button
+                type="button"
+                onClick={onStop}
+                className="rounded-md bg-destructive px-3 py-1.5 text-sm font-medium text-destructive-foreground hover:bg-destructive/90"
+              >
+                Stop
+              </button>
+            ) : (
+              <PromptInputSubmit disabled={!inputText.trim()} />
+            )}
+          </PromptInputFooter>
+        </PromptInput>
       </div>
     </div>
   )

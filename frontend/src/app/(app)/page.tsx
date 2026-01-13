@@ -2,7 +2,7 @@
 
 import dynamic from "next/dynamic"
 
-const Chat = dynamic(() => import("@/components/chat"), {
+const ChatPanel = dynamic(() => import("@/components/app/chat-panel/chat-panel.container"), {
   ssr: false,
   loading: () => (
     <div className="flex h-dvh items-center justify-center">
@@ -12,5 +12,5 @@ const Chat = dynamic(() => import("@/components/chat"), {
 })
 
 export default function Page() {
-  return <Chat />
+  return <ChatPanel />
 }
