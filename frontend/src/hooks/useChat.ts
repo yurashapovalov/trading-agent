@@ -342,7 +342,14 @@ export function useChat() {
 
   const respondToClarification = useCallback(
     async (userResponse: string) => {
-      if (!clarification || isLoading) return
+      console.log("[respondToClarification] Called with:", userResponse)
+      console.log("[respondToClarification] clarification:", clarification)
+      console.log("[respondToClarification] isLoading:", isLoading)
+
+      if (!clarification || isLoading) {
+        console.log("[respondToClarification] Blocked! clarification=", clarification, "isLoading=", isLoading)
+        return
+      }
 
       // Add clarification Q&A to messages
       setMessages((prev) => [

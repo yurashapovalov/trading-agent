@@ -27,6 +27,7 @@ export default function ChatPanelContainer() {
   }
 
   const handleClarificationSelect = (response: string) => {
+    console.log("[handleClarificationSelect] Called with:", response)
     // Use resume endpoint for interrupt-based clarification
     respondToClarification(response)
   }
