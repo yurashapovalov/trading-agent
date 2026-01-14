@@ -184,16 +184,19 @@ async def chat_stream(request: ChatRequest, user_id: str = Depends(require_auth)
                 event_type = event.get("type")
 
                 if event_type == "step_start":
-                    agents_used.append(event.get("agent"))
+                    agent_name = event.get("agent")
+                    agents_used.append(agent_name)
+                    print(f"[{agent_name.upper()}] Starting...")
 
                 elif event_type == "step_end":
                     agent_name = event.get("agent")
                     step_number += 1
                     duration_ms = event.get("duration_ms", 0)
+                    result = event.get("result") or {}
+                    print(f"[{agent_name.upper()}] Done in {duration_ms}ms, result: {result}")
 
                     # Get route from understander
                     if agent_name == "understander":
-                        result = event.get("result") or {}
                         route = result.get("type")
 
                     # Log trace step (use 'output' for full data, fallback to 'result')
