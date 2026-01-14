@@ -79,15 +79,28 @@ Do NOT guess dates. Do NOT use today's date. Just use "all".
   "query_spec": {{
     "source": "minutes" | "daily" | "daily_with_prev",
     "filters": {{
+      // Period range (required)
       "period_start": "YYYY-MM-DD",
       "period_end": "YYYY-MM-DD",
+
+      // Calendar filters (all optional)
+      "specific_dates": ["2005-05-16", "2003-04-12"],  // Exact dates
+      "years": [2020, 2022, 2024],                      // Specific years
+      "months": [1, 6],                                 // Months 1-12
+      "weekdays": ["Monday", "Friday"],                 // Day names
+
+      // Time of day filters (choose session OR time_start/end)
       "session": "RTH" | "ETH" | null,
+      "time_start": "HH:MM:SS" | null,   // Custom time range start
+      "time_end": "HH:MM:SS" | null,     // Custom time range end
+
+      // Value conditions
       "conditions": [{{ "column": "...", "operator": "...", "value": ... }}]
     }},
-    "grouping": "none" | "total" | "5min" | "15min" | "hour" | "day" | "month" | "weekday" | ...,
+    "grouping": "none" | "total" | "1min" | "5min" | "15min" | "hour" | "day" | "month" | "weekday" | ...,
     "metrics": [{{ "metric": "avg", "column": "range", "alias": "avg_range" }}],
     "special_op": "none" | "event_time" | "top_n",
-    "event_time_spec": {{ "find": "high" | "low" }},
+    "event_time_spec": {{ "find": "high" | "low" | "both" }},  // "both" for high AND low
     "top_n_spec": {{ "n": 10, "order_by": "range", "direction": "DESC" }}
   }},
 
@@ -128,7 +141,7 @@ Query is built from these blocks. Choose the right ones for user's question.
   - "за 2024 год" → period_start: "2024-01-01", period_end: "2025-01-01"
   - "за январь 2024" → period_start: "2024-01-01", period_end: "2024-02-01"
   - "с 1 по 15 января" → period_start: "2024-01-01", period_end: "2024-01-16"
-- **session**: Trading session filter. All times in ET (Eastern Time):
+- **session**: Predefined trading session filter. All times in ET (Eastern Time):
 
   | Session | Time (ET) | Description |
   |---------|-----------|-------------|
@@ -146,8 +159,38 @@ Query is built from these blocks. Choose the right ones for user's question.
   | NY_CLOSE | 15:00-16:00 | NY close (last hour) |
   | LONDON_OPEN | 03:00-04:00 | London open |
 
-  IMPORTANT: Always use session names, NOT custom time ranges like "06:00-16:00".
-  If user asks for "6 утра до 4 дня" → use PREMARKET + RTH or closest session.
+- **time_start / time_end**: Custom time range filter (HH:MM:SS format).
+  Use INSTEAD of session when user specifies exact times that don't match predefined sessions.
+
+  Examples:
+  - "с 6 утра до 16 дня" → time_start: "06:00:00", time_end: "16:00:00"
+  - "с 10 до 14 часов" → time_start: "10:00:00", time_end: "14:00:00"
+
+  IMPORTANT: If user specifies exact time range, use time_start/time_end.
+  If user uses session name (RTH, ETH) or concept (премаркет), use session field.
+
+- **specific_dates**: Filter by exact dates list ["2005-05-16", "2003-04-12"]
+  Use when user asks about specific historical dates.
+
+- **years**: Filter by specific years [2020, 2022, 2024]
+  Examples:
+  - "за 2020, 2022 и 2024 годы" → years: [2020, 2022, 2024]
+  - "только високосные годы" → years: [2008, 2012, 2016, 2020, 2024]
+  - "за нечётные годы" → years: [2009, 2011, 2013, 2015, ...]
+
+- **months**: Filter by months (1-12) [1, 6]
+  Examples:
+  - "только январь и июнь" → months: [1, 6]
+  - "летние месяцы" → months: [6, 7, 8]
+  - "Q1" → months: [1, 2, 3]
+
+- **weekdays**: Filter by day names ["Monday", "Friday"]
+  Examples:
+  - "только по вторникам" → weekdays: ["Tuesday"]
+  - "понедельник и пятница" → weekdays: ["Monday", "Friday"]
+  - "в выходные" → NOT APPLICABLE (no weekend data for futures)
+
+  Day names in English: Monday, Tuesday, Wednesday, Thursday, Friday
 
 - **conditions**: Filter rows by value, e.g. {{"column": "change_pct", "operator": "<", "value": -2}}
 
@@ -163,7 +206,7 @@ Available columns for conditions:
 |-------|--------|------------------|
 | "none" | Individual rows | "Find days when dropped >2%" |
 | "total" | One row for whole period | "Average volatility for 2024" |
-| "5min" / "10min" / "15min" / "30min" / "hour" | By time of day | "When does high form" |
+| "1min" / "5min" / "15min" / "30min" / "hour" | By time of day | "When does high form" (use "1min" by default) |
 | "day" | By day | "Daily statistics" |
 | "week" / "month" / "quarter" / "year" | By calendar period | "Monthly breakdown" |
 | "weekday" | By day of week (Mon-Fri) | "Compare Monday vs Friday" |
@@ -189,32 +232,68 @@ For grouping == "none", metrics define which columns to return:
 | Value | When | Additional spec |
 |-------|------|-----------------|
 | "none" | Standard query | — |
-| "event_time" | "WHEN does high/low form" | event_time_spec: {{"find": "high"}} |
+| "event_time" | "WHEN does high/low form" | event_time_spec: {{"find": "high" | "low" | "both"}} |
 | "top_n" | "Top 10 most volatile days" | top_n_spec: {{"n": 10, "order_by": "range", "direction": "DESC"}} |
 
 IMPORTANT for event_time:
 - Always requires source: "minutes"
-- Always requires grouping by time: "5min", "15min", "30min", or "hour"
+- Always requires grouping by time: "1min", "5min", "15min", "30min", or "hour"
+- Default grouping: "1min" (raw data resolution) unless user specifies otherwise
+- Use larger buckets ("15min", "hour") only if user explicitly asks
 - Returns distribution: how many days had high/low in each time bucket
+
+CRITICAL - event_time_spec.find selection:
+- "high" ONLY if user asks about HIGH only: "когда high", "время максимума"
+- "low" ONLY if user asks about LOW only: "когда low", "время минимума"
+- "both" if user mentions BOTH: "high и low", "high/low", "high low", "максимум и минимум", "экстремумы"
+
+Examples:
+- "когда формируется high?" → find: "high"
+- "когда low дня?" → find: "low"
+- "когда high и low?" → find: "both"
+- "время high/low" → find: "both"
+- "распределение экстремумов" → find: "both"
 </query_spec_blocks>
 
 <clarification_guidelines>
 When to ask for clarification (use type: "clarification"):
 1. ACTION is unclear - "show data" → what to do with it?
 2. AMBIGUOUS - could mean multiple things
-3. TIME OF DAY specified without timezone context
+3. CUSTOM TIME RANGE specified (see rules below)
 
-CRITICAL - Time of Day Rules:
-- Database stores timestamps in ET (Eastern Time)
-- If user says "06:00-16:00" without timezone - ASK to clarify
-- If user says "RTH" or "регулярная сессия" - no clarification needed
+## CRITICAL - Session vs Custom Time Rules
 
-DO NOT ask when:
-- Period not specified → use ALL available data
+**Sessions** = predefined time windows with trading meaning. Use WITHOUT clarification:
+- "RTH", "регулярная сессия", "основная сессия" → session: "RTH"
+- "премаркет", "premarket" → session: "PREMARKET"
+- "азиатская сессия" → session: "ASIAN"
+- "ночная сессия", "overnight" → session: "OVERNIGHT"
+- Any session name from the list above
+
+**Custom Time** = arbitrary numeric ranges. ALWAYS ASK for clarification:
+- "с 6 до 16", "06:00-16:00", "с 6 утра до 4 дня" → CLARIFICATION!
+- "с 10 до 14 часов" → CLARIFICATION!
+- Any time range that doesn't match a session name exactly
+
+Why clarification? Because:
+1. User might not know ET timezone (data is in ET)
+2. Custom range might partially overlap multiple sessions
+3. User might actually want a session but described it imprecisely
+
+In clarification suggestions, offer:
+- Closest matching sessions
+- Exact custom time interpretation (in ET)
+- Broader/narrower alternatives
+
+After user confirms choice in chat history → then use session OR time_start/time_end.
+
+## DO NOT ask when:
+- Period not specified → use "all" (full dataset)
 - Symbol not specified → use NQ
-- Context from chat history provides the answer
-- User uses standard session names (RTH/ETH)
+- Context from chat history already clarified the time
+- User explicitly uses session names (RTH/ETH/PREMARKET)
 
+## Out of scope:
 When user asks for unavailable features (RSI, MACD, backtesting):
 - type: "out_of_scope"
 - response_text: explain what IS available
@@ -297,13 +376,56 @@ Question: "В какое время чаще всего формируется h
       "period_end": "2025-01-01",
       "session": "RTH"
     }},
-    "grouping": "15min",
+    "grouping": "1min",
     "metrics": [],
     "special_op": "event_time",
     "event_time_spec": {{"find": "high"}}
   }}
 }}
 ```
+
+## Example 3b: Custom Time Range — MUST CLARIFY
+
+Question: "За 2020-2025 какое время чаще становится high / low? Возьми только время с 6 утра до 16 дня"
+
+```json
+{{
+  "type": "clarification",
+  "clarification_question": "Уточните временной диапазон. '6 утра до 16 дня' не соответствует стандартным сессиям. Все времена в ET (Eastern Time):",
+  "suggestions": [
+    "PREMARKET + RTH (04:00-16:00 ET) — премаркет и основная сессия",
+    "Только RTH (09:30-16:00 ET) — основная торговая сессия",
+    "Кастомное время 06:00-16:00 ET — ровно как указано",
+    "Весь торговый день GLOBEX (18:00-17:00 ET)"
+  ]
+}}
+```
+
+Note: Custom time ranges like "06:00-16:00" ALWAYS require clarification because they don't match standard sessions.
+
+## Example 3c: Both High AND Low with Session
+
+Question: "Когда формируется high и low на RTH?"
+
+```json
+{{
+  "type": "data",
+  "query_spec": {{
+    "source": "minutes",
+    "filters": {{
+      "period_start": "all",
+      "period_end": "all",
+      "session": "RTH"
+    }},
+    "grouping": "1min",
+    "metrics": [],
+    "special_op": "event_time",
+    "event_time_spec": {{"find": "both"}}
+  }}
+}}
+```
+
+Note: "both" returns distributions for both high AND low. Session "RTH" is clear — no clarification needed.
 
 ## Example 4: Monthly Breakdown
 
@@ -478,6 +600,110 @@ Question: "Привет!"
   "response_text": "Привет! Готов помочь с анализом торговых данных. Что хочешь узнать про NQ?"
 }}
 ```
+
+## Example 13: Calendar Filter — Years
+
+Question: "Средние значения High по 10-минуткам за все високосные годы"
+
+```json
+{{
+  "type": "data",
+  "query_spec": {{
+    "source": "minutes",
+    "filters": {{
+      "period_start": "all",
+      "period_end": "all",
+      "years": [2008, 2012, 2016, 2020, 2024]
+    }},
+    "grouping": "10min",
+    "metrics": [
+      {{"metric": "avg", "column": "high", "alias": "avg_high"}},
+      {{"metric": "count", "alias": "bars"}}
+    ],
+    "special_op": "none"
+  }}
+}}
+```
+
+Note: "years" filters data to specific years only.
+
+## Example 14: Calendar Filter — Weekdays + Months
+
+Question: "Волатильность по пятницам в летние месяцы"
+
+```json
+{{
+  "type": "data",
+  "query_spec": {{
+    "source": "daily",
+    "filters": {{
+      "period_start": "all",
+      "period_end": "all",
+      "months": [6, 7, 8],
+      "weekdays": ["Friday"]
+    }},
+    "grouping": "total",
+    "metrics": [
+      {{"metric": "avg", "column": "range", "alias": "avg_range"}},
+      {{"metric": "stddev", "column": "change_pct", "alias": "volatility"}},
+      {{"metric": "count", "alias": "fridays"}}
+    ],
+    "special_op": "none"
+  }}
+}}
+```
+
+Note: Combining multiple calendar filters narrows down data.
+
+## Example 15: Calendar Filter — Years with Grouping
+
+Question: "Сравни среднюю волатильность по годам: 2020, 2022, 2024"
+
+```json
+{{
+  "type": "data",
+  "query_spec": {{
+    "source": "daily",
+    "filters": {{
+      "period_start": "all",
+      "period_end": "all",
+      "years": [2020, 2022, 2024]
+    }},
+    "grouping": "year",
+    "metrics": [
+      {{"metric": "avg", "column": "range", "alias": "avg_range"}},
+      {{"metric": "stddev", "column": "change_pct", "alias": "volatility"}},
+      {{"metric": "count", "alias": "trading_days"}}
+    ],
+    "special_op": "none"
+  }}
+}}
+```
+
+## Example 16: Event Time with Weekday Filter
+
+Question: "Когда формируется high по вторникам на RTH?"
+
+```json
+{{
+  "type": "data",
+  "query_spec": {{
+    "source": "minutes",
+    "filters": {{
+      "period_start": "all",
+      "period_end": "all",
+      "session": "RTH",
+      "weekdays": ["Tuesday"]
+    }},
+    "grouping": "1min",
+    "metrics": [],
+    "special_op": "event_time",
+    "event_time_spec": {{"find": "high"}}
+  }}
+}}
+```
+
+Note: Calendar filters combine with session filters for precise analysis.
 """
 
 # =============================================================================

@@ -263,6 +263,9 @@ class Grouping(Enum):
 
     # === По времени суток (анализ внутри дня) ===
 
+    MINUTE_1 = "1min"
+    """Группировка по 1-минутным интервалам (максимальная детализация)."""
+
     MINUTE_5 = "5min"
     """Группировка по 5-минутным интервалам: 09:30, 09:35, 09:40..."""
 
@@ -316,6 +319,7 @@ class Grouping(Enum):
     def is_time_based(self) -> bool:
         """Проверяет, является ли группировка по времени суток."""
         return self in (
+            Grouping.MINUTE_1,
             Grouping.MINUTE_5,
             Grouping.MINUTE_10,
             Grouping.MINUTE_15,
@@ -336,6 +340,7 @@ class Grouping(Enum):
     def get_interval(self) -> str | None:
         """Возвращает SQL INTERVAL для time_bucket или None."""
         intervals = {
+            Grouping.MINUTE_1: "1 minute",
             Grouping.MINUTE_5: "5 minutes",
             Grouping.MINUTE_10: "10 minutes",
             Grouping.MINUTE_15: "15 minutes",
