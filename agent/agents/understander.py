@@ -23,139 +23,24 @@ from agent.capabilities import (
 from agent.modules.sql import get_data_range
 from agent.prompts.understander import get_understander_prompt
 
+# Schema auto-generation (Single Source of Truth)
+from agent.query_builder.schema import (
+    get_query_spec_schema,
+    get_response_schema,
+    get_special_op_map,
+    get_spec_field_name,
+)
+
 
 # =============================================================================
-# JSON Schema для query_spec
+# JSON Schema для query_spec (auto-generated from types.py)
 # =============================================================================
 
-QUERY_SPEC_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "source": {
-            "type": "string",
-            "enum": ["minutes", "daily", "daily_with_prev"]
-        },
-        "filters": {
-            "type": "object",
-            "properties": {
-                "period_start": {"type": "string"},
-                "period_end": {"type": "string"},
-                "specific_dates": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "Конкретные даты: ['2005-05-16', '2003-04-12']"
-                },
-                "years": {
-                    "type": "array",
-                    "items": {"type": "integer"},
-                    "description": "Конкретные годы: [2020, 2022, 2024]"
-                },
-                "months": {
-                    "type": "array",
-                    "items": {"type": "integer"},
-                    "description": "Месяцы (1-12): [1, 6] для января и июня"
-                },
-                "weekdays": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "Дни недели: ['Monday', 'Friday']"
-                },
-                "session": {
-                    "type": "string",
-                    "enum": [
-                        "RTH", "ETH", "OVERNIGHT", "GLOBEX",
-                        "ASIAN", "EUROPEAN", "US",
-                        "PREMARKET", "POSTMARKET", "MORNING", "AFTERNOON", "LUNCH",
-                        "LONDON_OPEN", "NY_OPEN", "NY_CLOSE"
-                    ]
-                },
-                "time_start": {
-                    "type": "string",
-                    "description": "Начало кастомного времени: '06:00:00'"
-                },
-                "time_end": {
-                    "type": "string",
-                    "description": "Конец кастомного времени: '16:00:00'"
-                },
-                "conditions": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "column": {"type": "string"},
-                            "operator": {"type": "string"},
-                            "value": {"type": "number"}
-                        }
-                    }
-                }
-            }
-        },
-        "grouping": {
-            "type": "string",
-            "enum": [
-                "none", "total",
-                "5min", "10min", "15min", "30min", "hour",
-                "day", "week", "month", "quarter", "year",
-                "weekday", "session"
-            ]
-        },
-        "metrics": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "metric": {"type": "string"},
-                    "column": {"type": "string"},
-                    "alias": {"type": "string"}
-                }
-            }
-        },
-        "special_op": {
-            "type": "string",
-            "enum": ["none", "event_time", "top_n", "compare", "find_extremum"]
-        },
-        "event_time_spec": {
-            "type": "object",
-            "properties": {
-                "find": {"type": "string", "enum": ["high", "low", "both"]}
-            }
-        },
-        "top_n_spec": {
-            "type": "object",
-            "properties": {
-                "n": {"type": "integer"},
-                "order_by": {"type": "string"},
-                "direction": {"type": "string", "enum": ["ASC", "DESC"]}
-            }
-        },
-        "find_extremum_spec": {
-            "type": "object",
-            "properties": {
-                "find": {"type": "string", "enum": ["high", "low", "both"]}
-            }
-        }
-    }
-}
-
-# Полная схема ответа Understander
-RESPONSE_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "type": {
-            "type": "string",
-            "enum": ["data", "concept", "chitchat", "out_of_scope", "clarification"]
-        },
-        "query_spec": QUERY_SPEC_SCHEMA,
-        "concept": {"type": "string"},
-        "response_text": {"type": "string"},
-        "clarification_question": {"type": "string"},
-        "suggestions": {
-            "type": "array",
-            "items": {"type": "string"}
-        }
-    },
-    "required": ["type"]
-}
+# Auto-generated schemas - Single Source of Truth
+# Все типы определены в agent/query_builder/types.py
+# Schema генерируется автоматически из этих типов
+QUERY_SPEC_SCHEMA = get_query_spec_schema()
+RESPONSE_SCHEMA = get_response_schema()
 
 
 # =============================================================================
@@ -401,13 +286,9 @@ def query_spec_to_builder(query_spec: dict) -> "QuerySpec":
         FindExtremumSpec,
     )
 
-    # Source
-    source_map = {
-        "minutes": Source.MINUTES,
-        "daily": Source.DAILY,
-        "daily_with_prev": Source.DAILY_WITH_PREV,
-    }
-    source = source_map.get(query_spec.get("source", "daily"), Source.DAILY)
+    # Source (auto-generated from Source enum)
+    from agent.query_builder.schema import get_source_map
+    source = get_source_map().get(query_spec.get("source", "daily"), Source.DAILY)
 
     # Filters
     filters_data = query_spec.get("filters", {})
@@ -435,24 +316,9 @@ def query_spec_to_builder(query_spec: dict) -> "QuerySpec":
         conditions=conditions,
     )
 
-    # Grouping
-    grouping_map = {
-        "none": Grouping.NONE,
-        "total": Grouping.TOTAL,
-        "5min": Grouping.MINUTE_5,
-        "10min": Grouping.MINUTE_10,
-        "15min": Grouping.MINUTE_15,
-        "30min": Grouping.MINUTE_30,
-        "hour": Grouping.HOUR,
-        "day": Grouping.DAY,
-        "week": Grouping.WEEK,
-        "month": Grouping.MONTH,
-        "quarter": Grouping.QUARTER,
-        "year": Grouping.YEAR,
-        "weekday": Grouping.WEEKDAY,
-        "session": Grouping.SESSION,
-    }
-    grouping = grouping_map.get(query_spec.get("grouping", "none"), Grouping.NONE)
+    # Grouping (auto-generated from Grouping enum)
+    from agent.query_builder.schema import get_grouping_map
+    grouping = get_grouping_map().get(query_spec.get("grouping", "none"), Grouping.NONE)
 
     # Metrics
     metric_map = {
@@ -481,15 +347,8 @@ def query_spec_to_builder(query_spec: dict) -> "QuerySpec":
             alias=m.get("alias"),
         ))
 
-    # Special Op
-    special_op_map = {
-        "none": SpecialOp.NONE,
-        "event_time": SpecialOp.EVENT_TIME,
-        "top_n": SpecialOp.TOP_N,
-        "compare": SpecialOp.COMPARE,
-        "find_extremum": SpecialOp.FIND_EXTREMUM,
-    }
-    special_op = special_op_map.get(
+    # Special Op (auto-generated from SpecialOp enum)
+    special_op = get_special_op_map().get(
         query_spec.get("special_op", "none"),
         SpecialOp.NONE
     )
