@@ -272,6 +272,24 @@ Return ONLY the SQL query.
 </output>
 """
 
+# User prompt when detailed_spec is provided (preferred)
+USER_PROMPT_DETAILED = """<parameters>
+Symbol: {symbol}
+Period: {period_start} to {period_end}
+</parameters>
+
+<detailed_spec>
+{detailed_spec}
+</detailed_spec>
+
+<task>
+Generate a DuckDB SQL query based on the detailed specification above.
+Follow the Logic and SQL Hints exactly.
+Return only the SQL query.
+</task>
+"""
+
+# User prompt fallback for legacy search_condition
 USER_PROMPT = """<parameters>
 Symbol: {symbol}
 Period: {period_start} to {period_end}
@@ -288,8 +306,11 @@ Return only the SQL query.
 USER_PROMPT_REWRITE = """<parameters>
 Symbol: {symbol}
 Period: {period_start} to {period_end}
-Search condition: {search_condition}
 </parameters>
+
+<specification>
+{spec}
+</specification>
 
 <previous_sql>
 {previous_sql}
@@ -309,7 +330,8 @@ def get_sql_agent_prompt(
     symbol: str,
     period_start: str,
     period_end: str,
-    search_condition: str,
+    detailed_spec: str = None,
+    search_condition: str = None,
     previous_sql: str = None,
     error: str = None,
 ) -> str:
@@ -320,28 +342,39 @@ def get_sql_agent_prompt(
         symbol: Trading symbol (NQ, ES, etc.)
         period_start: Start date ISO format
         period_end: End date ISO format
-        search_condition: Natural language search condition
+        detailed_spec: Detailed specification from Understander (preferred)
+        search_condition: Legacy search condition (fallback)
         previous_sql: Previous SQL if rewriting
         error: Validation error if rewriting
 
     Returns:
         Complete prompt string
     """
+    # Use detailed_spec if available, otherwise fallback to search_condition
+    spec = detailed_spec or search_condition or ""
+
     if previous_sql and error:
         user_prompt = USER_PROMPT_REWRITE.format(
             symbol=symbol,
             period_start=period_start,
             period_end=period_end,
-            search_condition=search_condition,
+            spec=spec,
             previous_sql=previous_sql,
             error=error,
+        )
+    elif detailed_spec:
+        user_prompt = USER_PROMPT_DETAILED.format(
+            symbol=symbol,
+            period_start=period_start,
+            period_end=period_end,
+            detailed_spec=detailed_spec,
         )
     else:
         user_prompt = USER_PROMPT.format(
             symbol=symbol,
             period_start=period_start,
             period_end=period_end,
-            search_condition=search_condition,
+            search_condition=search_condition or "",
         )
 
     return SYSTEM_PROMPT + "\n" + user_prompt

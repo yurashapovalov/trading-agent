@@ -48,10 +48,13 @@ class Intent(TypedDict, total=False):
     symbol: str | None            # "NQ", "ES", etc.
     period_start: str | None      # ISO date "2025-01-01"
     period_end: str | None        # ISO date "2025-01-31"
-    granularity: Literal["period", "daily", "hourly", "weekday", "monthly"] | None  # How to group data
+    granularity: Literal["period", "daily", "weekly", "monthly", "quarterly", "yearly", "hourly", "weekday"] | None
 
-    # For search queries (type="data" with search)
-    search_condition: str | None  # Natural language condition for Analyst to filter
+    # For complex queries - detailed specification for SQL Agent
+    detailed_spec: str | None     # Markdown spec with Task, Logic, SQL Hints, etc.
+
+    # DEPRECATED - use detailed_spec instead
+    search_condition: str | None
 
     # For strategy/backtest requests (future)
     strategy: StrategyDef | None

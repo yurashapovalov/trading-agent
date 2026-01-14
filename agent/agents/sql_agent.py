@@ -1,5 +1,11 @@
 """
-SQL Agent - generates DuckDB SQL queries for search conditions.
+SQL Agent v2 - generates DuckDB SQL from detailed specifications.
+
+Receives detailed_spec from Understander with:
+- Task description
+- Analysis type (FILTER, EVENT, DISTRIBUTION, etc.)
+- Step-by-step logic
+- SQL hints
 
 Returns:
 - sql_query: Generated SQL query for DataFetcher to execute
@@ -11,14 +17,14 @@ from google.genai import types
 import config
 from agent.state import AgentState, UsageStats
 from agent.prompts.sql_agent import get_sql_agent_prompt
-from agent.pricing import calculate_cost, GEMINI_2_5_FLASH_LITE
+from agent.pricing import calculate_cost
 
 
 class SQLAgent:
     """
-    Generates SQL queries from natural language search conditions.
+    Generates SQL queries from detailed specifications.
 
-    Principle: LLM understands search condition and writes SQL.
+    Receives detailed_spec from Understander and writes precise SQL.
     SQL Validator checks the SQL before execution.
     """
 
@@ -27,7 +33,7 @@ class SQLAgent:
 
     def __init__(self):
         self.client = genai.Client(api_key=config.GOOGLE_API_KEY)
-        self.model = config.GEMINI_LITE_MODEL  # Use cheaper model for SQL generation
+        self.model = config.GEMINI_MODEL  # Use same model as Analyst for better reasoning
         self._last_usage = UsageStats(
             input_tokens=0,
             output_tokens=0,
@@ -36,12 +42,15 @@ class SQLAgent:
         )
 
     def __call__(self, state: AgentState) -> dict:
-        """Generate SQL query from search condition."""
+        """Generate SQL query from detailed_spec or search_condition."""
         intent = state.get("intent") or {}
+
+        # Prefer detailed_spec, fallback to search_condition for backwards compatibility
+        detailed_spec = intent.get("detailed_spec")
         search_condition = intent.get("search_condition")
 
-        # No search condition - skip SQL Agent
-        if not search_condition:
+        # No spec - skip SQL Agent
+        if not detailed_spec and not search_condition:
             return {
                 "sql_query": None,
                 "usage": self._last_usage,
@@ -62,23 +71,25 @@ class SQLAgent:
             previous_sql = state.get("sql_query")
             error = validation.get("feedback")
 
-        # Build prompt
+        # Build prompt - use detailed_spec if available
         prompt = get_sql_agent_prompt(
             symbol=symbol,
             period_start=period_start,
             period_end=period_end,
-            search_condition=search_condition,
+            detailed_spec=detailed_spec,
+            search_condition=search_condition,  # Fallback
             previous_sql=previous_sql,
             error=error,
         )
 
-        # Call LLM
+        # Call LLM with thinking enabled for better reasoning
         try:
             response = self.client.models.generate_content(
                 model=self.model,
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     temperature=0.1,  # Low temperature for precise SQL
+                    thinking_config=types.ThinkingConfig(include_thoughts=True),
                 )
             )
 
@@ -119,8 +130,8 @@ class SQLAgent:
         if response.usage_metadata:
             input_tokens = response.usage_metadata.prompt_token_count or 0
             output_tokens = response.usage_metadata.candidates_token_count or 0
-            thinking_tokens = 0
-            cost = calculate_cost(input_tokens, output_tokens, thinking_tokens, GEMINI_2_5_FLASH_LITE)
+            thinking_tokens = getattr(response.usage_metadata, 'thoughts_token_count', 0) or 0
+            cost = calculate_cost(input_tokens, output_tokens, thinking_tokens)
 
             self._last_usage = UsageStats(
                 input_tokens=input_tokens,

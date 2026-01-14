@@ -156,6 +156,105 @@ TEMPLATES = {
         GROUP BY weekday_num, weekday_name
         ORDER BY weekday_num
     """,
+
+    # One row per week (time-series)
+    "weekly": """
+        WITH daily AS (
+            SELECT
+                timestamp::date as date,
+                DATE_TRUNC('week', timestamp::date) as week,
+                FIRST(open ORDER BY timestamp) as open,
+                LAST(close ORDER BY timestamp) as close,
+                MAX(high) as high,
+                MIN(low) as low,
+                SUM(volume) as volume
+            FROM ohlcv_1min
+            WHERE symbol = $1
+              AND timestamp >= $2
+              AND timestamp < $3
+            GROUP BY date, DATE_TRUNC('week', timestamp::date)
+        )
+        SELECT
+            week::date as week_start,
+            COUNT(*) as trading_days,
+            ROUND(FIRST(open ORDER BY week), 2) as open_price,
+            ROUND(LAST(close ORDER BY week), 2) as close_price,
+            ROUND(MAX(high), 2) as max_price,
+            ROUND(MIN(low), 2) as min_price,
+            ROUND(SUM(volume), 0) as total_volume,
+            ROUND(AVG(high - low), 2) as avg_daily_range,
+            ROUND((LAST(close ORDER BY week) - FIRST(open ORDER BY week))
+                  / FIRST(open ORDER BY week) * 100, 2) as change_pct
+        FROM daily
+        GROUP BY week
+        ORDER BY week
+    """,
+
+    # One row per quarter (time-series)
+    "quarterly": """
+        WITH daily AS (
+            SELECT
+                timestamp::date as date,
+                DATE_TRUNC('quarter', timestamp::date) as quarter,
+                FIRST(open ORDER BY timestamp) as open,
+                LAST(close ORDER BY timestamp) as close,
+                MAX(high) as high,
+                MIN(low) as low,
+                SUM(volume) as volume
+            FROM ohlcv_1min
+            WHERE symbol = $1
+              AND timestamp >= $2
+              AND timestamp < $3
+            GROUP BY date, DATE_TRUNC('quarter', timestamp::date)
+        )
+        SELECT
+            STRFTIME(quarter, '%Y-Q') || ((EXTRACT(MONTH FROM quarter)::int - 1) / 3 + 1)::varchar as quarter,
+            COUNT(*) as trading_days,
+            ROUND(FIRST(open ORDER BY quarter), 2) as open_price,
+            ROUND(LAST(close ORDER BY quarter), 2) as close_price,
+            ROUND(MAX(high), 2) as max_price,
+            ROUND(MIN(low), 2) as min_price,
+            ROUND(SUM(volume), 0) as total_volume,
+            ROUND(AVG(high - low), 2) as avg_daily_range,
+            ROUND((LAST(close ORDER BY quarter) - FIRST(open ORDER BY quarter))
+                  / FIRST(open ORDER BY quarter) * 100, 2) as change_pct
+        FROM daily
+        GROUP BY quarter
+        ORDER BY quarter
+    """,
+
+    # One row per year (time-series)
+    "yearly": """
+        WITH daily AS (
+            SELECT
+                timestamp::date as date,
+                DATE_TRUNC('year', timestamp::date) as year,
+                FIRST(open ORDER BY timestamp) as open,
+                LAST(close ORDER BY timestamp) as close,
+                MAX(high) as high,
+                MIN(low) as low,
+                SUM(volume) as volume
+            FROM ohlcv_1min
+            WHERE symbol = $1
+              AND timestamp >= $2
+              AND timestamp < $3
+            GROUP BY date, DATE_TRUNC('year', timestamp::date)
+        )
+        SELECT
+            EXTRACT(YEAR FROM year)::int as year,
+            COUNT(*) as trading_days,
+            ROUND(FIRST(open ORDER BY year), 2) as open_price,
+            ROUND(LAST(close ORDER BY year), 2) as close_price,
+            ROUND(MAX(high), 2) as max_price,
+            ROUND(MIN(low), 2) as min_price,
+            ROUND(SUM(volume), 0) as total_volume,
+            ROUND(AVG(high - low), 2) as avg_daily_range,
+            ROUND((LAST(close ORDER BY year) - FIRST(open ORDER BY year))
+                  / FIRST(open ORDER BY year) * 100, 2) as change_pct
+        FROM daily
+        GROUP BY year
+        ORDER BY year
+    """,
 }
 
 
@@ -167,7 +266,7 @@ def fetch(
     symbol: str,
     period_start: str,
     period_end: str,
-    granularity: Literal["period", "daily", "hourly", "weekday", "monthly"] = "daily"
+    granularity: Literal["period", "daily", "weekly", "monthly", "quarterly", "yearly", "hourly", "weekday"] = "daily"
 ) -> dict[str, Any]:
     """
     Fetch OHLCV data at specified granularity.
@@ -179,9 +278,12 @@ def fetch(
         granularity: How to group data
             - "period": single row with aggregates
             - "daily": one row per day
+            - "weekly": one row per week
+            - "monthly": one row per month
+            - "quarterly": one row per quarter
+            - "yearly": one row per year
             - "hourly": one row per hour (aggregated across days)
             - "weekday": one row per day of week (Mon-Fri stats)
-            - "monthly": one row per month (time-series)
 
     Returns:
         {

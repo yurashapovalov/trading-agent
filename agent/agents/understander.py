@@ -1,8 +1,8 @@
 """
-Understander agent - parses user questions into structured Intent.
+Understander v2 - senior trading data analyst.
 
-LLM decides WHAT data to fetch (Intent).
-DataFetcher (code) executes HOW to fetch it.
+Deeply understands user questions and formulates detailed specifications
+for SQL Agent. Uses thinking for complex analysis type detection.
 """
 
 import json
@@ -12,7 +12,7 @@ from google.genai import types
 
 import config
 from agent.state import AgentState, Intent, UsageStats
-from agent.pricing import calculate_cost, GEMINI_2_5_FLASH_LITE
+from agent.pricing import calculate_cost
 from agent.capabilities import (
     get_capabilities_prompt,
     DEFAULT_SYMBOL,
@@ -23,14 +23,17 @@ from agent.prompts.understander import get_understander_prompt
 
 
 # =============================================================================
-# Understander Agent
+# Understander Agent v2
 # =============================================================================
 
 class Understander:
     """
-    Parses user questions into structured Intent.
+    Senior trading data analyst that understands user intent.
 
-    Uses Gemini with JSON mode to return structured response.
+    Uses Gemini with thinking to:
+    - Deeply understand what trader wants to know
+    - Detect analysis type (FILTER, EVENT, DISTRIBUTION, etc.)
+    - Generate detailed_spec for SQL Agent
     """
 
     name = "understander"
@@ -38,7 +41,7 @@ class Understander:
 
     def __init__(self):
         self.client = genai.Client(api_key=config.GOOGLE_API_KEY)
-        self.model = config.GEMINI_LITE_MODEL
+        self.model = config.GEMINI_MODEL  # Smart model with thinking
         self._last_usage = UsageStats(
             input_tokens=0,
             output_tokens=0,
@@ -94,7 +97,7 @@ class Understander:
         )
 
     def _parse_with_llm(self, question: str, chat_history: list) -> Intent:
-        """Call LLM and parse response into Intent."""
+        """Call LLM with thinking and parse response into Intent."""
         try:
             prompt = self._build_prompt(question, chat_history)
 
@@ -102,7 +105,8 @@ class Understander:
                 model=self.model,
                 contents=prompt,
                 config=types.GenerateContentConfig(
-                    temperature=0,
+                    temperature=1.0,  # Recommended for thinking models
+                    thinking_config=types.ThinkingConfig(include_thoughts=True),
                     response_mime_type="application/json",
                     response_schema={
                         "type": "object",
@@ -116,11 +120,12 @@ class Understander:
                             "period_end": {"type": "string"},
                             "granularity": {
                                 "type": "string",
-                                "enum": ["period", "daily", "hourly", "weekday", "monthly"]
+                                "enum": ["period", "daily", "weekly", "monthly", "quarterly", "yearly", "hourly", "weekday"]
                             },
-                            "search_condition": {"type": "string"},  # Natural language condition for filtering
+                            "detailed_spec": {"type": "string"},  # Detailed specification for SQL Agent
+                            "search_condition": {"type": "string"},  # DEPRECATED
                             "concept": {"type": "string"},
-                            "response_text": {"type": "string"},  # For chitchat/out_of_scope
+                            "response_text": {"type": "string"},
                             "needs_clarification": {"type": "boolean"},
                             "clarification_question": {"type": "string"},
                             "suggestions": {
@@ -133,15 +138,16 @@ class Understander:
                 )
             )
 
-            # Track usage
+            # Track usage including thinking tokens
             if response.usage_metadata:
                 input_tokens = response.usage_metadata.prompt_token_count or 0
                 output_tokens = response.usage_metadata.candidates_token_count or 0
-                cost = calculate_cost(input_tokens, output_tokens, 0, GEMINI_2_5_FLASH_LITE)
+                thinking_tokens = getattr(response.usage_metadata, 'thoughts_token_count', 0) or 0
+                cost = calculate_cost(input_tokens, output_tokens, thinking_tokens)
                 self._last_usage = UsageStats(
                     input_tokens=input_tokens,
                     output_tokens=output_tokens,
-                    thinking_tokens=0,
+                    thinking_tokens=thinking_tokens,
                     cost_usd=cost
                 )
 
@@ -171,16 +177,12 @@ class Understander:
             intent["period_start"] = data.get("period_start")
             intent["period_end"] = data.get("period_end")
             intent["granularity"] = data.get("granularity") or DEFAULT_GRANULARITY
-            intent["search_condition"] = data.get("search_condition")
+            intent["detailed_spec"] = data.get("detailed_spec")
+            intent["search_condition"] = data.get("search_condition")  # DEPRECATED
 
-            # Default period if not specified
+            # Default period: ALL available data (more data = better analytics)
             if not intent["period_start"] or not intent["period_end"]:
-                if intent.get("search_condition"):
-                    # Search queries use FULL data range by default
-                    intent["period_start"], intent["period_end"] = self._full_data_range()
-                else:
-                    # Regular data queries use last month by default
-                    intent["period_start"], intent["period_end"] = self._default_period()
+                intent["period_start"], intent["period_end"] = self._full_data_range()
 
         if intent_type == "concept":
             intent["concept"] = data.get("concept", "")
@@ -192,7 +194,7 @@ class Understander:
 
     def _default_intent(self) -> Intent:
         """Return default intent for fallback."""
-        start, end = self._default_period()
+        start, end = self._full_data_range()
         return Intent(
             type="data",
             symbol=DEFAULT_SYMBOL,
@@ -202,21 +204,8 @@ class Understander:
             needs_clarification=False,
         )
 
-    def _default_period(self) -> tuple[str, str]:
-        """Get default period (last month of available data)."""
-        data_range = get_data_range("NQ")
-        if data_range:
-            end_date = datetime.strptime(data_range['end_date'], "%Y-%m-%d")
-            start_date = end_date - timedelta(days=30)
-            return start_date.strftime("%Y-%m-%d"), data_range['end_date']
-
-        # Fallback
-        today = datetime.now()
-        month_ago = today - timedelta(days=30)
-        return month_ago.strftime("%Y-%m-%d"), today.strftime("%Y-%m-%d")
-
     def _full_data_range(self) -> tuple[str, str]:
-        """Get full available data range (for pattern searches)."""
+        """Get full available data range (default for all queries)."""
         data_range = get_data_range("NQ")
         if data_range:
             return data_range['start_date'], data_range['end_date']
