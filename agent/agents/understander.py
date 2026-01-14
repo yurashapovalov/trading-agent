@@ -3,12 +3,15 @@ Understander v2 - senior trading data analyst.
 
 Deeply understands user questions and formulates detailed specifications
 for SQL Agent. Uses thinking for complex analysis type detection.
+
+Supports human-in-the-loop via LangGraph interrupt() for clarifications.
 """
 
 import json
 from datetime import datetime, timedelta
 from google import genai
 from google.genai import types
+from langgraph.types import interrupt
 
 import config
 from agent.state import AgentState, Intent, UsageStats
@@ -50,16 +53,40 @@ class Understander:
         )
 
     def __call__(self, state: AgentState) -> dict:
-        """Parse question and return Intent."""
-        question = state.get("question", "")
-        chat_history = state.get("chat_history", [])
+        """Parse question and return Intent.
 
-        # Check clarification limit
-        if state.get("clarification_attempts", 0) >= 3:
-            return {"intent": self._default_intent()}
+        Uses interrupt() for human-in-the-loop clarifications.
+        When clarification is needed:
+        1. Graph pauses and returns question to user
+        2. User responds
+        3. Graph resumes, response is added to context
+        4. LLM re-analyzes with full context
+        """
+        question = state.get("question", "")
+        chat_history = list(state.get("chat_history", []))  # Copy to avoid mutation
 
         # Call LLM with JSON mode
         intent = self._parse_with_llm(question, chat_history)
+
+        # If clarification needed, interrupt and wait for user response
+        if intent.get("needs_clarification"):
+            clarification_question = intent.get("clarification_question", "Уточните ваш запрос")
+            suggestions = intent.get("suggestions", [])
+
+            # Interrupt graph - pauses here until resume
+            user_response = interrupt({
+                "type": "clarification",
+                "question": clarification_question,
+                "suggestions": suggestions,
+            })
+
+            # After resume - user_response contains user's answer
+            # Add exchange to chat history and re-parse
+            chat_history.append({"role": "assistant", "content": clarification_question})
+            chat_history.append({"role": "user", "content": user_response})
+
+            # Re-call LLM with updated context
+            intent = self._parse_with_llm(question, chat_history)
 
         return {
             "intent": intent,
@@ -167,6 +194,7 @@ class Understander:
         intent: Intent = {
             "type": intent_type,
             "symbol": data.get("symbol") or DEFAULT_SYMBOL,
+            # needs_clarification is handled via interrupt(), not stored in final intent
             "needs_clarification": data.get("needs_clarification", False),
             "clarification_question": data.get("clarification_question"),
             "suggestions": data.get("suggestions", []),

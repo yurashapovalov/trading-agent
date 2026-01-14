@@ -2,7 +2,7 @@
 LangGraph definition for multi-agent trading system v2.
 
 Flow:
-                    ┌─ chitchat/out_of_scope/clarification ─► Responder ──► END
+                    ┌─ chitchat/out_of_scope ─► Responder ──► END
                     │
 Question ─► Understander ─┼────────────────────────────────────────────────────────────┐
                     │                            ┌──────────────────────────────────────┤
@@ -10,11 +10,11 @@ Question ─► Understander ─┼───────────────
                     └─ data ─► SQL Agent ─► SQL Validator ─► DataFetcher ─► Analyst ─► Validator ─► END
                                    ↑_______________|                           ↑____________| (rewrite loop)
 
-Clarification (stateless):
-- When Understander returns needs_clarification=true, Responder returns the question
-- Response is saved to chat_logs like normal
-- User answers with new message
-- Understander sees context and combines original question with clarification
+Human-in-the-loop (interrupt):
+- When Understander needs clarification, it calls interrupt() which pauses the graph
+- Graph state is saved, __interrupt__ payload returned to caller
+- Caller resumes with Command(resume=user_response)
+- Understander continues with user's response, re-analyzes, and proceeds
 
 Note: SQL Agent runs if detailed_spec or search_condition exists in Intent.
 """
@@ -50,15 +50,18 @@ def understand_question(state: AgentState) -> Command:
     """
     Understander node - parses question into Intent and routes to next node.
     Uses Command API to combine state update with routing decision.
+
+    Note: Clarification is now handled via interrupt() inside Understander.
+    If clarification is needed, graph pauses and this function is not reached
+    until the user responds and graph resumes.
     """
     result = understander(state)
     intent = result.get("intent") or {}
     intent_type = intent.get("type", "data")
 
     # Determine next node based on intent
-    if intent.get("needs_clarification"):
-        next_node = "responder"
-    elif intent_type in ("chitchat", "out_of_scope", "concept"):
+    # Note: needs_clarification is handled via interrupt() before we get here
+    if intent_type in ("chitchat", "out_of_scope", "concept"):
         next_node = "responder"
     elif intent.get("detailed_spec") or intent.get("search_condition"):
         next_node = "sql_agent"
@@ -95,28 +98,15 @@ def validate_response(state: AgentState) -> dict:
 
 def simple_respond(state: AgentState) -> dict:
     """
-    Responder node - returns response_text for chitchat/out_of_scope/clarification.
+    Responder node - returns response_text for chitchat/out_of_scope/concept.
     No data fetching or analysis needed.
+
+    Note: Clarification is now handled via interrupt() in Understander,
+    not through this responder node.
     """
     intent = state.get("intent") or {}
 
-    # Handle clarification - return question with suggestions
-    if intent.get("needs_clarification"):
-        question = intent.get("clarification_question", "Уточните ваш вопрос")
-        suggestions = intent.get("suggestions", [])
-
-        # Format response with suggestions
-        response_text = question
-        if suggestions:
-            response_text += "\n\nВарианты:\n" + "\n".join(f"• {s}" for s in suggestions)
-
-        return {
-            "response": response_text,
-            "suggestions": suggestions,  # Pass to frontend for buttons
-            "agents_used": ["responder"],
-        }
-
-    # Normal response
+    # Return response from intent (chitchat/out_of_scope/concept)
     response_text = intent.get("response_text", "Чем могу помочь с анализом торговых данных?")
     return {
         "response": response_text,
@@ -512,37 +502,26 @@ class TradingGraph:
                     }
 
                 elif node_name == "responder":
-                    # Responder handles chitchat/out_of_scope/clarification
+                    # Responder handles chitchat/out_of_scope/concept only
+                    # (clarification is now handled via interrupt in understander)
                     response = updates.get("response") or ""
-                    suggestions = updates.get("suggestions") or []
-                    is_clarification = len(suggestions) > 0
 
-                    # For clarification, emit special event with question and buttons
-                    if is_clarification:
-                        # Extract just the question (before "Варианты:")
-                        question = response.split("\n\nВарианты:")[0] if "\n\nВарианты:" in response else response
+                    # Stream response in chunks
+                    chunk_size = 50
+                    for i in range(0, len(response), chunk_size):
                         yield {
-                            "type": "clarification",
-                            "question": question,
-                            "suggestions": suggestions
+                            "type": "text_delta",
+                            "agent": node_name,
+                            "content": response[i:i+chunk_size]
                         }
-                    else:
-                        # Stream normal response in chunks
-                        chunk_size = 50
-                        for i in range(0, len(response), chunk_size):
-                            yield {
-                                "type": "text_delta",
-                                "agent": node_name,
-                                "content": response[i:i+chunk_size]
-                            }
 
                     yield {
                         "type": "step_end",
                         "agent": node_name,
                         "duration_ms": step_duration_ms,
-                        "result": {"response_length": len(response), "is_clarification": is_clarification},
+                        "result": {"response_length": len(response)},
                         "input": input_data,
-                        "output": {"response": response, "suggestions": suggestions}
+                        "output": {"response": response}
                     }
                     # Update accumulated state
                     accumulated_state["response"] = response
@@ -550,6 +529,29 @@ class TradingGraph:
         # Get final state with accumulated usage from graph (reducers already applied)
         duration_ms = int((time.time() - start_time) * 1000)
         final_state = self.app.get_state(config)
+
+        # Check for interrupt (human-in-the-loop clarification)
+        if final_state and final_state.tasks:
+            for task in final_state.tasks:
+                if hasattr(task, 'interrupts') and task.interrupts:
+                    for intr in task.interrupts:
+                        # Emit interrupt event for frontend
+                        interrupt_value = intr.value if hasattr(intr, 'value') else intr
+                        yield {
+                            "type": "interrupt",
+                            "question": interrupt_value.get("question", "Уточните запрос"),
+                            "suggestions": interrupt_value.get("suggestions", []),
+                        }
+                    # Don't emit done - graph is paused
+                    yield {
+                        "type": "paused",
+                        "total_duration_ms": duration_ms,
+                        "request_id": initial_state.get("request_id"),
+                        "message": "Waiting for user response"
+                    }
+                    return
+
+        # Normal completion - emit usage and done
         usage = (final_state.values.get("usage") or {}) if final_state else {}
 
         yield {
@@ -564,6 +566,159 @@ class TradingGraph:
             "type": "done",
             "total_duration_ms": duration_ms,
             "request_id": initial_state.get("request_id")
+        }
+
+    def resume_sse(
+        self,
+        user_response: str,
+        user_id: str,
+        session_id: str = "default",
+    ):
+        """
+        Resume a paused graph after interrupt with user's response.
+
+        Args:
+            user_response: User's answer to clarification question
+            user_id: User ID (same as original request)
+            session_id: Session ID (same as original request)
+
+        Yields:
+            Same events as stream_sse - continues from where graph paused
+        """
+        import time
+
+        start_time = time.time()
+        step_number = 0
+        last_step_time = start_time
+
+        config = {
+            "configurable": {
+                "thread_id": f"{user_id}_{session_id}"
+            }
+        }
+
+        # Track accumulated state
+        accumulated_state = {}
+
+        # Resume with Command(resume=user_response)
+        for event in self.app.stream(Command(resume=user_response), config, stream_mode=["updates", "custom"]):
+            stream_type, data = event
+
+            # Custom events (text_delta from agents) - yield directly
+            if stream_type == "custom":
+                yield data
+                continue
+
+            # Updates events - process node outputs (same logic as stream_sse)
+            for node_name, updates in data.items():
+                step_number += 1
+                current_time = time.time()
+                step_duration_ms = int((current_time - last_step_time) * 1000)
+                last_step_time = current_time
+
+                input_data = self._get_agent_input(node_name, accumulated_state)
+
+                yield {
+                    "type": "step_start",
+                    "agent": node_name,
+                    "message": self._get_agent_message(node_name)
+                }
+
+                # Process based on node type (simplified - main logic same as stream_sse)
+                if node_name == "understander":
+                    intent = updates.get("intent") or {}
+                    usage = updates.get("usage") or {}
+                    yield {
+                        "type": "step_end",
+                        "agent": node_name,
+                        "duration_ms": step_duration_ms,
+                        "result": {"type": intent.get("type"), "symbol": intent.get("symbol")},
+                        "input": input_data,
+                        "output": {"intent": intent, "usage": usage}
+                    }
+                    accumulated_state["intent"] = intent
+
+                elif node_name == "sql_agent":
+                    sql_query = updates.get("sql_query")
+                    yield {
+                        "type": "step_end",
+                        "agent": node_name,
+                        "duration_ms": step_duration_ms,
+                        "result": {"sql_generated": sql_query is not None},
+                        "input": input_data,
+                        "output": {"sql_query": sql_query}
+                    }
+                    accumulated_state["sql_query"] = sql_query
+
+                elif node_name == "data_fetcher":
+                    data_result = updates.get("data") or {}
+                    yield {
+                        "type": "step_end",
+                        "agent": node_name,
+                        "duration_ms": step_duration_ms,
+                        "result": {"rows": data_result.get("row_count", 0)},
+                        "input": input_data,
+                        "output": data_result
+                    }
+                    accumulated_state["data"] = data_result
+
+                elif node_name == "analyst":
+                    response = updates.get("response") or ""
+                    yield {
+                        "type": "step_end",
+                        "agent": node_name,
+                        "duration_ms": step_duration_ms,
+                        "result": {"response_length": len(response)},
+                        "input": input_data,
+                        "output": {"response": response}
+                    }
+                    accumulated_state["response"] = response
+
+                else:
+                    # Generic handler for other nodes
+                    yield {
+                        "type": "step_end",
+                        "agent": node_name,
+                        "duration_ms": step_duration_ms,
+                        "result": {},
+                        "input": input_data,
+                        "output": updates
+                    }
+
+        # Check for another interrupt (nested clarification)
+        duration_ms = int((time.time() - start_time) * 1000)
+        final_state = self.app.get_state(config)
+
+        if final_state and final_state.tasks:
+            for task in final_state.tasks:
+                if hasattr(task, 'interrupts') and task.interrupts:
+                    for intr in task.interrupts:
+                        interrupt_value = intr.value if hasattr(intr, 'value') else intr
+                        yield {
+                            "type": "interrupt",
+                            "question": interrupt_value.get("question", "Уточните запрос"),
+                            "suggestions": interrupt_value.get("suggestions", []),
+                        }
+                    yield {
+                        "type": "paused",
+                        "total_duration_ms": duration_ms,
+                        "message": "Waiting for user response"
+                    }
+                    return
+
+        # Normal completion
+        usage = (final_state.values.get("usage") or {}) if final_state else {}
+        yield {
+            "type": "usage",
+            "input_tokens": usage.get("input_tokens", 0),
+            "output_tokens": usage.get("output_tokens", 0),
+            "thinking_tokens": usage.get("thinking_tokens", 0),
+            "cost": usage.get("cost_usd", 0)
+        }
+
+        yield {
+            "type": "done",
+            "total_duration_ms": duration_ms
         }
 
     def _get_agent_message(self, agent: str) -> str:

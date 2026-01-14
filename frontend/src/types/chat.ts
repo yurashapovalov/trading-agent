@@ -53,7 +53,9 @@ export type SSEEvent =
   | { type: "text_delta"; content: string }
   | { type: "suggestions"; suggestions: string[] }
   | { type: "usage"; input_tokens: number; output_tokens: number; thinking_tokens?: number; cost: number }
-  | { type: "clarification_needed"; question: string; suggestions: string[]; thread_id: string }
-  | { type: "clarification"; question: string; suggestions: string[] }
+  | { type: "interrupt"; question: string; suggestions: string[] }  // Human-in-the-loop clarification
+  | { type: "paused"; total_duration_ms?: number; message?: string }  // Graph paused waiting for response
+  | { type: "clarification_needed"; question: string; suggestions: string[]; thread_id: string }  // Legacy
+  | { type: "clarification"; question: string; suggestions: string[] }  // Legacy
   | { type: "done" }
   | { type: "error"; message: string }

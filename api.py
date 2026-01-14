@@ -91,6 +91,11 @@ class ChatRequest(BaseModel):
     session_id: Optional[str] = "default"
 
 
+class ResumeRequest(BaseModel):
+    response: str  # User's answer to clarification
+    session_id: Optional[str] = "default"
+
+
 class DataInfo(BaseModel):
     symbol: str
     bars: int
@@ -148,6 +153,8 @@ async def chat_stream(request: ChatRequest, user_id: str = Depends(require_auth)
     - text_delta: streaming text
     - validation: validation result
     - usage: token usage
+    - interrupt: clarification needed (human-in-the-loop)
+    - paused: graph waiting for user response
     - done: completion
     """
     import asyncio
@@ -209,13 +216,36 @@ async def chat_stream(request: ChatRequest, user_id: str = Depends(require_auth)
                 elif event_type == "text_delta":
                     final_text += event.get("content", "")
 
-                elif event_type == "clarification":
-                    # Save clarification question as response for context
+                elif event_type == "interrupt":
+                    # Human-in-the-loop: save clarification question as response for context
                     question = event.get("question") or ""
                     suggestions = event.get("suggestions") or []
                     final_text = question
                     if suggestions:
                         final_text += "\n\nВарианты:\n" + "\n".join(f"• {s}" for s in suggestions)
+
+                elif event_type == "paused":
+                    # Graph is paused waiting for user response
+                    # Log partial completion (will be updated when resumed)
+                    duration_ms = event.get("total_duration_ms", 0)
+                    await log_completion(
+                        request_id=request_id,
+                        user_id=user_id,
+                        session_id=request.session_id or "default",
+                        question=request.message,
+                        response=final_text[:10000],
+                        route=route or "clarification",
+                        agents_used=list(set(agents_used)),
+                        validation_attempts=validation_attempts,
+                        validation_passed=None,  # Not yet complete
+                        input_tokens=usage_data.get("input_tokens", 0),
+                        output_tokens=usage_data.get("output_tokens", 0),
+                        thinking_tokens=usage_data.get("thinking_tokens", 0),
+                        cost_usd=usage_data.get("cost", 0),
+                        duration_ms=duration_ms,
+                        model=config.GEMINI_MODEL,
+                        provider="gemini"
+                    )
 
                 elif event_type == "validation":
                     validation_attempts += 1
@@ -270,6 +300,138 @@ async def chat_stream(request: ChatRequest, user_id: str = Depends(require_auth)
 async def chat_stream_v2(request: ChatRequest, user_id: str = Depends(require_auth)):
     """Alias for /chat/stream (backward compatibility)."""
     return await chat_stream(request, user_id)
+
+
+@app.post("/chat/resume")
+async def chat_resume(request: ResumeRequest, user_id: str = Depends(require_auth)):
+    """
+    Resume a paused chat after interrupt (human-in-the-loop).
+
+    Call this endpoint after receiving an 'interrupt' event from /chat/stream.
+    The user's response will be passed to the paused graph to continue processing.
+
+    SSE event types: same as /chat/stream
+    """
+    import asyncio
+    import uuid
+    from agent.graph import trading_graph
+
+    print(f"[RESUME] User response: {request.response[:50]}... for user {user_id[:8]}...")
+
+    async def generate():
+        final_text = ""
+        usage_data = {}
+        request_id = str(uuid.uuid4())
+        route = "data"  # Resume is always for data queries
+        agents_used = []
+        validation_attempts = 0
+        validation_passed = None
+        step_number = 0
+
+        try:
+            for event in trading_graph.resume_sse(
+                user_response=request.response,
+                user_id=user_id,
+                session_id=request.session_id or "default",
+            ):
+                yield f"data: {json.dumps(clean_for_json(event), default=str)}\n\n"
+                await asyncio.sleep(0)
+
+                event_type = event.get("type")
+
+                if event_type == "step_start":
+                    agents_used.append(event.get("agent"))
+
+                elif event_type == "step_end":
+                    agent_name = event.get("agent")
+                    step_number += 1
+                    duration_ms = event.get("duration_ms", 0)
+
+                    await log_trace_step(
+                        request_id=request_id,
+                        user_id=user_id,
+                        step_number=step_number,
+                        agent_name=agent_name,
+                        input_data=event.get("input"),
+                        output_data=event.get("output") or event.get("result"),
+                        duration_ms=duration_ms,
+                    )
+
+                elif event_type == "text_delta":
+                    final_text += event.get("content", "")
+
+                elif event_type == "interrupt":
+                    # Another clarification needed
+                    question = event.get("question") or ""
+                    suggestions = event.get("suggestions") or []
+                    final_text = question
+                    if suggestions:
+                        final_text += "\n\nВарианты:\n" + "\n".join(f"• {s}" for s in suggestions)
+
+                elif event_type == "paused":
+                    duration_ms = event.get("total_duration_ms", 0)
+                    await log_completion(
+                        request_id=request_id,
+                        user_id=user_id,
+                        session_id=request.session_id or "default",
+                        question=f"[RESUME] {request.response}",
+                        response=final_text[:10000],
+                        route="clarification",
+                        agents_used=list(set(agents_used)),
+                        validation_attempts=validation_attempts,
+                        validation_passed=None,
+                        input_tokens=usage_data.get("input_tokens", 0),
+                        output_tokens=usage_data.get("output_tokens", 0),
+                        thinking_tokens=usage_data.get("thinking_tokens", 0),
+                        cost_usd=usage_data.get("cost", 0),
+                        duration_ms=duration_ms,
+                        model=config.GEMINI_MODEL,
+                        provider="gemini"
+                    )
+
+                elif event_type == "validation":
+                    validation_attempts += 1
+                    validation_passed = event.get("status") == "ok"
+                    if event.get("status") == "rewrite":
+                        final_text = ""
+
+                elif event_type == "usage":
+                    usage_data = event
+
+                elif event_type == "done":
+                    duration_ms = event.get("total_duration_ms", 0)
+                    await log_completion(
+                        request_id=request_id,
+                        user_id=user_id,
+                        session_id=request.session_id or "default",
+                        question=f"[RESUME] {request.response}",
+                        response=final_text[:10000],
+                        route=route,
+                        agents_used=list(set(agents_used)),
+                        validation_attempts=validation_attempts,
+                        validation_passed=validation_passed,
+                        input_tokens=usage_data.get("input_tokens", 0),
+                        output_tokens=usage_data.get("output_tokens", 0),
+                        thinking_tokens=usage_data.get("thinking_tokens", 0),
+                        cost_usd=usage_data.get("cost", 0),
+                        duration_ms=duration_ms,
+                        model=config.GEMINI_MODEL,
+                        provider="gemini"
+                    )
+
+        except Exception as e:
+            print(f"[RESUME] Error: {e}")
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        }
+    )
 
 
 @app.get("/chat/history")

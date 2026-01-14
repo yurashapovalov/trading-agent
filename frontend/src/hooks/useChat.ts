@@ -270,22 +270,19 @@ export function useChat() {
                     thinking_tokens: event.thinking_tokens,
                     cost: event.cost,
                   }
-                } else if (event.type === "clarification") {
-                  // Stateless clarification - show question with buttons
+                } else if (event.type === "interrupt") {
+                  // Human-in-the-loop: graph paused for clarification
                   setClarification({
                     question: event.question,
                     suggestions: event.suggestions,
-                    thread_id: "", // Not needed for stateless
+                    thread_id: sessionIdRef.current, // Use session_id for resume
                   })
-                } else if (event.type === "clarification_needed") {
-                  // Legacy: System is asking for clarification (interrupt-based)
-                  setClarification({
-                    question: event.question,
-                    suggestions: event.suggestions,
-                    thread_id: event.thread_id,
-                  })
+                } else if (event.type === "paused") {
+                  // Graph is paused waiting for user response
+                  // Don't add to messages yet - wait for resume completion
                   setCurrentSteps([])
                   setIsLoading(false)
+                  return // Exit stream processing, wait for user response
                 } else if (event.type === "done") {
                   setMessages((prev) => [
                     ...prev,
@@ -344,16 +341,14 @@ export function useChat() {
   }, [])
 
   const respondToClarification = useCallback(
-    async (response: string) => {
+    async (userResponse: string) => {
       if (!clarification || isLoading) return
-
-      const threadId = clarification.thread_id
 
       // Add clarification Q&A to messages
       setMessages((prev) => [
         ...prev,
         { role: "assistant", content: clarification.question },
-        { role: "user", content: response },
+        { role: "user", content: userResponse },
       ])
 
       // Clear clarification state
@@ -374,8 +369,8 @@ export function useChat() {
             }),
           },
           body: JSON.stringify({
-            thread_id: threadId,
-            user_response: response,
+            response: userResponse,
+            session_id: sessionIdRef.current,
           }),
           signal: abortControllerRef.current.signal,
         })
@@ -441,15 +436,18 @@ export function useChat() {
                     thinking_tokens: event.thinking_tokens,
                     cost: event.cost,
                   }
-                } else if (event.type === "clarification_needed") {
+                } else if (event.type === "interrupt") {
                   // Another clarification needed
                   setClarification({
                     question: event.question,
                     suggestions: event.suggestions,
-                    thread_id: event.thread_id,
+                    thread_id: sessionIdRef.current,
                   })
+                } else if (event.type === "paused") {
+                  // Graph paused again for clarification
                   setCurrentSteps([])
                   setIsLoading(false)
+                  return
                 } else if (event.type === "done") {
                   setMessages((prev) => [
                     ...prev,

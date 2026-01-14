@@ -17,6 +17,7 @@ export default function ChatPanelContainer() {
     clarification,
     sendMessage,
     stopGeneration,
+    respondToClarification,
   } = useChat()
 
   const handleSubmit = () => {
@@ -26,7 +27,8 @@ export default function ChatPanelContainer() {
   }
 
   const handleClarificationSelect = (response: string) => {
-    sendMessage(response)
+    // Use resume endpoint for interrupt-based clarification
+    respondToClarification(response)
   }
 
   return (
