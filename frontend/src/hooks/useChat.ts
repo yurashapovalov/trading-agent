@@ -279,10 +279,10 @@ export function useChat() {
                   })
                 } else if (event.type === "paused") {
                   // Graph is paused waiting for user response
-                  // Don't add to messages yet - wait for resume completion
+                  // Stream will end naturally, clarification UI shown via interrupt event
                   setCurrentSteps([])
                   setIsLoading(false)
-                  return // Exit stream processing, wait for user response
+                  // Don't return - let stream finish naturally
                 } else if (event.type === "done") {
                   setMessages((prev) => [
                     ...prev,
@@ -447,7 +447,7 @@ export function useChat() {
                   // Graph paused again for clarification
                   setCurrentSteps([])
                   setIsLoading(false)
-                  return
+                  // Don't return - let stream finish naturally
                 } else if (event.type === "done") {
                   setMessages((prev) => [
                     ...prev,
