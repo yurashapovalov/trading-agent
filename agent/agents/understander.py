@@ -112,7 +112,7 @@ class Understander:
                 model=self.model,
                 contents=prompt,
                 config=types.GenerateContentConfig(
-                    temperature=1.0,  # Recommended for thinking models
+                    temperature=0.3,  # Lower for more deterministic detailed_spec
                     thinking_config=types.ThinkingConfig(include_thoughts=True),
                     response_mime_type="application/json",
                     response_schema={

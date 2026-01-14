@@ -88,7 +88,7 @@ class SQLAgent:
                 model=self.model,
                 contents=prompt,
                 config=types.GenerateContentConfig(
-                    temperature=0.1,  # Low temperature for precise SQL
+                    temperature=0,  # Zero temperature for deterministic SQL
                     thinking_config=types.ThinkingConfig(
                         thinking_budget=0  # Disable thinking - detailed_spec has all context
                     ),

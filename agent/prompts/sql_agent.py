@@ -134,6 +134,12 @@ Query type determines output:
 
 5. DISTRIBUTION (by weekday, month, hour):
    → Return grouped aggregates: GROUP BY period
+
+6. EVENT + DISTRIBUTION (when does high/low form):
+   → CRITICAL: Count TRADING DAYS, not minute bars!
+   → Pattern: AGGREGATE FIRST, then JOIN
+   → WRONG: JOIN raw data, then COUNT (creates cartesian product)
+   → CORRECT: COUNT per bucket in separate CTEs, then JOIN results
 </rules>
 
 <examples>
@@ -237,6 +243,52 @@ SELECT
 FROM with_windows
 GROUP BY STRFTIME(date, '%Y-%m')
 ORDER BY month
+
+--- EVENT + DISTRIBUTION (time of daily high/low) ---
+
+Example: "when does daily high/low form in RTH session (15-min buckets)"
+-- CORRECT PATTERN: Aggregate in separate CTEs, then JOIN
+WITH filtered_data AS (
+    SELECT timestamp, timestamp::date as date, high, low
+    FROM ohlcv_1min
+    WHERE symbol = '{symbol}'
+      AND timestamp >= '{period_start}'
+      AND timestamp < '{period_end}'
+      AND timestamp::time >= '09:30:00'
+      AND timestamp::time < '16:00:00'
+),
+daily_extremes AS (
+    -- Find exact timestamp of daily high and low (first occurrence if tie)
+    SELECT
+        date,
+        FIRST(timestamp ORDER BY high DESC, timestamp ASC) as high_ts,
+        FIRST(timestamp ORDER BY low ASC, timestamp ASC) as low_ts
+    FROM filtered_data
+    GROUP BY date
+),
+high_distribution AS (
+    -- Count days per time bucket for highs
+    SELECT
+        STRFTIME(TIME_BUCKET(INTERVAL '15 minutes', high_ts), '%H:%M') as time_bucket,
+        COUNT(*) as high_count
+    FROM daily_extremes
+    GROUP BY time_bucket
+),
+low_distribution AS (
+    -- Count days per time bucket for lows
+    SELECT
+        STRFTIME(TIME_BUCKET(INTERVAL '15 minutes', low_ts), '%H:%M') as time_bucket,
+        COUNT(*) as low_count
+    FROM daily_extremes
+    GROUP BY time_bucket
+)
+SELECT
+    COALESCE(h.time_bucket, l.time_bucket) as time_bucket,
+    COALESCE(h.high_count, 0) as high_count,
+    COALESCE(l.low_count, 0) as low_count
+FROM high_distribution h
+FULL OUTER JOIN low_distribution l ON h.time_bucket = l.time_bucket
+ORDER BY time_bucket
 
 --- SESSIONS (RTH/ETH) ---
 
