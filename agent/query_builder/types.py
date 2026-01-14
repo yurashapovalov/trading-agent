@@ -148,16 +148,21 @@ class Filters:
     Фильтры для ограничения выборки данных.
 
     Attributes:
-        period_start: Начало периода в ISO формате (YYYY-MM-DD).
-                      Включительно.
-        period_end: Конец периода в ISO формате (YYYY-MM-DD).
-                    Не включительно (< period_end).
-        time_start: Начало временного окна (HH:MM:SS).
-                    Опционально. Используется для кастомного времени.
-        time_end: Конец временного окна (HH:MM:SS).
-                  Опционально.
-        session: Торговая сессия (см. TRADING_SESSIONS).
-        conditions: Список условий фильтрации по значениям.
+        # === Календарные фильтры ===
+        period_start: Начало периода в ISO формате (YYYY-MM-DD). Включительно.
+        period_end: Конец периода в ISO формате (YYYY-MM-DD). Не включительно.
+        specific_dates: Конкретные даты ["2005-05-16", "2003-04-12"]
+        years: Конкретные годы [2020, 2022, 2024]
+        months: Месяцы (1-12) [1, 6] для января и июня
+        weekdays: Дни недели ["Monday", "Friday"]
+
+        # === Время суток ===
+        session: Торговая сессия (RTH, ETH, PREMARKET, etc.)
+        time_start: Начало кастомного времени (HH:MM:SS)
+        time_end: Конец кастомного времени (HH:MM:SS)
+
+        # === Условия по значениям ===
+        conditions: Список условий фильтрации [{column, operator, value}]
 
     Example:
         # Январь 2024, только RTH сессия, дни с падением > 1%
@@ -167,13 +172,30 @@ class Filters:
             session="RTH",
             conditions=[Condition("change_pct", "<", -1.0)]
         )
+
+        # Вторники и пятницы за 2020, 2022, 2024 годы
+        Filters(
+            period_start="2020-01-01",
+            period_end="2025-01-01",
+            years=[2020, 2022, 2024],
+            weekdays=["Tuesday", "Friday"]
+        )
     """
 
+    # Календарные фильтры
     period_start: str
     period_end: str
+    specific_dates: list[str] | None = None
+    years: list[int] | None = None
+    months: list[int] | None = None
+    weekdays: list[str] | None = None
+
+    # Время суток
+    session: SessionType | None = None
     time_start: str | None = None
     time_end: str | None = None
-    session: SessionType | None = None
+
+    # Условия по значениям
     conditions: list[Condition] = field(default_factory=list)
 
     def get_time_filter(self) -> tuple[str, str] | None:
@@ -507,9 +529,10 @@ class EventTimeSpec:
         find: Что ищем внутри каждого дня.
               "high" — момент максимальной цены
               "low" — момент минимальной цены
+              "both" — и high и low (возвращает обе колонки)
     """
 
-    find: Literal["high", "low"]
+    find: Literal["high", "low", "both"]
 
 
 @dataclass

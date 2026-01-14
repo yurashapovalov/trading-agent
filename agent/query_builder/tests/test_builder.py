@@ -50,7 +50,8 @@ def test_daily_simple():
     print("\n=== test_daily_simple ===")
     print(sql)
 
-    assert "WITH daily AS" in sql
+    assert "WITH daily_raw AS" in sql
+    assert "daily AS" in sql
     assert "AVG(range)" in sql
     assert "COUNT(*)" in sql
     assert "'NQ'" in sql
@@ -251,6 +252,167 @@ def test_daily_with_prev():
     assert "WHERE gap_pct > 1.0" in sql
 
 
+def test_calendar_filter_years():
+    """Тест: фильтрация по годам."""
+    spec = QuerySpec(
+        symbol="NQ",
+        source=Source.DAILY,
+        filters=Filters(
+            period_start="2008-01-01",
+            period_end="2025-01-01",
+            years=[2012, 2016, 2020, 2024],  # Високосные годы
+        ),
+        grouping=Grouping.YEAR,
+        metrics=[
+            MetricSpec(Metric.AVG, "range", "avg_range"),
+            MetricSpec(Metric.COUNT, alias="trading_days"),
+        ],
+    )
+
+    builder = QueryBuilder()
+    sql = builder.build(spec)
+
+    print("\n=== test_calendar_filter_years ===")
+    print(sql)
+
+    assert "YEAR(date) IN (2012, 2016, 2020, 2024)" in sql
+
+
+def test_calendar_filter_months():
+    """Тест: фильтрация по месяцам."""
+    spec = QuerySpec(
+        symbol="NQ",
+        source=Source.DAILY,
+        filters=Filters(
+            period_start="2020-01-01",
+            period_end="2025-01-01",
+            months=[6, 7, 8],  # Лето
+        ),
+        grouping=Grouping.TOTAL,
+        metrics=[
+            MetricSpec(Metric.AVG, "range", "avg_range"),
+            MetricSpec(Metric.COUNT, alias="summer_days"),
+        ],
+    )
+
+    builder = QueryBuilder()
+    sql = builder.build(spec)
+
+    print("\n=== test_calendar_filter_months ===")
+    print(sql)
+
+    assert "MONTH(date) IN (6, 7, 8)" in sql
+
+
+def test_calendar_filter_weekdays():
+    """Тест: фильтрация по дням недели."""
+    spec = QuerySpec(
+        symbol="NQ",
+        source=Source.DAILY,
+        filters=Filters(
+            period_start="2020-01-01",
+            period_end="2025-01-01",
+            weekdays=["Monday", "Friday"],
+        ),
+        grouping=Grouping.WEEKDAY,
+        metrics=[
+            MetricSpec(Metric.AVG, "range", "avg_range"),
+            MetricSpec(Metric.COUNT, alias="days"),
+        ],
+    )
+
+    builder = QueryBuilder()
+    sql = builder.build(spec)
+
+    print("\n=== test_calendar_filter_weekdays ===")
+    print(sql)
+
+    assert "DAYNAME(date) IN ('Monday', 'Friday')" in sql
+
+
+def test_calendar_filter_combined():
+    """Тест: комбинация нескольких календарных фильтров."""
+    spec = QuerySpec(
+        symbol="NQ",
+        source=Source.DAILY,
+        filters=Filters(
+            period_start="2020-01-01",
+            period_end="2025-01-01",
+            years=[2020, 2022, 2024],
+            months=[1, 12],
+            weekdays=["Friday"],
+        ),
+        grouping=Grouping.TOTAL,
+        metrics=[
+            MetricSpec(Metric.AVG, "range", "avg_range"),
+            MetricSpec(Metric.COUNT, alias="days"),
+        ],
+    )
+
+    builder = QueryBuilder()
+    sql = builder.build(spec)
+
+    print("\n=== test_calendar_filter_combined ===")
+    print(sql)
+
+    assert "YEAR(date) IN (2020, 2022, 2024)" in sql
+    assert "MONTH(date) IN (1, 12)" in sql
+    assert "DAYNAME(date) IN ('Friday')" in sql
+
+
+def test_event_time_with_calendar_filters():
+    """Тест: EVENT_TIME с календарными фильтрами."""
+    spec = QuerySpec(
+        symbol="NQ",
+        source=Source.MINUTES,
+        filters=Filters(
+            period_start="2020-01-01",
+            period_end="2025-01-01",
+            session="RTH",
+            weekdays=["Tuesday"],
+        ),
+        grouping=Grouping.MINUTE_15,
+        special_op=SpecialOp.EVENT_TIME,
+        event_time_spec=EventTimeSpec(find="high"),
+    )
+
+    builder = QueryBuilder()
+    sql = builder.build(spec)
+
+    print("\n=== test_event_time_with_calendar_filters ===")
+    print(sql)
+
+    assert "DAYNAME(timestamp::date) IN ('Tuesday')" in sql
+    assert "BETWEEN '09:30:00' AND '16:00:00'" in sql
+
+
+def test_event_time_both():
+    """Тест: EVENT_TIME с find='both' для high и low."""
+    spec = QuerySpec(
+        symbol="NQ",
+        source=Source.MINUTES,
+        filters=Filters(
+            period_start="2020-01-01",
+            period_end="2025-01-01",
+            session="RTH",
+        ),
+        grouping=Grouping.MINUTE_15,
+        special_op=SpecialOp.EVENT_TIME,
+        event_time_spec=EventTimeSpec(find="both"),
+    )
+
+    builder = QueryBuilder()
+    sql = builder.build(spec)
+
+    print("\n=== test_event_time_both ===")
+    print(sql)
+
+    assert "daily_highs" in sql
+    assert "daily_lows" in sql
+    assert "event_type" in sql
+    assert "UNION ALL" in sql
+
+
 def run_all_tests():
     """Запускает все тесты."""
     tests = [
@@ -262,6 +424,13 @@ def run_all_tests():
         test_event_time_low,
         test_top_n,
         test_daily_with_prev,
+        # Новые тесты для календарных фильтров
+        test_calendar_filter_years,
+        test_calendar_filter_months,
+        test_calendar_filter_weekdays,
+        test_calendar_filter_combined,
+        test_event_time_with_calendar_filters,
+        test_event_time_both,
     ]
 
     passed = 0
