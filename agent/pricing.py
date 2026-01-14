@@ -1,7 +1,14 @@
-"""LLM Pricing Constants
+"""LLM pricing constants for cost calculation.
 
-Update these values when pricing changes.
-All prices are per 1 million tokens.
+Prices are per 1 million tokens. Update when provider pricing changes.
+
+Supported models:
+- Gemini 3 Flash Preview (current default)
+- Gemini 2.0/2.5 Flash
+- Claude Haiku/Sonnet
+
+Example:
+    cost = calculate_cost(input_tokens=1000, output_tokens=500)
 """
 
 # Gemini 3 Flash Preview

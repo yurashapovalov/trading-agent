@@ -1,5 +1,5 @@
 """
-LangGraph v2 — с QueryBuilder вместо SQL Agent.
+LangGraph v2
 
 Упрощённый flow:
                     ┌─ chitchat/out_of_scope/clarification ─► Responder ──► END

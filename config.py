@@ -1,4 +1,13 @@
-"""Configuration management"""
+"""Application configuration loaded from environment variables.
+
+All settings are loaded from .env file or environment. Provides configuration
+for LLM providers (Gemini, Claude), database paths, Supabase, CORS, and trading symbols.
+
+Example:
+    import config
+    print(config.GEMINI_MODEL)  # "gemini-3-flash-preview"
+    print(config.DATABASE_PATH)  # "data/trading.duckdb"
+"""
 
 import os
 from pathlib import Path

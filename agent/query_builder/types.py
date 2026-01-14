@@ -1,14 +1,15 @@
-"""
-Query Builder Types — все типы данных для построения SQL запросов.
+"""QueryBuilder types - Single Source of Truth for all query building blocks.
 
-Этот модуль определяет "кубики" из которых собираются запросы:
-- Source: откуда берём данные (минутки, дневки)
-- Filters: как фильтруем (период, время, условия)
-- Grouping: как группируем результат
-- Metrics: какие метрики считаем
-- SpecialOp: особые операции (EVENT_TIME, TOP_N, COMPARE)
+Defines the "kubiks" (building blocks) that queries are assembled from:
+- Source: Where to get data (minutes, daily)
+- Filters: How to filter (period, time, conditions)
+- Grouping: How to group results
+- Metrics: What metrics to calculate
+- SpecialOp: Special operations (EVENT_TIME, FIND_EXTREMUM, TOP_N)
 
-Understander возвращает QuerySpec, QueryBuilder превращает его в SQL.
+Understander returns QuerySpec, QueryBuilder converts it to SQL.
+
+JSON Schema for LLM is auto-generated from these types in schema.py.
 """
 
 from __future__ import annotations

@@ -1,20 +1,16 @@
-"""
-Auto-generation of JSON Schema from Python types.
+"""Auto-generation of JSON Schema from Python types.
 
-Single Source of Truth — все типы определяются в types.py,
-schema генерируется автоматически.
+Single Source of Truth - all types are defined in types.py,
+JSON schema is generated automatically for LLM.
 
-Использование:
-    from agent.query_builder.schema import (
-        get_query_spec_schema,
-        get_special_op_map,
-        get_special_op_values,
-    )
+Functions:
+    get_query_spec_schema() - JSON schema for LLM response validation
+    get_special_op_map() - Maps string -> SpecialOp enum
+    get_source_map() - Maps string -> Source enum
+    parse_spec() - Parse spec dict into dataclass based on special_op
 
-    # JSON schema для LLM
+Example:
     schema = get_query_spec_schema()
-
-    # Маппинг строка -> enum
     op_map = get_special_op_map()
     special_op = op_map.get("find_extremum")  # -> SpecialOp.FIND_EXTREMUM
 """
@@ -27,6 +23,7 @@ from .types import (
     Source,
     Grouping,
     SpecialOp,
+    Metric,
     EventTimeSpec,
     TopNSpec,
     CompareSpec,
@@ -71,6 +68,11 @@ def get_special_op_values() -> list[str]:
     return get_enum_values(SpecialOp)
 
 
+def get_metric_values() -> list[str]:
+    """Получить список значений Metric enum."""
+    return get_enum_values(Metric)
+
+
 # =============================================================================
 # Маппинг string -> Enum
 # =============================================================================
@@ -93,6 +95,16 @@ def get_source_map() -> dict[str, Source]:
 def get_grouping_map() -> dict[str, Grouping]:
     """Автоматически генерирует маппинг строка -> Grouping."""
     return {g.value: g for g in Grouping}
+
+
+def get_metric_map() -> dict[str, Metric]:
+    """
+    Автоматически генерирует маппинг строка -> Metric.
+
+    Returns:
+        {"open": Metric.OPEN, "high": Metric.HIGH, "count": Metric.COUNT, ...}
+    """
+    return {m.value: m for m in Metric}
 
 
 # =============================================================================
@@ -323,6 +335,81 @@ def get_spec_field_name(special_op: SpecialOp) -> str | None:
     if special_op in SPECIAL_OP_SPECS:
         return f"{special_op.value}_spec"
     return None
+
+
+def parse_spec(special_op: SpecialOp, query_spec: dict) -> object | None:
+    """
+    Автоматически парсит spec из JSON для данного SpecialOp.
+
+    Использует dataclass introspection для извлечения полей и дефолтов.
+
+    Args:
+        special_op: SpecialOp enum value
+        query_spec: JSON dict с query_spec от LLM
+
+    Returns:
+        Объект spec (EventTimeSpec, TopNSpec, и т.д.) или None
+
+    Example:
+        >>> parse_spec(SpecialOp.EVENT_TIME, {"event_time_spec": {"find": "low"}})
+        EventTimeSpec(find='low')
+    """
+    spec_class = SPECIAL_OP_SPECS.get(special_op)
+    if spec_class is None:
+        return None
+
+    spec_field_name = f"{special_op.value}_spec"
+    spec_data = query_spec.get(spec_field_name, {})
+
+    # Получаем дефолты из dataclass
+    type_hints = get_type_hints(spec_class)
+    kwargs = {}
+
+    for field in fields(spec_class):
+        field_name = field.name
+        field_type = type_hints.get(field_name, str)
+
+        # Получаем значение из JSON или используем дефолт
+        if field_name in spec_data:
+            kwargs[field_name] = spec_data[field_name]
+        elif field.default is not field.default_factory:
+            # Есть явный дефолт
+            if field.default is not dataclass_field_missing:
+                kwargs[field_name] = field.default
+            elif field.default_factory is not dataclass_field_missing:
+                kwargs[field_name] = field.default_factory()
+        else:
+            # Нет дефолта — используем разумное значение
+            kwargs[field_name] = _get_default_for_type(field_type)
+
+    return spec_class(**kwargs)
+
+
+def _get_default_for_type(field_type) -> object:
+    """Возвращает дефолтное значение для типа."""
+    origin = get_origin(field_type)
+
+    if origin is Literal:
+        args = get_args(field_type)
+        return args[0] if args else ""
+
+    if origin is list:
+        return []
+
+    if field_type is str:
+        return ""
+    elif field_type is int:
+        return 0
+    elif field_type is float:
+        return 0.0
+    elif field_type is bool:
+        return False
+
+    return None
+
+
+# Для проверки отсутствия дефолта
+from dataclasses import MISSING as dataclass_field_missing
 
 
 # =============================================================================

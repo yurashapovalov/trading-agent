@@ -1,11 +1,18 @@
-"""
-Understander — парсит вопрос в query_spec.
+"""Understander agent - parses user questions into structured query_spec.
 
-Возвращает структурированный JSON (query_spec) для QueryBuilder.
-QueryBuilder детерминировано превращает query_spec в SQL.
+Converts natural language questions into JSON query_spec that QueryBuilder
+transforms deterministically into SQL.
 
-Архитектура:
-    Вопрос → Understander → query_spec → QueryBuilder → SQL
+Architecture:
+    Question → Understander → query_spec → QueryBuilder → SQL
+
+The Understander uses LLM to classify intent and extract query parameters,
+but does NOT generate SQL directly. This ensures deterministic behavior.
+
+Example:
+    understander = Understander()
+    result = understander({"question": "What was NQ high in January 2024?"})
+    # result["intent"]["query_spec"] contains structured params for QueryBuilder
 """
 
 import json
@@ -16,10 +23,8 @@ from google.genai import types
 import config
 from agent.state import AgentState, Intent, UsageStats
 from agent.pricing import calculate_cost
-from agent.capabilities import (
-    get_capabilities_prompt,
-    DEFAULT_SYMBOL,
-)
+# Default symbol when not specified
+DEFAULT_SYMBOL = "NQ"
 from agent.modules.sql import get_data_range
 from agent.prompts.understander import get_understander_prompt
 
@@ -28,7 +33,6 @@ from agent.query_builder.schema import (
     get_query_spec_schema,
     get_response_schema,
     get_special_op_map,
-    get_spec_field_name,
 )
 
 
@@ -48,22 +52,22 @@ RESPONSE_SCHEMA = get_response_schema()
 # =============================================================================
 
 class Understander:
-    """
-    Senior trading data analyst that understands user intent.
+    """Parses user questions into structured query_spec for QueryBuilder.
 
-    Возвращает query_spec — структурированную спецификацию запроса,
-    которую QueryBuilder превращает в SQL.
+    Uses Gemini LLM to understand user intent and extract query parameters.
+    Returns query_spec (JSON) that QueryBuilder converts to SQL deterministically.
 
     Attributes:
-        name: Имя агента для логов
-        agent_type: Тип агента (routing)
+        name: Agent name for logging.
+        agent_type: Agent type ("routing" - decides next step in pipeline).
+        model: Gemini model name from config.
     """
 
     name = "understander"
     agent_type = "routing"
 
     def __init__(self):
-        """Инициализация клиента Gemini."""
+        """Initialize Gemini client and usage tracking."""
         self.client = genai.Client(api_key=config.GOOGLE_API_KEY)
         # Используем основную модель для лучшего понимания
         self.model = config.GEMINI_MODEL
@@ -75,14 +79,13 @@ class Understander:
         )
 
     def __call__(self, state: AgentState) -> dict:
-        """
-        Главный метод — парсит вопрос и возвращает Intent.
+        """Parse question and return structured Intent.
 
         Args:
-            state: Текущее состояние агента с вопросом и историей
+            state: Current agent state with question and chat_history.
 
         Returns:
-            dict с intent, usage, agents_used, step_number
+            Dict with intent, usage stats, agents_used list, and step_number.
         """
         question = state.get("question", "")
         chat_history = list(state.get("chat_history", []))
@@ -101,11 +104,11 @@ class Understander:
         }
 
     # =========================================================================
-    # Вспомогательные методы
+    # Helper Methods
     # =========================================================================
 
     def _get_data_info(self) -> str:
-        """Получает информацию о доступных данных."""
+        """Get available data info for prompt context."""
         data_range = get_data_range("NQ")
         if data_range:
             return (
@@ -116,7 +119,7 @@ class Understander:
         return "Данные: NQ"
 
     def _build_prompt(self, question: str, chat_history: list) -> str:
-        """Строит полный промпт из шаблона."""
+        """Build complete prompt from template with context."""
         # Форматируем историю чата
         history_str = ""
         if chat_history:
@@ -125,7 +128,7 @@ class Understander:
                 history_str += f"{role}: {msg.get('content', '')}\n"
 
         return get_understander_prompt(
-            capabilities=get_capabilities_prompt(),
+            capabilities="",  # All kubiks documented in prompt template
             data_info=self._get_data_info(),
             today=datetime.now().strftime("%Y-%m-%d"),
             question=question,
@@ -133,7 +136,7 @@ class Understander:
         )
 
     def _parse_with_llm(self, question: str, chat_history: list) -> Intent:
-        """Вызывает LLM и парсит ответ в Intent."""
+        """Call LLM and parse response into Intent."""
         try:
             prompt = self._build_prompt(question, chat_history)
 
@@ -173,14 +176,13 @@ class Understander:
             return self._default_intent()
 
     def _build_intent(self, data: dict) -> Intent:
-        """
-        Строит Intent из распарсенных данных.
+        """Build Intent object from parsed LLM response.
 
         Args:
-            data: JSON от LLM
+            data: Parsed JSON from LLM response.
 
         Returns:
-            Intent с нужными полями
+            Intent dict with type, query_spec, and other fields.
         """
         intent_type = data.get("type", "data")
 
@@ -229,7 +231,7 @@ class Understander:
         return intent
 
     def _default_intent(self) -> Intent:
-        """Возвращает дефолтный intent при ошибке."""
+        """Return default intent on error (fallback)."""
         start, end = self._full_data_range()
         return {
             "type": "data",
@@ -251,7 +253,7 @@ class Understander:
         }
 
     def _full_data_range(self) -> tuple[str, str]:
-        """Возвращает полный диапазон доступных данных."""
+        """Return full available data range from database."""
         data_range = get_data_range("NQ")
         if data_range:
             return data_range['start_date'], data_range['end_date']
@@ -259,18 +261,20 @@ class Understander:
 
 
 # =============================================================================
-# Функции для конвертации query_spec в объекты QueryBuilder
+# Conversion Functions
 # =============================================================================
 
 def query_spec_to_builder(query_spec: dict) -> "QuerySpec":
-    """
-    Конвертирует JSON query_spec в объект QuerySpec.
+    """Convert JSON query_spec to QuerySpec dataclass for QueryBuilder.
+
+    Transforms the JSON dict from Understander into typed QuerySpec object
+    that QueryBuilder uses to generate SQL.
 
     Args:
-        query_spec: JSON dict от Understander
+        query_spec: JSON dict from Understander LLM response.
 
     Returns:
-        QuerySpec объект для QueryBuilder
+        QuerySpec dataclass instance ready for QueryBuilder.build().
     """
     from agent.query_builder import (
         QuerySpec,
@@ -281,9 +285,6 @@ def query_spec_to_builder(query_spec: dict) -> "QuerySpec":
         Metric,
         MetricSpec,
         SpecialOp,
-        EventTimeSpec,
-        TopNSpec,
-        FindExtremumSpec,
     )
 
     # Source (auto-generated from Source enum)
@@ -317,27 +318,11 @@ def query_spec_to_builder(query_spec: dict) -> "QuerySpec":
     )
 
     # Grouping (auto-generated from Grouping enum)
-    from agent.query_builder.schema import get_grouping_map
+    from agent.query_builder.schema import get_grouping_map, get_metric_map
     grouping = get_grouping_map().get(query_spec.get("grouping", "none"), Grouping.NONE)
 
-    # Metrics
-    metric_map = {
-        "open": Metric.OPEN,
-        "high": Metric.HIGH,
-        "low": Metric.LOW,
-        "close": Metric.CLOSE,
-        "volume": Metric.VOLUME,
-        "range": Metric.RANGE,
-        "change_pct": Metric.CHANGE_PCT,
-        "gap_pct": Metric.GAP_PCT,
-        "count": Metric.COUNT,
-        "avg": Metric.AVG,
-        "sum": Metric.SUM,
-        "min": Metric.MIN,
-        "max": Metric.MAX,
-        "stddev": Metric.STDDEV,
-        "median": Metric.MEDIAN,
-    }
+    # Metrics (auto-generated from Metric enum)
+    metric_map = get_metric_map()
     metrics = []
     for m in query_spec.get("metrics", []):
         metric_type = metric_map.get(m.get("metric", "count"), Metric.COUNT)
@@ -353,27 +338,14 @@ def query_spec_to_builder(query_spec: dict) -> "QuerySpec":
         SpecialOp.NONE
     )
 
-    # Event Time Spec
-    event_time_spec = None
-    if special_op == SpecialOp.EVENT_TIME:
-        ets = query_spec.get("event_time_spec", {})
-        event_time_spec = EventTimeSpec(find=ets.get("find", "high"))
+    # Parse spec автоматически на основе special_op
+    from agent.query_builder.schema import parse_spec
+    parsed_spec = parse_spec(special_op, query_spec)
 
-    # Top N Spec
-    top_n_spec = None
-    if special_op == SpecialOp.TOP_N:
-        tns = query_spec.get("top_n_spec", {})
-        top_n_spec = TopNSpec(
-            n=tns.get("n", 10),
-            order_by=tns.get("order_by", "range"),
-            direction=tns.get("direction", "DESC"),
-        )
-
-    # Find Extremum Spec
-    find_extremum_spec = None
-    if special_op == SpecialOp.FIND_EXTREMUM:
-        fes = query_spec.get("find_extremum_spec", {})
-        find_extremum_spec = FindExtremumSpec(find=fes.get("find", "both"))
+    # Распределяем parsed_spec по соответствующим полям QuerySpec
+    event_time_spec = parsed_spec if special_op == SpecialOp.EVENT_TIME else None
+    top_n_spec = parsed_spec if special_op == SpecialOp.TOP_N else None
+    find_extremum_spec = parsed_spec if special_op == SpecialOp.FIND_EXTREMUM else None
 
     return QuerySpec(
         symbol="NQ",  # TODO: брать из query_spec когда добавим другие символы

@@ -6,19 +6,29 @@ Multi-agent system for trading data analysis using natural language.
 
 | Layer | Technology |
 |-------|-----------|
-| **LLM** | Gemini 2.5 Flash Lite (Understander), Gemini 3 Flash (Analyst) |
+| **LLM** | Gemini 3 Flash (configurable via `GEMINI_MODEL` env var) |
 | **Framework** | LangGraph (state machine) |
 | **Backend** | FastAPI + SSE streaming |
 | **Frontend** | Next.js 15 + React |
 | **Database** | DuckDB (trading data) + Supabase (auth, logs) |
 | **Deploy** | Hetzner VPS (backend) + Vercel (frontend) |
 
-## Core Principle
+## Core Principles
 
-**LLM классифицирует, не генерирует.**
+**1. LLM классифицирует, не генерирует.**
 
 Вместо генерации SQL, LLM выбирает из готовых "кубиков" (building blocks).
 QueryBuilder детерминировано превращает кубики в SQL.
+
+**2. Single Source of Truth.**
+
+Все типы определены в `types.py`. JSON Schema для LLM генерируется автоматически.
+Добавление нового кубика = изменение в одном месте.
+
+**3. Hybrid Agent Architecture.**
+
+LLM используется там где нужно понимание (NLU, генерация текста).
+Детерминированный код — там где нужна надёжность (SQL, валидация).
 
 ## Architecture
 
@@ -35,12 +45,14 @@ Question ─► Understander ─┼───────────────
 
 | Agent | Type | Purpose |
 |-------|------|---------|
-| **Understander** | LLM (Lite) | Вопрос → query_spec (JSON кубиков) |
+| **Understander** | LLM | Вопрос → query_spec (JSON кубиков) |
 | **QueryBuilder** | Code | query_spec → SQL (детерминированно) |
 | **DataFetcher** | Code | Выполняет SQL → данные |
-| **Analyst** | LLM (Flash) | Данные → ответ + Stats |
+| **Analyst** | LLM | Данные → ответ + Stats |
 | **Validator** | Code | Проверяет Stats против данных |
 | **Responder** | Code | Chitchat/concept/clarification ответы |
+
+**Note:** Understander и Analyst используют одну модель (`GEMINI_MODEL`). Это упрощает конфигурацию.
 
 ## Query Spec — Кубики
 
@@ -53,13 +65,19 @@ query_spec:
     period_start: "2024-01-01"
     period_end: "2024-12-31"
     session: RTH | ETH | OVERNIGHT | ...
+    weekdays: ["Monday", "Friday"]
+    months: [1, 6, 12]
     conditions: [{column, operator, value}]
   grouping: none | total | 5min..hour | day..year | weekday | session
   metrics: [{metric, column, alias}]
-  special_op: none | event_time | top_n | compare
+  special_op: none | event_time | find_extremum | top_n | compare
+  # Для special_op добавляются соответствующие spec:
+  event_time_spec: {find: high | low | both}
+  find_extremum_spec: {find: high | low | both}
+  top_n_spec: {n: 10, order_by: range, direction: DESC}
 ```
 
-QueryBuilder превращает это в валидный SQL.
+QueryBuilder детерминированно превращает это в валидный SQL.
 
 ## Data Flow
 
@@ -111,9 +129,14 @@ LONDON_OPEN (03:00-04:00)  NY_OPEN (09:30-10:30)  NY_CLOSE (15:00-16:00)
 
 | Operation | Описание | Пример |
 |-----------|----------|--------|
-| `event_time` | Распределение времени события | "когда high дня?" |
+| `event_time` | Распределение времени события по bucket'ам | "в какое время чаще формируется high?" |
+| `find_extremum` | Точное время и значение high/low | "во сколько был хай 10 января?" |
 | `top_n` | Топ N записей | "10 самых волатильных дней" |
 | `compare` | Сравнение категорий | "RTH vs ETH" |
+
+**Разница event_time vs find_extremum:**
+- `event_time`: "в какое время **обычно**" → распределение (frequency, percentage)
+- `find_extremum`: "во сколько **конкретно**" → точные значения (timestamp, value)
 
 ## Performance
 
@@ -130,18 +153,23 @@ LONDON_OPEN (03:00-04:00)  NY_OPEN (09:30-10:30)  NY_CLOSE (15:00-16:00)
 
 ```
 agent/
-├── graph.py              # LangGraph pipeline
+├── graph.py                    # LangGraph pipeline
 ├── agents/
-│   ├── understander.py   # LLM: вопрос → query_spec
-│   ├── data_fetcher.py   # Code: SQL → данные
-│   ├── analyst.py        # LLM: данные → ответ
-│   └── validator.py      # Code: проверка Stats
+│   ├── understander.py         # LLM: вопрос → query_spec
+│   ├── data_fetcher.py         # Code: SQL → данные
+│   ├── analyst.py              # LLM: данные → ответ
+│   └── validator.py            # Code: проверка Stats
 ├── prompts/
-│   ├── understander.py   # Промпт с кубиками
+│   ├── understander.py         # Промпт с кубиками
 │   └── analyst.py
 └── query_builder/
-    ├── types.py          # Dataclasses, enums
-    └── builder.py        # query_spec → SQL
+    ├── types.py                # Dataclasses, enums (Single Source of Truth)
+    ├── schema.py               # Auto-generation JSON Schema из types.py
+    ├── builder.py              # query_spec → SQL
+    ├── sql_utils.py            # SQL security (validation, escaping)
+    ├── filters/                # Calendar, time filters
+    ├── source/                 # Daily, minutes builders
+    └── special_ops/            # event_time, find_extremum, top_n builders
 ```
 
 ## Future: Кубики как Data Layer

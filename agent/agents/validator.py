@@ -1,8 +1,16 @@
-"""
-Validator agent - checks Stats against actual data.
+"""Validator agent - checks Analyst's Stats against actual data.
 
-No LLM here. Pure Python validation.
-If stats don't match data, returns "rewrite" status.
+Pure Python agent (no LLM). Compares structured Stats from Analyst response
+against actual data from DataFetcher. Returns "rewrite" status if numbers
+don't match within tolerance.
+
+This ensures factual accuracy of responses by validating all numbers
+mentioned by Analyst against the source data.
+
+Tolerances:
+    - Percentages: ±0.5%
+    - Prices: ±$0.01
+    - Counts: Exact match
 """
 
 from agent.state import AgentState, Stats, ValidationResult
@@ -14,11 +22,15 @@ TOLERANCE_PRICE = 0.01  # $0.01 tolerance for prices
 
 
 class Validator:
-    """
-    Validates Analyst's Stats against actual data.
+    """Validates Analyst's Stats against actual data.
 
-    No LLM - just code comparing numbers.
-    Returns status: "ok" or "rewrite" with issues list.
+    Pure Python validation (no LLM). Compares numbers from Stats against
+    actual data to ensure factual accuracy.
+
+    Attributes:
+        name: Agent name for logging.
+        agent_type: Agent type ("validation").
+        max_attempts: Max validation attempts before auto-approve.
     """
 
     name = "validator"
@@ -26,7 +38,14 @@ class Validator:
     max_attempts = 3
 
     def __call__(self, state: AgentState) -> dict:
-        """Validate stats against data."""
+        """Validate stats against data.
+
+        Args:
+            state: Agent state with stats, data, and validation_attempts.
+
+        Returns:
+            Dict with validation result (status, issues, feedback).
+        """
         stats = state.get("stats") or {}
         data = state.get("data") or {}
         intent = state.get("intent") or {}

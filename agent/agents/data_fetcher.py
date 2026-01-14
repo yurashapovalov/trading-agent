@@ -1,8 +1,15 @@
-"""
-DataFetcher agent - fetches data based on Intent.
+"""DataFetcher agent - executes SQL and fetches data from DuckDB.
 
-No LLM here. Pure Python routing to modules.
-Central hub: executes SQL from QueryBuilder.
+Pure Python agent (no LLM). Executes SQL from QueryBuilder or falls back
+to template queries for simple requests.
+
+Architecture:
+    QueryBuilder → SQL → DataFetcher → rows → Analyst
+
+Example:
+    fetcher = DataFetcher()
+    result = fetcher({"sql_query": "SELECT ...", "intent": {...}})
+    # result["data"]["rows"] contains query results
 """
 
 import time
@@ -15,20 +22,30 @@ from agent.modules import sql
 
 
 class DataFetcher:
-    """
-    Fetches data based on structured Intent.
+    """Fetches trading data based on Intent from Understander.
 
-    Routes:
-    - sql_query exists → execute SQL from QueryBuilder
-    - type="concept" → no data needed
-    - else → use standard templates from sql.py
+    Pure Python agent (no LLM). Routes to appropriate data source:
+    - sql_query exists: Execute SQL from QueryBuilder
+    - type="concept": No data needed
+    - else: Use template queries from sql.py
+
+    Attributes:
+        name: Agent name for logging.
+        agent_type: Agent type ("data" - fetches data).
     """
 
     name = "data_fetcher"
     agent_type = "data"
 
     def __call__(self, state: AgentState) -> dict:
-        """Fetch data based on intent."""
+        """Fetch data based on intent.
+
+        Args:
+            state: Agent state with sql_query, intent, and sql_validation.
+
+        Returns:
+            Dict with data (rows, row_count, granularity), agents_used.
+        """
         start_time = time.time()
 
         intent = state.get("intent")
@@ -68,15 +85,14 @@ class DataFetcher:
         }
 
     def _execute_sql(self, sql_query: str, intent: Intent = None) -> dict[str, Any]:
-        """
-        Execute SQL query (from QueryBuilder or SQL Agent).
+        """Execute SQL query in DuckDB.
 
         Args:
-            sql_query: SQL query string
-            intent: Optional intent to determine granularity from query_spec
+            sql_query: SQL query string from QueryBuilder.
+            intent: Optional intent to determine granularity from query_spec.
 
         Returns:
-            Data dict with rows, row_count, granularity, etc.
+            Dict with rows, row_count, granularity, columns, sql_query, source.
         """
         try:
             with duckdb.connect(config.DATABASE_PATH, read_only=True) as conn:
@@ -123,7 +139,7 @@ class DataFetcher:
             }
 
     def _handle_data(self, intent: Intent) -> dict[str, Any]:
-        """Handle type=data: fetch with granularity."""
+        """Handle type=data using template queries from sql.py."""
         symbol = intent.get("symbol", "NQ")
         period_start = intent.get("period_start")
         period_end = intent.get("period_end")
@@ -140,7 +156,7 @@ class DataFetcher:
         )
 
     def _handle_concept(self, intent: Intent) -> dict[str, Any]:
-        """Handle type=concept: no data needed."""
+        """Handle type=concept - no data needed for concept explanations."""
         return {
             "type": "concept",
             "concept": intent.get("concept", ""),

@@ -7,6 +7,7 @@ Time Filter Builder — фильтрация по времени суток.
 - Сессии пересекающие полночь (OVERNIGHT, ASIAN, GLOBEX)
 
 Все времена в ET (Eastern Time).
+Все значения валидируются для защиты от SQL injection.
 """
 
 from __future__ import annotations
@@ -15,16 +16,23 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from agent.query_builder.types import Filters
 
+from agent.query_builder.sql_utils import safe_sql_time
+
 
 def build_time_filter_sql(filters: "Filters") -> str:
     """
     Строит SQL условие для фильтра по времени суток.
+
+    Все входные данные валидируются для защиты от SQL injection.
 
     Args:
         filters: Объект Filters с session или time_start/time_end
 
     Returns:
         SQL выражение (без AND в начале) или пустую строку
+
+    Raises:
+        ValidationError: Если входные данные невалидны
 
     Examples:
         >>> filters = Filters(..., session="RTH")
@@ -46,11 +54,16 @@ def build_time_filter_sql(filters: "Filters") -> str:
 
     start_time, end_time = time_filter
 
+    # Валидируем времена (session times из TRADING_SESSIONS уже безопасны,
+    # но кастомные time_start/time_end нужно проверить)
+    safe_start = safe_sql_time(start_time)
+    safe_end = safe_sql_time(end_time)
+
     # Проверяем пересечение полночи (end < start означает что сессия идёт через полночь)
     if filters.crosses_midnight():
         # Сессия пересекает полночь: 18:00-03:00
         # SQL: (time >= '18:00:00' OR time < '03:00:00')
-        return f"(timestamp::time >= '{start_time}' OR timestamp::time < '{end_time}')"
+        return f"(timestamp::time >= {safe_start} OR timestamp::time < {safe_end})"
     else:
         # Обычная сессия в рамках одного дня: 09:30-16:00
-        return f"timestamp::time BETWEEN '{start_time}' AND '{end_time}'"
+        return f"timestamp::time BETWEEN {safe_start} AND {safe_end}"

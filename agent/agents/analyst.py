@@ -1,11 +1,18 @@
-"""
-Analyst agent - interprets data and generates responses with Stats.
+"""Analyst agent - interprets data and generates user-facing responses.
 
-Returns:
-- response: User-facing markdown response
-- stats: Structured numbers for validation
+Analyzes data from DataFetcher and generates markdown responses with Stats
+for validation. Stats are structured numbers that Validator checks against
+actual data to ensure accuracy.
 
-Supports real-time streaming via LangGraph's get_stream_writer().
+Supports two modes:
+- Streaming: Real-time text output via LangGraph's get_stream_writer()
+- Batch: JSON response with stats for validation
+
+Example:
+    analyst = Analyst()
+    result = analyst({"question": "...", "data": {...}})
+    # result["response"] = markdown text
+    # result["stats"] = {"change_pct": 2.5, ...} for validation
 """
 
 import json
@@ -28,17 +35,22 @@ except ImportError:
 
 
 class Analyst:
-    """
-    Analyzes data and writes responses with Stats for validation.
+    """Analyzes trading data and generates user-facing responses with Stats.
 
-    Principle: LLM analyzes data, returns response + stats.
-    Validator (code) checks if stats match actual data.
+    Uses Gemini LLM to interpret data and write insights. Returns structured
+    Stats that Validator checks against actual data for accuracy.
+
+    Attributes:
+        name: Agent name for logging.
+        agent_type: Agent type ("output" - generates final response).
+        model: Gemini model name from config.
     """
 
     name = "analyst"
     agent_type = "output"
 
     def __init__(self):
+        """Initialize Gemini client and usage tracking."""
         self.client = genai.Client(api_key=config.GOOGLE_API_KEY)
         self.model = config.GEMINI_MODEL
         self._last_usage = UsageStats(
@@ -49,11 +61,16 @@ class Analyst:
         )
 
     def __call__(self, state: AgentState) -> dict:
-        """
-        Generate analysis with stats.
+        """Generate analysis response with stats for validation.
 
         Uses real-time streaming when running inside LangGraph graph.
-        Falls back to batch generation otherwise.
+        Falls back to batch JSON generation otherwise.
+
+        Args:
+            state: Agent state with question, data, intent, and validation info.
+
+        Returns:
+            Dict with response, stats, usage, agents_used, step_number.
         """
         question = state.get("question", "")
         data = state.get("data") or {}

@@ -1,4 +1,11 @@
-"""Supabase logging for request traces and completions."""
+"""Supabase logging for request traces and completions.
+
+Logs to two tables:
+- request_traces: Per-agent step data (input, output, duration)
+- chat_logs: Complete request summary (question, response, usage)
+
+Both async and sync versions provided for different contexts.
+"""
 
 import json
 from datetime import datetime

@@ -1,4 +1,12 @@
-"""Checkpointer configuration for LangGraph persistence."""
+"""LangGraph checkpointer configuration for state persistence.
+
+Provides checkpointer implementations for storing conversation state:
+- SQLite: Default, persistent storage in data/checkpoints.db
+- PostgreSQL: Production option with Supabase
+- Memory: Development/testing only (not persistent)
+
+The checkpointer enables interrupt/resume functionality in LangGraph.
+"""
 
 import os
 from pathlib import Path

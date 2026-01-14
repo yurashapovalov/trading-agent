@@ -9,6 +9,8 @@ Find Extremum Operation Builder — поиск точного времени hig
 Отличие от EVENT_TIME:
 - EVENT_TIME: распределение по bucket'ам → frequency, percentage
 - FIND_EXTREMUM: точные значения → timestamp, value
+
+Все значения валидируются для защиты от SQL injection.
 """
 
 from __future__ import annotations
@@ -19,6 +21,7 @@ if TYPE_CHECKING:
 
 from agent.query_builder.types import SpecialOp
 from agent.query_builder.source.common import OHLCV_TABLE
+from agent.query_builder.sql_utils import safe_sql_symbol, safe_sql_date
 from .base import SpecialOpBuilder, SpecialOpRegistry
 
 
@@ -28,6 +31,7 @@ class FindExtremumOpBuilder(SpecialOpBuilder):
     Builder для SpecialOp.FIND_EXTREMUM.
 
     Находит точное время и значение high/low для каждого дня в периоде.
+    Все входные данные валидируются для защиты от SQL injection.
     """
 
     op_type = SpecialOp.FIND_EXTREMUM
@@ -42,6 +46,9 @@ class FindExtremumOpBuilder(SpecialOpBuilder):
 
         Returns:
             SQL с колонками: date, high_time, high_value, low_time, low_value
+
+        Raises:
+            ValidationError: Если входные данные невалидны
         """
         find = spec.find_extremum_spec.find
         symbol = spec.symbol
@@ -63,15 +70,20 @@ class FindExtremumOpBuilder(SpecialOpBuilder):
         extra_filters_sql: str
     ) -> str:
         """Запрос для поиска только HIGH."""
+        # Валидация входных данных
+        safe_symbol = safe_sql_symbol(symbol)
+        safe_start = safe_sql_date(period_start)
+        safe_end = safe_sql_date(period_end)
+
         return f"""WITH filtered_data AS (
     SELECT
         timestamp,
         timestamp::date as date,
         high
     FROM {OHLCV_TABLE}
-    WHERE symbol = '{symbol}'
-      AND timestamp >= '{period_start}'
-      AND timestamp < '{period_end}'
+    WHERE symbol = {safe_symbol}
+      AND timestamp >= {safe_start}
+      AND timestamp < {safe_end}
       {extra_filters_sql}
 ),
 daily_highs AS (
@@ -98,15 +110,20 @@ ORDER BY date"""
         extra_filters_sql: str
     ) -> str:
         """Запрос для поиска только LOW."""
+        # Валидация входных данных
+        safe_symbol = safe_sql_symbol(symbol)
+        safe_start = safe_sql_date(period_start)
+        safe_end = safe_sql_date(period_end)
+
         return f"""WITH filtered_data AS (
     SELECT
         timestamp,
         timestamp::date as date,
         low
     FROM {OHLCV_TABLE}
-    WHERE symbol = '{symbol}'
-      AND timestamp >= '{period_start}'
-      AND timestamp < '{period_end}'
+    WHERE symbol = {safe_symbol}
+      AND timestamp >= {safe_start}
+      AND timestamp < {safe_end}
       {extra_filters_sql}
 ),
 daily_lows AS (
@@ -133,6 +150,11 @@ ORDER BY date"""
         extra_filters_sql: str
     ) -> str:
         """Запрос для поиска HIGH и LOW."""
+        # Валидация входных данных
+        safe_symbol = safe_sql_symbol(symbol)
+        safe_start = safe_sql_date(period_start)
+        safe_end = safe_sql_date(period_end)
+
         return f"""WITH filtered_data AS (
     SELECT
         timestamp,
@@ -140,9 +162,9 @@ ORDER BY date"""
         high,
         low
     FROM {OHLCV_TABLE}
-    WHERE symbol = '{symbol}'
-      AND timestamp >= '{period_start}'
-      AND timestamp < '{period_end}'
+    WHERE symbol = {safe_symbol}
+      AND timestamp >= {safe_start}
+      AND timestamp < {safe_end}
       {extra_filters_sql}
 ),
 daily_extremes AS (

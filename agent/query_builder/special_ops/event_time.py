@@ -5,6 +5,8 @@ Event Time Operation Builder — поиск времени события.
 - "В какое время формируется high дня?"
 - "Когда обычно бывает low?"
 - "Распределение high и low по времени"
+
+Все значения валидируются для защиты от SQL injection.
 """
 
 from __future__ import annotations
@@ -15,6 +17,7 @@ if TYPE_CHECKING:
 
 from agent.query_builder.types import SpecialOp
 from agent.query_builder.source.common import OHLCV_TABLE
+from agent.query_builder.sql_utils import safe_sql_symbol, safe_sql_date
 from .base import SpecialOpBuilder, SpecialOpRegistry
 
 
@@ -24,6 +27,7 @@ class EventTimeOpBuilder(SpecialOpBuilder):
     Builder для SpecialOp.EVENT_TIME.
 
     Находит распределение времени формирования high/low по дням.
+    Все входные данные валидируются для защиты от SQL injection.
     """
 
     op_type = SpecialOp.EVENT_TIME
@@ -40,6 +44,9 @@ class EventTimeOpBuilder(SpecialOpBuilder):
         1. filtered_data: минутки с фильтрами
         2. daily_extremes: для каждого дня timestamp high/low
         3. distribution: группировка по time_bucket
+
+        Raises:
+            ValidationError: Если входные данные невалидны
         """
         event = spec.event_time_spec
         find_col = event.find  # "high", "low" или "both"
@@ -70,6 +77,10 @@ class EventTimeOpBuilder(SpecialOpBuilder):
         extra_filters_sql: str
     ) -> str:
         """Запрос для одного типа экстремума (high или low)."""
+        # Валидация входных данных
+        safe_symbol = safe_sql_symbol(symbol)
+        safe_start = safe_sql_date(period_start)
+        safe_end = safe_sql_date(period_end)
 
         if find_col == "high":
             order_clause = "high DESC, timestamp ASC"
@@ -84,9 +95,9 @@ class EventTimeOpBuilder(SpecialOpBuilder):
         high,
         low
     FROM {OHLCV_TABLE}
-    WHERE symbol = '{symbol}'
-      AND timestamp >= '{period_start}'
-      AND timestamp < '{period_end}'
+    WHERE symbol = {safe_symbol}
+      AND timestamp >= {safe_start}
+      AND timestamp < {safe_end}
       {extra_filters_sql}
 ),
 daily_extremes AS (
@@ -121,6 +132,10 @@ ORDER BY time_bucket"""
         extra_filters_sql: str
     ) -> str:
         """UNION запрос для high И low."""
+        # Валидация входных данных
+        safe_symbol = safe_sql_symbol(symbol)
+        safe_start = safe_sql_date(period_start)
+        safe_end = safe_sql_date(period_end)
 
         return f"""WITH filtered_data AS (
     -- Минутные данные с фильтрами
@@ -130,9 +145,9 @@ ORDER BY time_bucket"""
         high,
         low
     FROM {OHLCV_TABLE}
-    WHERE symbol = '{symbol}'
-      AND timestamp >= '{period_start}'
-      AND timestamp < '{period_end}'
+    WHERE symbol = {safe_symbol}
+      AND timestamp >= {safe_start}
+      AND timestamp < {safe_end}
       {extra_filters_sql}
 ),
 daily_highs AS (

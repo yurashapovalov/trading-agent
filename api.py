@@ -1,4 +1,18 @@
-"""FastAPI server for Trading Agent - Multi-Agent Architecture"""
+"""FastAPI server for Trading Analytics Agent.
+
+Provides REST API and SSE streaming endpoints for the multi-agent trading
+analysis system. Handles authentication via Supabase JWT, chat history,
+and request logging.
+
+Endpoints:
+    GET  /           - Health check
+    POST /chat/stream - SSE streaming chat with agents
+    GET  /chat/history - Get user's chat history with traces
+    GET  /data        - Get available trading data info
+
+Run:
+    uvicorn api:app --reload
+"""
 
 import json
 import math

@@ -1,4 +1,14 @@
-"""LangGraph state definition for multi-agent system."""
+"""LangGraph state types for multi-agent trading analytics system.
+
+Defines all TypedDict types that flow through the agent pipeline:
+- Intent: Parsed user intent from Understander
+- Stats: Structured numbers from Analyst for validation
+- AgentState: Main state object passed between agents
+
+Example:
+    state = create_initial_state("What was NQ range today?", "user123")
+    result = graph.invoke(state)
+"""
 
 from typing import TypedDict, Literal, Annotated
 from uuid import uuid4

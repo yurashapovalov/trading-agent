@@ -1,18 +1,21 @@
-"""
-Query Builder — координатор для построения SQL из QuerySpec.
+"""QueryBuilder - deterministically converts QuerySpec to SQL.
 
-Использует Registry pattern для расширяемости:
-- SourceRegistry: builders для разных источников данных
-- SpecialOpRegistry: builders для специальных операций
+Uses Registry pattern for extensibility:
+- SourceRegistry: Builders for different data sources (daily, minutes)
+- SpecialOpRegistry: Builders for special operations (event_time, find_extremum)
 
-Добавление нового кубика:
-    1. Создать класс в соответствующей директории
-    2. Унаследовать от базового класса
-    3. Добавить декоратор @Registry.register
-    4. Готово — builder найдёт его автоматически
+Adding new building blocks:
+    1. Create class in appropriate directory
+    2. Inherit from base class
+    3. Add @Registry.register decorator
+    4. Done - builder finds it automatically
 
-Архитектура:
+Architecture:
     QuerySpec → QueryBuilder.build() → SQL string
+
+Example:
+    builder = QueryBuilder()
+    sql = builder.build(spec)  # Always valid SQL, deterministic
 """
 
 from __future__ import annotations
@@ -43,30 +46,27 @@ from .grouping import (
 
 
 class QueryBuilder:
-    """
-    Строит SQL запросы из QuerySpec.
+    """Builds SQL queries from QuerySpec deterministically.
 
-    Использование:
-        spec = QuerySpec(...)
+    Stateless - single instance can be reused for multiple queries.
+    Uses Registry pattern to find appropriate builders for sources and special ops.
+
+    Example:
         builder = QueryBuilder()
         sql = builder.build(spec)
-
-    QueryBuilder не хранит состояние между вызовами —
-    можно использовать один инстанс для многих запросов.
     """
 
     def build(self, spec: QuerySpec) -> str:
-        """
-        Главный метод — строит SQL из спецификации.
+        """Build SQL from QuerySpec.
 
         Args:
-            spec: Полная спецификация запроса
+            spec: Complete query specification with source, filters, metrics.
 
         Returns:
-            SQL строка
+            Valid DuckDB SQL string.
 
         Raises:
-            ValueError: Если спецификация невалидна
+            ValueError: If spec validation fails.
         """
         # Валидация
         errors = spec.validate()
@@ -89,11 +89,11 @@ class QueryBuilder:
         return self._build_standard_query(spec)
 
     # =========================================================================
-    # Стандартный запрос
+    # Standard Query Building
     # =========================================================================
 
     def _build_standard_query(self, spec: QuerySpec) -> str:
-        """Строит стандартный запрос: CTE → SELECT → WHERE → GROUP BY."""
+        """Build standard query: CTE → SELECT → WHERE → GROUP BY."""
         parts = []
 
         # 1. CTE через registry
@@ -130,11 +130,11 @@ class QueryBuilder:
         return self._join_parts(parts)
 
     # =========================================================================
-    # CTE Building через Registry
+    # CTE Building via Registry
     # =========================================================================
 
     def _build_source_cte(self, spec: QuerySpec) -> str:
-        """Строит CTE через SourceRegistry."""
+        """Build CTE using SourceRegistry."""
         source_builder = SourceRegistry.get_or_raise(spec.source)
 
         # Определяем какие фильтры передавать
@@ -151,7 +151,7 @@ class QueryBuilder:
     # =========================================================================
 
     def _build_select(self, spec: QuerySpec) -> str:
-        """Строит SELECT часть запроса."""
+        """Build SELECT clause with metrics and grouping columns."""
         columns = []
 
         group_col = get_grouping_column(spec.grouping)
@@ -170,20 +170,20 @@ class QueryBuilder:
         return ",\n    ".join(columns)
 
     def _build_where_conditions(self, spec: QuerySpec) -> str:
-        """Строит WHERE из conditions."""
+        """Build WHERE clause from filter conditions."""
         conditions = []
         for cond in spec.filters.conditions:
             conditions.append(cond.to_sql())
         return " AND ".join(conditions) if conditions else ""
 
     def _build_group_by(self, spec: QuerySpec) -> str:
-        """Строит GROUP BY часть."""
+        """Build GROUP BY clause based on grouping type."""
         if spec.grouping in (Grouping.NONE, Grouping.TOTAL):
             return ""
         return get_grouping_expression(spec.grouping)
 
     def _build_order_by(self, spec: QuerySpec) -> str:
-        """Строит ORDER BY часть."""
+        """Build ORDER BY clause based on grouping or explicit order."""
         if spec.order_by:
             return f"{spec.order_by} {spec.order_direction}"
 
@@ -198,11 +198,11 @@ class QueryBuilder:
         return get_grouping_expression(grouping)
 
     # =========================================================================
-    # Утилиты
+    # Utilities
     # =========================================================================
 
     def _join_parts(self, parts: list[str]) -> str:
-        """Соединяет части SQL в один запрос."""
+        """Join SQL parts into final query with proper formatting."""
         parts = [p for p in parts if p]
 
         result = []

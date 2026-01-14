@@ -1,7 +1,15 @@
-"""
-SQL module - fetches data at different granularities.
+"""SQL module - fetches OHLCV data from DuckDB at various granularities.
 
-No LLM here. Just gets data, Analyst does the analysis.
+Provides template-based queries for common data access patterns:
+- period: Aggregated stats for entire period (1 row)
+- daily: One row per trading day
+- hourly: One row per hour
+
+Used by DataFetcher as fallback when QueryBuilder is not available.
+
+Example:
+    data = fetch("NQ", "2024-01-01", "2024-01-31", "daily")
+    # Returns {"rows": [...], "row_count": 22, "granularity": "daily"}
 """
 
 import duckdb
