@@ -14,7 +14,6 @@ import {
   ChainOfThoughtContent,
   ChainOfThoughtStep,
 } from "@/components/ai/chain-of-thought"
-import { ClarificationMessage } from "@/components/ai/clarification-message"
 import {
   PromptInput,
   PromptInputBody,
@@ -25,7 +24,7 @@ import {
 } from "@/components/ai/prompt-input"
 import { Loader } from "@/components/ai/loader"
 
-import type { AgentStep, ChatMessage, ClarificationRequest } from "@/types/chat"
+import type { AgentStep, ChatMessage } from "@/types/chat"
 import { DatabaseIcon, BrainIcon, CheckCircleIcon, RouteIcon, MessageCircleIcon } from "lucide-react"
 
 // Map agent names to icons
@@ -100,12 +99,12 @@ type ChatPanelProps = {
   isLoading: boolean
   currentSteps: AgentStep[]
   streamingText: string
-  clarification: ClarificationRequest | null
+  suggestions: string[]
   inputText: string
   onInputChange: (text: string) => void
   onSubmit: () => void
   onStop: () => void
-  onClarificationSelect: (response: string) => void
+  onSuggestionClick: (suggestion: string) => void
 }
 
 export function ChatPanel({
@@ -114,12 +113,12 @@ export function ChatPanel({
   isLoading,
   currentSteps,
   streamingText,
-  clarification,
+  suggestions,
   inputText,
   onInputChange,
   onSubmit,
   onStop,
-  onClarificationSelect,
+  onSuggestionClick,
 }: ChatPanelProps) {
   return (
     <div className="relative flex h-full w-full flex-col overflow-hidden">
@@ -166,14 +165,6 @@ export function ChatPanel({
             </Message>
           )}
 
-          {clarification && (
-            <ClarificationMessage
-              question={clarification.question}
-              suggestions={clarification.suggestions}
-              onSelectSuggestion={onClarificationSelect}
-            />
-          )}
-
           {isLoading && currentSteps.length === 0 && !streamingText && (
             <div className="flex items-center gap-2 text-muted-foreground">
               <Loader className="size-4" />
@@ -184,14 +175,30 @@ export function ChatPanel({
         <ConversationScrollButton />
       </Conversation>
 
-      {/* Bottom: Input */}
+      {/* Bottom: Suggestions + Input */}
       <div className="mx-auto w-full max-w-2xl shrink-0 px-4 pb-4 pt-4">
+        {/* Quick reply suggestions */}
+        {suggestions.length > 0 && !isLoading && (
+          <div className="mb-3 flex flex-wrap gap-2">
+            {suggestions.map((suggestion, index) => (
+              <button
+                key={index}
+                type="button"
+                onClick={() => onSuggestionClick(suggestion)}
+                className="rounded-full border border-border bg-background px-3 py-1.5 text-sm text-foreground hover:bg-muted transition-colors"
+              >
+                {suggestion}
+              </button>
+            ))}
+          </div>
+        )}
+
         <PromptInput onSubmit={onSubmit}>
           <PromptInputBody>
             <PromptInputTextarea
               value={inputText}
               onChange={(e) => onInputChange(e.target.value)}
-              placeholder={clarification ? "Напишите свой ответ..." : "Ask about NQ futures..."}
+              placeholder="Ask about NQ futures..."
             />
           </PromptInputBody>
           <PromptInputFooter>

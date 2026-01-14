@@ -14,10 +14,9 @@ export default function ChatPanelContainer() {
     isLoading,
     currentSteps,
     streamingText,
-    clarification,
+    suggestions,
     sendMessage,
     stopGeneration,
-    respondToClarification,
   } = useChat()
 
   const handleSubmit = () => {
@@ -26,10 +25,9 @@ export default function ChatPanelContainer() {
     setText("")
   }
 
-  const handleClarificationSelect = (response: string) => {
-    console.log("[handleClarificationSelect] Called with:", response)
-    // Use resume endpoint for interrupt-based clarification
-    respondToClarification(response)
+  const handleSuggestionClick = (suggestion: string) => {
+    // Send suggestion as a normal message
+    sendMessage(suggestion)
   }
 
   return (
@@ -44,12 +42,12 @@ export default function ChatPanelContainer() {
       isLoading={isLoading}
       currentSteps={currentSteps}
       streamingText={streamingText}
-      clarification={clarification}
+      suggestions={suggestions}
       inputText={text}
       onInputChange={setText}
       onSubmit={handleSubmit}
       onStop={stopGeneration}
-      onClarificationSelect={handleClarificationSelect}
+      onSuggestionClick={handleSuggestionClick}
     />
   )
 }

@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback } from "react"
 import { useAuth } from "@/components/auth-provider"
-import type { ChatMessage, AgentStep, ToolUsage, Usage, SSEEvent, ClarificationRequest } from "@/types/chat"
+import type { ChatMessage, AgentStep, ToolUsage, Usage, SSEEvent } from "@/types/chat"
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
 
@@ -79,7 +79,6 @@ export function useChat() {
   const [currentSteps, setCurrentSteps] = useState<AgentStep[]>([])
   const [streamingText, setStreamingText] = useState("")
   const [suggestions, setSuggestions] = useState<string[]>(DEFAULT_SUGGESTIONS)
-  const [clarification, setClarification] = useState<ClarificationRequest | null>(null)
   const abortControllerRef = useRef<AbortController | null>(null)
 
   const sessionIdRef = useRef<string>("")
@@ -130,9 +129,6 @@ export function useChat() {
   const sendMessage = useCallback(
     async (text: string) => {
       if (!text.trim() || isLoading) return
-
-      // Clear any pending clarification
-      setClarification(null)
 
       setMessages((prev) => [...prev, { role: "user", content: text }])
       setIsLoading(true)
@@ -270,19 +266,6 @@ export function useChat() {
                     thinking_tokens: event.thinking_tokens,
                     cost: event.cost,
                   }
-                } else if (event.type === "interrupt") {
-                  // Human-in-the-loop: graph paused for clarification
-                  setClarification({
-                    question: event.question,
-                    suggestions: event.suggestions,
-                    thread_id: sessionIdRef.current, // Use session_id for resume
-                  })
-                } else if (event.type === "paused") {
-                  // Graph is paused waiting for user response
-                  // Stream will end naturally, clarification UI shown via interrupt event
-                  setCurrentSteps([])
-                  setIsLoading(false)
-                  // Don't return - let stream finish naturally
                 } else if (event.type === "done") {
                   setMessages((prev) => [
                     ...prev,
@@ -340,173 +323,13 @@ export function useChat() {
     ])
   }, [])
 
-  const respondToClarification = useCallback(
-    async (userResponse: string) => {
-      console.log("[respondToClarification] Called with:", userResponse)
-      console.log("[respondToClarification] clarification:", clarification)
-      console.log("[respondToClarification] isLoading:", isLoading)
-
-      if (!clarification || isLoading) {
-        console.log("[respondToClarification] Blocked! clarification=", clarification, "isLoading=", isLoading)
-        return
-      }
-
-      // Add clarification Q&A to messages
-      setMessages((prev) => [
-        ...prev,
-        { role: "assistant", content: clarification.question },
-        { role: "user", content: userResponse },
-      ])
-
-      // Clear clarification state
-      setClarification(null)
-      setIsLoading(true)
-      setCurrentSteps([])
-      setStreamingText("")
-
-      abortControllerRef.current = new AbortController()
-
-      try {
-        const apiResponse = await fetch(`${API_URL}/chat/resume`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            ...(session?.access_token && {
-              Authorization: `Bearer ${session.access_token}`,
-            }),
-          },
-          body: JSON.stringify({
-            response: userResponse,
-            session_id: sessionIdRef.current,
-          }),
-          signal: abortControllerRef.current.signal,
-        })
-
-        if (!apiResponse.body) throw new Error("No response body")
-
-        const reader = apiResponse.body.getReader()
-        const decoder = new TextDecoder()
-        let buffer = ""
-        const stepsCollected: AgentStep[] = []
-        let currentAgentName: string | null = null
-        let finalText = ""
-        let usageData: Usage | undefined
-        let route: string | undefined
-        let validationPassed: boolean | undefined
-
-        while (true) {
-          const { done, value } = await reader.read()
-          if (done) break
-
-          buffer += decoder.decode(value, { stream: true })
-          const lines = buffer.split("\n")
-          buffer = lines.pop() || ""
-
-          for (const line of lines) {
-            if (line.startsWith("data: ")) {
-              try {
-                const event = JSON.parse(line.slice(6)) as SSEEvent
-
-                // Same event handling as sendMessage
-                if (event.type === "step_start") {
-                  currentAgentName = event.agent
-                  const newStep: AgentStep = {
-                    agent: event.agent,
-                    message: event.message,
-                    status: "running",
-                    tools: [],
-                  }
-                  stepsCollected.push(newStep)
-                  setCurrentSteps((prev) => [...prev, newStep])
-                } else if (event.type === "step_end") {
-                  if (event.agent === "understander" || event.agent === "router") {
-                    route = (event.result?.type || event.result?.route) as string | undefined
-                  }
-                  setCurrentSteps((prev) =>
-                    prev.map((s) =>
-                      s.agent === event.agent && s.status === "running"
-                        ? { ...s, status: "completed", result: event.result, durationMs: event.duration_ms }
-                        : s
-                    )
-                  )
-                } else if (event.type === "text_delta") {
-                  finalText += event.content
-                  setStreamingText((prev) => prev + event.content)
-                } else if (event.type === "suggestions") {
-                  if (event.suggestions && event.suggestions.length > 0) {
-                    setSuggestions(event.suggestions)
-                  }
-                } else if (event.type === "usage") {
-                  usageData = {
-                    input_tokens: event.input_tokens,
-                    output_tokens: event.output_tokens,
-                    thinking_tokens: event.thinking_tokens,
-                    cost: event.cost,
-                  }
-                } else if (event.type === "interrupt") {
-                  // Another clarification needed
-                  setClarification({
-                    question: event.question,
-                    suggestions: event.suggestions,
-                    thread_id: sessionIdRef.current,
-                  })
-                } else if (event.type === "paused") {
-                  // Graph paused again for clarification
-                  setCurrentSteps([])
-                  setIsLoading(false)
-                  // Don't return - let stream finish naturally
-                } else if (event.type === "done") {
-                  setMessages((prev) => [
-                    ...prev,
-                    {
-                      role: "assistant",
-                      content: stripSuggestions(finalText),
-                      agent_steps: [...stepsCollected],
-                      route,
-                      validation_passed: validationPassed,
-                      usage: usageData,
-                    },
-                  ])
-                  setCurrentSteps([])
-                  setStreamingText("")
-                } else if (event.type === "error") {
-                  setMessages((prev) => [
-                    ...prev,
-                    { role: "assistant", content: `Ошибка: ${event.message}` },
-                  ])
-                  setCurrentSteps([])
-                }
-              } catch (e) {
-                console.error("Failed to parse SSE event:", e)
-              }
-            }
-          }
-        }
-      } catch (error) {
-        if (error instanceof Error && error.name === "AbortError") return
-        setMessages((prev) => [
-          ...prev,
-          { role: "assistant", content: "Ошибка подключения к серверу" },
-        ])
-        setCurrentSteps([])
-        setStreamingText("")
-      } finally {
-        setIsLoading(false)
-        abortControllerRef.current = null
-      }
-    },
-    [clarification, isLoading, session?.access_token]
-  )
-
   return {
     messages,
     isLoading,
     currentSteps,
     streamingText,
     suggestions,
-    clarification,
     sendMessage,
     stopGeneration,
-    respondToClarification,
   }
 }

@@ -123,7 +123,7 @@ User can always narrow down: "за 2024", "за последний месяц", 
 
 <output_schema>
 {{
-  "type": "data" | "concept" | "chitchat" | "out_of_scope",
+  "type": "data" | "concept" | "chitchat" | "out_of_scope" | "clarification",
   "symbol": "NQ",
   "period_start": "YYYY-MM-DD",
   "period_end": "YYYY-MM-DD",
@@ -134,17 +134,13 @@ User can always narrow down: "за 2024", "за последний месяц", 
   // For simple queries - result grouping level
   "granularity": "period" | "daily" | "weekly" | "monthly" | "quarterly" | "yearly" | "weekday" | "hourly",
 
-  // DEPRECATED - use detailed_spec instead
-  "search_condition": "...",
-
   // For concepts
   "concept": "...",
 
-  // For chitchat/out_of_scope
+  // For chitchat/out_of_scope/clarification - direct response text
   "response_text": "...",
 
-  // For clarification
-  "needs_clarification": false,
+  // For clarification - question to ask user
   "clarification_question": "...",
   "suggestions": ["...", "..."]
 }}
@@ -182,7 +178,7 @@ When the query requires SQL Agent, provide a detailed_spec with:
 </detailed_spec_format>
 
 <clarification_guidelines>
-Ask for clarification when:
+When to ask for clarification (use type: "clarification"):
 1. ACTION is unclear - "show data" → what to do with it?
 2. AMBIGUOUS - could mean multiple things
 3. MISSING critical info with no reasonable default
@@ -209,10 +205,10 @@ When user asks for unavailable features (technical indicators, backtesting, etc.
 - type: "out_of_scope"
 - response_text: explain what IS available
 
-When clarifying:
-- Ask specific question
-- Provide 2-4 concrete suggestions
-- Suggestions should be complete actionable queries
+When clarifying (type: "clarification"):
+- Set clarification_question: specific question to ask
+- Provide 2-4 suggestions: complete actionable queries user can click
+- User will respond via normal chat, you'll see their answer in chat_history
 </clarification_guidelines>
 
 <examples>
@@ -276,9 +272,8 @@ Question: "Покажи high low"
 Intent:
 ```json
 {{
-  "type": "data",
+  "type": "clarification",
   "symbol": "NQ",
-  "needs_clarification": true,
   "clarification_question": "Что именно вас интересует про high/low?",
   "suggestions": [
     "Показать дневные high/low за последний месяц",
@@ -295,9 +290,8 @@ Question: "Какое время чаще всего становится high/l
 Intent:
 ```json
 {{
-  "type": "data",
+  "type": "clarification",
   "symbol": "NQ",
-  "needs_clarification": true,
   "clarification_question": "Уточните временное окно 06:00-16:00. Данные хранятся в ET (Eastern Time). Это:",
   "suggestions": [
     "06:00-16:00 ET (pre-market + RTH до закрытия)",

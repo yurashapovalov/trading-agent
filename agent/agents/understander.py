@@ -4,14 +4,14 @@ Understander v2 - senior trading data analyst.
 Deeply understands user questions and formulates detailed specifications
 for SQL Agent. Uses thinking for complex analysis type detection.
 
-Supports human-in-the-loop via LangGraph interrupt() for clarifications.
+Clarifications are returned as type="clarification" with response_text,
+then handled via normal chat flow (user responds, Understander sees history).
 """
 
 import json
 from datetime import datetime, timedelta
 from google import genai
 from google.genai import types
-from langgraph.types import interrupt
 
 import config
 from agent.state import AgentState, Intent, UsageStats
@@ -55,47 +55,19 @@ class Understander:
     def __call__(self, state: AgentState) -> dict:
         """Parse question and return Intent.
 
-        Uses interrupt() for human-in-the-loop clarifications.
-        When clarification is needed:
-        1. Graph pauses and returns question to user
-        2. User responds
-        3. Graph resumes, response is added to context
-        4. LLM re-analyzes with full context
+        When clarification is needed, returns type="clarification" with
+        response_text and suggestions. User responds via normal chat,
+        and Understander sees full history on next invocation.
         """
         question = state.get("question", "")
-        chat_history = list(state.get("chat_history", []))  # Copy to avoid mutation
+        chat_history = list(state.get("chat_history", []))
 
-        print(f"[Understander] Starting. Question: {question[:50]}...")
+        print(f"[Understander] Question: {question[:50]}...")
 
         # Call LLM with JSON mode
         intent = self._parse_with_llm(question, chat_history)
-        print(f"[Understander] First LLM call. needs_clarification={intent.get('needs_clarification')}")
+        print(f"[Understander] Intent type={intent.get('type')}")
 
-        # If clarification needed, interrupt and wait for user response
-        if intent.get("needs_clarification"):
-            clarification_question = intent.get("clarification_question", "Уточните ваш запрос")
-            suggestions = intent.get("suggestions", [])
-
-            print(f"[Understander] Calling interrupt()...")
-            # Interrupt graph - pauses here until resume
-            user_response = interrupt({
-                "type": "clarification",
-                "question": clarification_question,
-                "suggestions": suggestions,
-            })
-            print(f"[Understander] interrupt() returned: {user_response[:50]}...")
-
-            # After resume - user_response contains user's answer
-            # Add exchange to chat history and re-parse
-            chat_history.append({"role": "assistant", "content": clarification_question})
-            chat_history.append({"role": "user", "content": user_response})
-
-            # Re-call LLM with updated context
-            print(f"[Understander] Second LLM call with updated history...")
-            intent = self._parse_with_llm(question, chat_history)
-            print(f"[Understander] Second LLM done. needs_clarification={intent.get('needs_clarification')}")
-
-        print(f"[Understander] Returning intent type={intent.get('type')}")
         return {
             "intent": intent,
             "usage": self._last_usage,
@@ -148,7 +120,7 @@ class Understander:
                         "properties": {
                             "type": {
                                 "type": "string",
-                                "enum": ["data", "concept", "chitchat", "out_of_scope"]
+                                "enum": ["data", "concept", "chitchat", "out_of_scope", "clarification"]
                             },
                             "symbol": {"type": "string"},
                             "period_start": {"type": "string"},
@@ -202,9 +174,6 @@ class Understander:
         intent: Intent = {
             "type": intent_type,
             "symbol": data.get("symbol") or DEFAULT_SYMBOL,
-            # needs_clarification is handled via interrupt(), not stored in final intent
-            "needs_clarification": data.get("needs_clarification", False),
-            "clarification_question": data.get("clarification_question"),
             "suggestions": data.get("suggestions", []),
         }
 
@@ -214,16 +183,19 @@ class Understander:
             intent["period_end"] = data.get("period_end")
             intent["granularity"] = data.get("granularity") or DEFAULT_GRANULARITY
             intent["detailed_spec"] = data.get("detailed_spec")
-            intent["search_condition"] = data.get("search_condition")  # DEPRECATED
 
-            # Default period: ALL available data (more data = better analytics)
+            # Default period: ALL available data
             if not intent["period_start"] or not intent["period_end"]:
                 intent["period_start"], intent["period_end"] = self._full_data_range()
 
-        if intent_type == "concept":
+        elif intent_type == "concept":
             intent["concept"] = data.get("concept", "")
 
-        if intent_type in ("chitchat", "out_of_scope"):
+        elif intent_type == "clarification":
+            # Clarification needed - return question and suggestions
+            intent["response_text"] = data.get("clarification_question", "Уточните ваш запрос")
+
+        elif intent_type in ("chitchat", "out_of_scope"):
             intent["response_text"] = data.get("response_text", "")
 
         return intent
@@ -237,7 +209,6 @@ class Understander:
             period_start=start,
             period_end=end,
             granularity=DEFAULT_GRANULARITY,
-            needs_clarification=False,
         )
 
     def _full_data_range(self) -> tuple[str, str]:
