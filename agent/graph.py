@@ -16,7 +16,7 @@ Clarification (stateless):
 - User answers with new message
 - Understander sees context and combines original question with clarification
 
-Note: SQL Agent only runs if search_condition exists in Intent.
+Note: SQL Agent runs if detailed_spec or search_condition exists in Intent.
 """
 
 from typing import Literal
@@ -60,7 +60,7 @@ def understand_question(state: AgentState) -> Command:
         next_node = "responder"
     elif intent_type in ("chitchat", "out_of_scope", "concept"):
         next_node = "responder"
-    elif intent.get("search_condition"):
+    elif intent.get("detailed_spec") or intent.get("search_condition"):
         next_node = "sql_agent"
     else:
         next_node = "data_fetcher"
@@ -69,7 +69,7 @@ def understand_question(state: AgentState) -> Command:
 
 
 def generate_sql(state: AgentState) -> dict:
-    """SQL Agent node - generates SQL from search_condition."""
+    """SQL Agent node - generates SQL from detailed_spec or search_condition."""
     return sql_agent(state)
 
 
