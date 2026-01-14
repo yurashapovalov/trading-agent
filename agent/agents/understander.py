@@ -65,20 +65,25 @@ class Understander:
         question = state.get("question", "")
         chat_history = list(state.get("chat_history", []))  # Copy to avoid mutation
 
+        print(f"[Understander] Starting. Question: {question[:50]}...")
+
         # Call LLM with JSON mode
         intent = self._parse_with_llm(question, chat_history)
+        print(f"[Understander] First LLM call. needs_clarification={intent.get('needs_clarification')}")
 
         # If clarification needed, interrupt and wait for user response
         if intent.get("needs_clarification"):
             clarification_question = intent.get("clarification_question", "Уточните ваш запрос")
             suggestions = intent.get("suggestions", [])
 
+            print(f"[Understander] Calling interrupt()...")
             # Interrupt graph - pauses here until resume
             user_response = interrupt({
                 "type": "clarification",
                 "question": clarification_question,
                 "suggestions": suggestions,
             })
+            print(f"[Understander] interrupt() returned: {user_response[:50]}...")
 
             # After resume - user_response contains user's answer
             # Add exchange to chat history and re-parse
@@ -86,8 +91,11 @@ class Understander:
             chat_history.append({"role": "user", "content": user_response})
 
             # Re-call LLM with updated context
+            print(f"[Understander] Second LLM call with updated history...")
             intent = self._parse_with_llm(question, chat_history)
+            print(f"[Understander] Second LLM done. needs_clarification={intent.get('needs_clarification')}")
 
+        print(f"[Understander] Returning intent type={intent.get('type')}")
         return {
             "intent": intent,
             "usage": self._last_usage,
