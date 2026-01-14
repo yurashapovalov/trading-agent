@@ -32,19 +32,22 @@ def get_checkpointer() -> BaseCheckpointSaver:
     """
     Get appropriate checkpointer based on environment.
 
-    - Development: MemorySaver (simple, in-memory)
-    - Production: PostgreSQL (Supabase)
+    Always use SQLite for persistence (required for interrupt/resume).
+    MemorySaver doesn't work across requests.
 
     Returns:
         Checkpointer instance
     """
-    env = os.getenv("ENVIRONMENT", "development")
+    from langgraph.checkpoint.sqlite import SqliteSaver
 
-    if env == "production" and os.getenv("DATABASE_URL"):
-        return get_postgres_checkpointer()
-    else:
-        # Use MemorySaver for development (simpler than SQLite context manager)
-        return get_memory_checkpointer()
+    db_path = Path(config.ROOT_DIR) / "data" / "checkpoints.db"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # SqliteSaver.from_conn_string returns a context manager, but we need
+    # a persistent saver. Use direct connection.
+    import sqlite3
+    conn = sqlite3.connect(str(db_path), check_same_thread=False)
+    return SqliteSaver(conn)
 
 
 def get_postgres_checkpointer() -> Optional[BaseCheckpointSaver]:
