@@ -89,6 +89,9 @@ class SQLAgent:
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     temperature=0.1,  # Low temperature for precise SQL
+                    thinking_config=types.ThinkingConfig(
+                        thinking_budget=0  # Disable thinking - detailed_spec has all context
+                    ),
                 )
             )
 
