@@ -139,13 +139,11 @@ class DataFetcher:
                     "row_count": len(rows),
                     "granularity": granularity,
                     "columns": list(df.columns) if len(df) > 0 else [],
-                    "sql_query": sql_query,
                     "source": source,
                 }
         except Exception as e:
             return {
                 "error": str(e),
-                "sql_query": sql_query,
                 "rows": [],
                 "row_count": 0,
             }
