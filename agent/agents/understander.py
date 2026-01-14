@@ -15,7 +15,7 @@ from google.genai import types
 
 import config
 from agent.state import AgentState, Intent, UsageStats
-from agent.pricing import calculate_cost, GEMINI_2_5_FLASH_LITE
+from agent.pricing import calculate_cost
 from agent.capabilities import (
     get_capabilities_prompt,
     DEFAULT_SYMBOL,
@@ -40,6 +40,26 @@ QUERY_SPEC_SCHEMA = {
             "properties": {
                 "period_start": {"type": "string"},
                 "period_end": {"type": "string"},
+                "specific_dates": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Конкретные даты: ['2005-05-16', '2003-04-12']"
+                },
+                "years": {
+                    "type": "array",
+                    "items": {"type": "integer"},
+                    "description": "Конкретные годы: [2020, 2022, 2024]"
+                },
+                "months": {
+                    "type": "array",
+                    "items": {"type": "integer"},
+                    "description": "Месяцы (1-12): [1, 6] для января и июня"
+                },
+                "weekdays": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Дни недели: ['Monday', 'Friday']"
+                },
                 "session": {
                     "type": "string",
                     "enum": [
@@ -48,6 +68,14 @@ QUERY_SPEC_SCHEMA = {
                         "PREMARKET", "POSTMARKET", "MORNING", "AFTERNOON", "LUNCH",
                         "LONDON_OPEN", "NY_OPEN", "NY_CLOSE"
                     ]
+                },
+                "time_start": {
+                    "type": "string",
+                    "description": "Начало кастомного времени: '06:00:00'"
+                },
+                "time_end": {
+                    "type": "string",
+                    "description": "Конец кастомного времени: '16:00:00'"
                 },
                 "conditions": {
                     "type": "array",
@@ -84,12 +112,12 @@ QUERY_SPEC_SCHEMA = {
         },
         "special_op": {
             "type": "string",
-            "enum": ["none", "event_time", "top_n", "compare"]
+            "enum": ["none", "event_time", "top_n", "compare", "find_extremum"]
         },
         "event_time_spec": {
             "type": "object",
             "properties": {
-                "find": {"type": "string", "enum": ["high", "low"]}
+                "find": {"type": "string", "enum": ["high", "low", "both"]}
             }
         },
         "top_n_spec": {
@@ -98,6 +126,12 @@ QUERY_SPEC_SCHEMA = {
                 "n": {"type": "integer"},
                 "order_by": {"type": "string"},
                 "direction": {"type": "string", "enum": ["ASC", "DESC"]}
+            }
+        },
+        "find_extremum_spec": {
+            "type": "object",
+            "properties": {
+                "find": {"type": "string", "enum": ["high", "low", "both"]}
             }
         }
     }
@@ -146,8 +180,8 @@ class Understander:
     def __init__(self):
         """Инициализация клиента Gemini."""
         self.client = genai.Client(api_key=config.GOOGLE_API_KEY)
-        # Используем lite модель для скорости (парсинг не требует тяжёлой модели)
-        self.model = "gemini-2.5-flash-lite"
+        # Используем основную модель для лучшего понимания
+        self.model = config.GEMINI_MODEL
         self._last_usage = UsageStats(
             input_tokens=0,
             output_tokens=0,
@@ -237,7 +271,7 @@ class Understander:
                 thinking_tokens = getattr(
                     response.usage_metadata, 'thoughts_token_count', 0
                 ) or 0
-                cost = calculate_cost(input_tokens, output_tokens, thinking_tokens, GEMINI_2_5_FLASH_LITE)
+                cost = calculate_cost(input_tokens, output_tokens, thinking_tokens)
                 self._last_usage = UsageStats(
                     input_tokens=input_tokens,
                     output_tokens=output_tokens,
@@ -364,6 +398,7 @@ def query_spec_to_builder(query_spec: dict) -> "QuerySpec":
         SpecialOp,
         EventTimeSpec,
         TopNSpec,
+        FindExtremumSpec,
     )
 
     # Source
@@ -385,9 +420,18 @@ def query_spec_to_builder(query_spec: dict) -> "QuerySpec":
         ))
 
     filters = Filters(
+        # Календарные фильтры
         period_start=filters_data.get("period_start", "2020-01-01"),
         period_end=filters_data.get("period_end", "2025-01-01"),
+        specific_dates=filters_data.get("specific_dates"),
+        years=filters_data.get("years"),
+        months=filters_data.get("months"),
+        weekdays=filters_data.get("weekdays"),
+        # Время суток
         session=filters_data.get("session"),
+        time_start=filters_data.get("time_start"),
+        time_end=filters_data.get("time_end"),
+        # Условия
         conditions=conditions,
     )
 
@@ -443,6 +487,7 @@ def query_spec_to_builder(query_spec: dict) -> "QuerySpec":
         "event_time": SpecialOp.EVENT_TIME,
         "top_n": SpecialOp.TOP_N,
         "compare": SpecialOp.COMPARE,
+        "find_extremum": SpecialOp.FIND_EXTREMUM,
     }
     special_op = special_op_map.get(
         query_spec.get("special_op", "none"),
@@ -465,6 +510,12 @@ def query_spec_to_builder(query_spec: dict) -> "QuerySpec":
             direction=tns.get("direction", "DESC"),
         )
 
+    # Find Extremum Spec
+    find_extremum_spec = None
+    if special_op == SpecialOp.FIND_EXTREMUM:
+        fes = query_spec.get("find_extremum_spec", {})
+        find_extremum_spec = FindExtremumSpec(find=fes.get("find", "both"))
+
     return QuerySpec(
         symbol="NQ",  # TODO: брать из query_spec когда добавим другие символы
         source=source,
@@ -474,4 +525,5 @@ def query_spec_to_builder(query_spec: dict) -> "QuerySpec":
         special_op=special_op,
         event_time_spec=event_time_spec,
         top_n_spec=top_n_spec,
+        find_extremum_spec=find_extremum_spec,
     )

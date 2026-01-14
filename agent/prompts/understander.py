@@ -99,9 +99,10 @@ Do NOT guess dates. Do NOT use today's date. Just use "all".
     }},
     "grouping": "none" | "total" | "1min" | "5min" | "15min" | "hour" | "day" | "month" | "weekday" | ...,
     "metrics": [{{ "metric": "avg", "column": "range", "alias": "avg_range" }}],
-    "special_op": "none" | "event_time" | "top_n",
-    "event_time_spec": {{ "find": "high" | "low" | "both" }},  // "both" for high AND low
-    "top_n_spec": {{ "n": 10, "order_by": "range", "direction": "DESC" }}
+    "special_op": "none" | "event_time" | "top_n" | "find_extremum",
+    "event_time_spec": {{ "find": "high" | "low" | "both" }},  // distribution over many days
+    "top_n_spec": {{ "n": 10, "order_by": "range", "direction": "DESC" }},
+    "find_extremum_spec": {{ "find": "high" | "low" | "both" }}  // exact time for specific day(s)
   }},
 
   // === For type: "concept" ===
@@ -232,27 +233,47 @@ For grouping == "none", metrics define which columns to return:
 | Value | When | Additional spec |
 |-------|------|-----------------|
 | "none" | Standard query | — |
-| "event_time" | "WHEN does high/low form" | event_time_spec: {{"find": "high" | "low" | "both"}} |
-| "top_n" | "Top 10 most volatile days" | top_n_spec: {{"n": 10, "order_by": "range", "direction": "DESC"}} |
+| "event_time" | "When does high/low USUALLY form" (distribution) | event_time_spec |
+| "find_extremum" | "When WAS high/low on specific day" (exact time) | find_extremum_spec |
+| "top_n" | "Top 10 most volatile days" | top_n_spec |
+
+CRITICAL — event_time vs find_extremum:
+- "event_time": DISTRIBUTION over many days → "когда ОБЫЧНО формируется high?"
+  Returns: time_bucket, frequency, percentage
+- "find_extremum": EXACT TIME for specific day(s) → "во сколько БЫЛ high 10 января?"
+  Returns: date, high_time, high_value, low_time, low_value
+
+Use find_extremum when:
+- Question asks about SPECIFIC DATE(S): "10 января", "вчера", "на прошлой неделе"
+- Question uses past tense: "был", "случился", "сформировался"
+- Question wants exact timestamp, not distribution
+
+Use event_time when:
+- Question asks about PATTERN: "обычно", "чаще всего", "как правило"
+- Question wants DISTRIBUTION: "распределение", "статистика по времени"
+- No specific dates mentioned
 
 IMPORTANT for event_time:
 - Always requires source: "minutes"
 - Always requires grouping by time: "1min", "5min", "15min", "30min", or "hour"
 - Default grouping: "1min" (raw data resolution) unless user specifies otherwise
-- Use larger buckets ("15min", "hour") only if user explicitly asks
 - Returns distribution: how many days had high/low in each time bucket
 
-CRITICAL - event_time_spec.find selection:
+IMPORTANT for find_extremum:
+- Always requires source: "minutes"
+- grouping is ignored (returns exact timestamps)
+- Use specific_dates or period filters to select day(s)
+
+CRITICAL - find selection (for both event_time and find_extremum):
 - "high" ONLY if user asks about HIGH only: "когда high", "время максимума"
 - "low" ONLY if user asks about LOW only: "когда low", "время минимума"
-- "both" if user mentions BOTH: "high и low", "high/low", "high low", "максимум и минимум", "экстремумы"
+- "both" if user mentions BOTH: "high и low", "high/low", "максимум и минимум"
 
 Examples:
-- "когда формируется high?" → find: "high"
-- "когда low дня?" → find: "low"
-- "когда high и low?" → find: "both"
-- "время high/low" → find: "both"
-- "распределение экстремумов" → find: "both"
+- "когда обычно формируется high?" → event_time, find: "high"
+- "во сколько был high 10 января?" → find_extremum, find: "high"
+- "время high/low вчера" → find_extremum, find: "both"
+- "распределение экстремумов за год" → event_time, find: "both"
 </query_spec_blocks>
 
 <clarification_guidelines>
@@ -426,6 +447,30 @@ Question: "Когда формируется high и low на RTH?"
 ```
 
 Note: "both" returns distributions for both high AND low. Session "RTH" is clear — no clarification needed.
+
+## Example 3d: Exact Time of High/Low (FIND_EXTREMUM)
+
+Question: "Во сколько был хай и лоу на NQ 10 января 2025?"
+
+```json
+{{
+  "type": "data",
+  "query_spec": {{
+    "source": "minutes",
+    "filters": {{
+      "period_start": "2025-01-10",
+      "period_end": "2025-01-11"
+    }},
+    "grouping": "none",
+    "metrics": [],
+    "special_op": "find_extremum",
+    "find_extremum_spec": {{"find": "both"}}
+  }}
+}}
+```
+
+Note: Unlike event_time, find_extremum returns EXACT timestamps (e.g. "06:12:00"), not distributions.
+Key difference: "во сколько БЫЛ" (specific day) vs "когда ОБЫЧНО формируется" (pattern).
 
 ## Example 4: Monthly Breakdown
 

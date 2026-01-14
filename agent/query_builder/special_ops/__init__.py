@@ -20,6 +20,7 @@ from .base import SpecialOpBuilder, SpecialOpRegistry
 # Импортируем builders чтобы они зарегистрировались
 from .event_time import EventTimeOpBuilder, build_event_time_query
 from .top_n import TopNOpBuilder, apply_top_n_to_spec
+from .find_extremum import FindExtremumOpBuilder
 
 __all__ = [
     # Base
@@ -28,6 +29,7 @@ __all__ = [
     # Builders
     "EventTimeOpBuilder",
     "TopNOpBuilder",
+    "FindExtremumOpBuilder",
     # Functions
     "build_event_time_query",
     "apply_top_n_to_spec",

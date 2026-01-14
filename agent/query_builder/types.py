@@ -524,6 +524,23 @@ class SpecialOp(Enum):
     Требует: CompareSpec со списком items для сравнения
     """
 
+    FIND_EXTREMUM = "find_extremum"
+    """
+    Найти точное время и значение high/low.
+
+    Пример: "во сколько был хай 10 января?"
+
+    Логика:
+    1. Для каждого дня найти минуту с MAX(high) или MIN(low)
+    2. Вернуть timestamp + value (не распределение!)
+
+    Отличие от EVENT_TIME:
+    - EVENT_TIME: распределение по bucket'ам → frequency, percentage
+    - FIND_EXTREMUM: точные значения → timestamp, value
+
+    Требует: FindExtremumSpec с параметром find (high/low/both)
+    """
+
 
 @dataclass
 class EventTimeSpec:
@@ -567,6 +584,27 @@ class CompareSpec:
     """
 
     items: list[str]
+
+
+@dataclass
+class FindExtremumSpec:
+    """
+    Параметры для операции FIND_EXTREMUM.
+
+    Находит точное время и значение high/low для конкретных дней.
+
+    Attributes:
+        find: Что ищем.
+              "high" — время и значение максимума
+              "low" — время и значение минимума
+              "both" — и high и low
+
+    Example output:
+        {"date": "2025-01-10", "high_time": "06:12:00", "high_value": 21543.25,
+         "low_time": "10:15:00", "low_value": 21234.50}
+    """
+
+    find: Literal["high", "low", "both"]
 
 
 # =============================================================================
@@ -629,6 +667,7 @@ class QuerySpec:
     event_time_spec: EventTimeSpec | None = None
     top_n_spec: TopNSpec | None = None
     compare_spec: CompareSpec | None = None
+    find_extremum_spec: FindExtremumSpec | None = None
 
     # === Сортировка и лимит ===
     order_by: str | None = None
@@ -654,6 +693,9 @@ class QuerySpec:
         if self.special_op == SpecialOp.COMPARE and not self.compare_spec:
             errors.append("COMPARE требует compare_spec")
 
+        if self.special_op == SpecialOp.FIND_EXTREMUM and not self.find_extremum_spec:
+            errors.append("FIND_EXTREMUM требует find_extremum_spec")
+
         # EVENT_TIME требует группировку по времени
         if self.special_op == SpecialOp.EVENT_TIME:
             if not self.grouping.is_time_based():
@@ -666,5 +708,10 @@ class QuerySpec:
         if self.special_op == SpecialOp.EVENT_TIME:
             if self.source != Source.MINUTES:
                 errors.append("EVENT_TIME требует source=MINUTES")
+
+        # FIND_EXTREMUM требует Source.MINUTES
+        if self.special_op == SpecialOp.FIND_EXTREMUM:
+            if self.source != Source.MINUTES:
+                errors.append("FIND_EXTREMUM требует source=MINUTES")
 
         return errors

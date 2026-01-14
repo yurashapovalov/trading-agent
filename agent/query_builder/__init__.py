@@ -46,6 +46,7 @@ from .types import (
     EventTimeSpec,
     TopNSpec,
     CompareSpec,
+    FindExtremumSpec,
 )
 
 from .builder import QueryBuilder
@@ -66,4 +67,5 @@ __all__ = [
     "EventTimeSpec",
     "TopNSpec",
     "CompareSpec",
+    "FindExtremumSpec",
 ]
