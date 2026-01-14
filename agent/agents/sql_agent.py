@@ -82,14 +82,13 @@ class SQLAgent:
             error=error,
         )
 
-        # Call LLM with thinking enabled for better reasoning
+        # Call LLM - no thinking needed, detailed_spec provides SQL hints
         try:
             response = self.client.models.generate_content(
                 model=self.model,
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     temperature=0.1,  # Low temperature for precise SQL
-                    thinking_config=types.ThinkingConfig(include_thoughts=True),
                 )
             )
 
