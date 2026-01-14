@@ -6,21 +6,21 @@
 
 ## Purpose
 
-Парсит вопрос пользователя в структурированный Intent.
+Парсит вопрос пользователя в структурированный `query_spec` — набор "кубиков" для QueryBuilder.
 
-## Principle
+## Architecture
 
-LLM решает ЧТО нужно сделать (какие данные, за какой период, есть ли условие поиска).
-Следующие агенты решают КАК это сделать:
-- SQL Agent генерирует SQL запрос
-- DataFetcher выполняет запрос
-- Analyst анализирует результат
+```
+Вопрос → Understander → query_spec (JSON) → QueryBuilder → SQL
+```
+
+**Принцип:** LLM классифицирует, не генерирует. Вместо генерации SQL, LLM выбирает из готовых блоков.
 
 ## Input
 
 ```python
 {
-    "question": "Как NQ вел себя в январе 2024?",
+    "question": "когда обычно формируется high дня за RTH?",
     "chat_history": [...]  # optional
 }
 ```
@@ -29,113 +29,174 @@ LLM решает ЧТО нужно сделать (какие данные, за
 
 ```python
 {
-    "intent": Intent(
-        type="data",           # data | concept | chitchat | out_of_scope
-        symbol="NQ",
-        period_start="2024-01-01",
-        period_end="2024-01-31",
-        granularity="daily",   # period | daily | hourly | weekday | monthly
-        search_condition=None, # or "days where change_pct < -2%"
-    )
+    "intent": {
+        "type": "data",
+        "symbol": "NQ",
+        "query_spec": {
+            "source": "minutes",
+            "filters": {
+                "period_start": "2008-01-02",
+                "period_end": "2026-01-07",
+                "session": "RTH"
+            },
+            "grouping": "15min",
+            "metrics": [],
+            "special_op": "event_time",
+            "event_time_spec": {"find": "high"}
+        }
+    }
 }
 ```
 
 ## Intent Types
 
-| Type | Когда | Пример вопроса |
-|------|-------|----------------|
-| `data` | Вопросы про данные или поиск | "Как NQ в январе?", "Найди падения >2%" |
+| Type | Когда | Пример |
+|------|-------|--------|
+| `data` | Запросы про данные | "Как NQ в январе?", "Когда high дня?" |
 | `concept` | Объяснение концепций | "Что такое MACD?" |
-| `chitchat` | Приветствия, благодарности | "Привет!", "Спасибо!" |
+| `chitchat` | Приветствия | "Привет!" |
 | `out_of_scope` | Не про трейдинг | "Какая погода?" |
+| `clarification` | Нужно уточнение | Неясный запрос |
 
-## Granularity
+## Query Spec — Кубики
 
-LLM выбирает granularity в зависимости от вопроса:
+### Source (откуда данные)
 
-| Granularity | Когда | Ответ |
-|-------------|-------|-------|
-| `period` | "За месяц" / общая статистика | 1 агрегированная строка |
-| `daily` | "По дням" / поиск паттернов | 1 строка на день |
-| `hourly` | "По часам" / внутридневной профиль | 1 строка на час |
-| `weekday` | "По дням недели" | 1 строка на день недели |
-| `monthly` | "По месяцам" | 1 строка на месяц |
+| Value | Описание |
+|-------|----------|
+| `minutes` | Минутные свечи |
+| `daily` | Дневные агрегации |
+| `daily_with_prev` | Дневные + данные предыдущего дня (для гэпов) |
 
-## Search Queries
+### Filters (фильтры)
 
-Для поисковых запросов ("найди", "когда", "покажи дни где..."):
+| Field | Описание |
+|-------|----------|
+| `period_start` | Начало периода (YYYY-MM-DD) или "all" |
+| `period_end` | Конец периода (YYYY-MM-DD) или "all" |
+| `session` | Торговая сессия (RTH, ETH, OVERNIGHT, etc.) |
+| `conditions` | Дополнительные условия [{column, operator, value}] |
 
-```python
-Intent(
-    type="data",
-    granularity="daily",  # всегда daily для поиска
-    search_condition="days where change_pct < -2% AND previous day change_pct > +1%"
-)
+### Sessions (15 сессий)
+
+```
+RTH, ETH, OVERNIGHT, GLOBEX,
+ASIAN, EUROPEAN, US,
+PREMARKET, POSTMARKET, MORNING, AFTERNOON, LUNCH,
+LONDON_OPEN, NY_OPEN, NY_CLOSE
 ```
 
-- `search_condition` - описание условия на natural language
-- SQL Agent конвертирует это в SQL запрос
-- DataFetcher выполняет SQL и возвращает отфильтрованные данные
-- Analyst анализирует результат
+### Grouping (группировка)
 
-**Важно:** Understander только описывает ЧТО искать. SQL Agent решает КАК это выразить в SQL.
+| Value | Описание |
+|-------|----------|
+| `none` | Без группировки (все строки) |
+| `total` | Одна агрегированная строка |
+| `5min`..`hour` | По временным интервалам |
+| `day`..`year` | По календарным периодам |
+| `weekday` | По дням недели |
+| `session` | По сессиям |
 
-## Period Defaults
+### Metrics (метрики)
 
-- Если период указан → используем его
-- Если период НЕ указан:
-  - Для поиска (search_condition есть) → ВСЕ доступные данные
-  - Для обычных запросов → последний месяц
+| Value | Описание |
+|-------|----------|
+| `open`, `high`, `low`, `close`, `volume` | OHLCV |
+| `range` | high - low |
+| `change_pct` | % изменения |
+| `gap_pct` | % гэпа от предыдущего close |
+| `count`, `avg`, `sum`, `min`, `max`, `stddev`, `median` | Агрегаты |
 
-## Implementation Details
+### Special Operations
+
+| Value | Описание |
+|-------|----------|
+| `none` | Обычный запрос |
+| `event_time` | Распределение времени события (high/low) |
+| `top_n` | Топ N записей |
+| `compare` | Сравнение категорий |
+
+## Period Handling
+
+- **Период указан** → используем как есть
+- **Период НЕ указан** → LLM возвращает `"all"`, Python заполняет из БД
+
+```python
+# LLM возвращает:
+"period_start": "all", "period_end": "all"
+
+# Python заменяет на реальные даты из БД:
+"period_start": "2008-01-02", "period_end": "2026-01-07"
+```
+
+Это обеспечивает **детерминизм** — LLM не гадает даты.
+
+## Examples
+
+### Статистика за период
+
+```
+Q: "средний range за 2024"
+→ source: daily
+  filters: {period: 2024-01-01 — 2024-12-31}
+  grouping: total
+  metrics: [{metric: avg, column: range}]
+```
+
+### Распределение времени
+
+```
+Q: "когда формируется high дня за RTH?"
+→ source: minutes
+  filters: {period: all, session: RTH}
+  grouping: 15min
+  special_op: event_time
+  event_time_spec: {find: high}
+```
+
+### Поиск экстремумов
+
+```
+Q: "топ 10 самых волатильных дней"
+→ source: daily
+  filters: {period: all}
+  special_op: top_n
+  top_n_spec: {n: 10, order_by: range, direction: DESC}
+```
+
+## Implementation
 
 ```python
 class Understander:
     name = "understander"
     agent_type = "routing"
+    model = "gemini-2.5-flash-lite"  # Быстрая модель
 
     def __call__(self, state: AgentState) -> dict:
-        question = state.get("question", "")
+        question = state["question"]
         intent = self._parse_with_llm(question)
         return {"intent": intent}
 ```
 
-- Использует Gemini с JSON mode для структурированного вывода
-- Промпт в `agent/prompts/understander.py`
-- При ошибке возвращает default intent (data, daily, last month)
+- JSON mode для структурированного вывода
+- JSON Schema для валидации query_spec
+- Температура 0.3 для детерминизма
+- ~1.5s на запрос
 
-## Prompt Structure
+## Prompt
 
-```xml
-<role>
-You are a trading question parser...
-</role>
+Промпт в `agent/prompts/understander.py` содержит:
+- Описание всех кубиков
+- Правила выбора source/grouping/metrics
+- Примеры маппинга вопрос → query_spec
+- JSON schema для ответа
 
-<constraints>
-- Always return valid JSON
-- Use granularity="daily" for search queries
-- Set search_condition for "find/search" questions
-</constraints>
+## Determinism
 
-<examples>
-Q: "Как NQ вел себя в январе?"
-→ type=data, granularity=daily
+10/10 идентичных запусков на один вопрос — **100% детерминизм**.
 
-Q: "Найди дни когда падение >2%"
-→ type=data, granularity=daily, search_condition="days where change_pct < -2%"
-
-Q: "Найди падения после роста"
-→ type=data, granularity=daily, search_condition="days where change_pct < -2% AND previous day change_pct > +1%"
-</examples>
-
-<task>
-{question}
-</task>
-```
-
-## Usage Tracking
-
-```python
-usage = understander.get_usage()
-# UsageStats(input_tokens=2190, output_tokens=51, cost_usd=0.00024)
-```
+Достигается за счёт:
+1. Низкой температуры (0.3)
+2. JSON schema валидации
+3. Ограниченного набора enum значений
+4. `"all"` вместо угадывания дат

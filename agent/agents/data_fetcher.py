@@ -2,7 +2,7 @@
 DataFetcher agent - fetches data based on Intent.
 
 No LLM here. Pure Python routing to modules.
-Central hub: executes validated SQL from SQL Agent or uses templates.
+Central hub: executes SQL from QueryBuilder.
 """
 
 import time
@@ -19,7 +19,7 @@ class DataFetcher:
     Fetches data based on structured Intent.
 
     Routes:
-    - sql_validation.status == "ok" + sql_query → execute SQL from SQL Agent
+    - sql_query exists → execute SQL from QueryBuilder
     - type="concept" → no data needed
     - else → use standard templates from sql.py
     """
@@ -41,14 +41,18 @@ class DataFetcher:
 
         intent_type = intent.get("type", "data")
 
-        # Check for validated SQL from SQL Agent
+        # Check for SQL query (from QueryBuilder or SQL Agent)
         sql_validation = state.get("sql_validation") or {}
         sql_query = state.get("sql_query")
 
         # Route to appropriate handler
-        if sql_validation.get("status") == "ok" and sql_query:
-            # Execute validated SQL from SQL Agent
-            data = self._execute_sql(sql_query)
+        # 1. SQL from QueryBuilder (no validation needed - deterministically valid)
+        # 2. SQL from SQL Agent (needs sql_validation.status == "ok")
+        # 3. Concept - no data needed
+        # 4. Fallback - use templates
+        if sql_query and (sql_validation.get("status") == "ok" or not sql_validation):
+            # Execute SQL (from QueryBuilder or validated SQL Agent)
+            data = self._execute_sql(sql_query, intent)
         elif intent_type == "concept":
             data = self._handle_concept(intent)
         else:  # "data" or default - use templates
@@ -63,8 +67,17 @@ class DataFetcher:
             "total_duration_ms": state.get("total_duration_ms", 0) + duration_ms,
         }
 
-    def _execute_sql(self, sql_query: str) -> dict[str, Any]:
-        """Execute validated SQL from SQL Agent."""
+    def _execute_sql(self, sql_query: str, intent: Intent = None) -> dict[str, Any]:
+        """
+        Execute SQL query (from QueryBuilder or SQL Agent).
+
+        Args:
+            sql_query: SQL query string
+            intent: Optional intent to determine granularity from query_spec
+
+        Returns:
+            Data dict with rows, row_count, granularity, etc.
+        """
         try:
             with duckdb.connect(config.DATABASE_PATH, read_only=True) as conn:
                 df = conn.execute(sql_query).df()
@@ -73,12 +86,33 @@ class DataFetcher:
                 # Convert numpy types to Python types
                 rows = sql._convert_numpy_types(rows)
 
+                # Determine granularity from query_spec or default
+                granularity = "daily"
+                source = "query_builder"
+
+                if intent:
+                    query_spec = intent.get("query_spec", {})
+                    if query_spec:
+                        source = "query_builder"
+                        # Map source to granularity
+                        spec_source = query_spec.get("source", "daily")
+                        if spec_source == "minutes":
+                            granularity = "minute"
+                        elif spec_source in ("daily", "daily_with_prev"):
+                            granularity = "daily"
+
+                        # Special ops have their own granularity
+                        special_op = query_spec.get("special_op", "none")
+                        if special_op == "event_time":
+                            granularity = "distribution"
+
                 return {
                     "rows": rows,
                     "row_count": len(rows),
-                    "granularity": "daily",
+                    "granularity": granularity,
+                    "columns": list(df.columns) if len(df) > 0 else [],
                     "sql_query": sql_query,
-                    "source": "sql_agent",
+                    "source": source,
                 }
         except Exception as e:
             return {

@@ -1,50 +1,153 @@
 """
-Understander v2 - senior trading data analyst.
+Understander — парсит вопрос в query_spec.
 
-Deeply understands user questions and formulates detailed specifications
-for SQL Agent. Uses thinking for complex analysis type detection.
+Возвращает структурированный JSON (query_spec) для QueryBuilder.
+QueryBuilder детерминировано превращает query_spec в SQL.
 
-Clarifications are returned as type="clarification" with response_text,
-then handled via normal chat flow (user responds, Understander sees history).
+Архитектура:
+    Вопрос → Understander → query_spec → QueryBuilder → SQL
 """
 
 import json
-from datetime import datetime, timedelta
+from datetime import datetime
 from google import genai
 from google.genai import types
 
 import config
 from agent.state import AgentState, Intent, UsageStats
-from agent.pricing import calculate_cost
+from agent.pricing import calculate_cost, GEMINI_2_5_FLASH_LITE
 from agent.capabilities import (
     get_capabilities_prompt,
     DEFAULT_SYMBOL,
-    DEFAULT_GRANULARITY,
 )
 from agent.modules.sql import get_data_range
 from agent.prompts.understander import get_understander_prompt
 
 
 # =============================================================================
-# Understander Agent v2
+# JSON Schema для query_spec
+# =============================================================================
+
+QUERY_SPEC_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "source": {
+            "type": "string",
+            "enum": ["minutes", "daily", "daily_with_prev"]
+        },
+        "filters": {
+            "type": "object",
+            "properties": {
+                "period_start": {"type": "string"},
+                "period_end": {"type": "string"},
+                "session": {
+                    "type": "string",
+                    "enum": [
+                        "RTH", "ETH", "OVERNIGHT", "GLOBEX",
+                        "ASIAN", "EUROPEAN", "US",
+                        "PREMARKET", "POSTMARKET", "MORNING", "AFTERNOON", "LUNCH",
+                        "LONDON_OPEN", "NY_OPEN", "NY_CLOSE"
+                    ]
+                },
+                "conditions": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "column": {"type": "string"},
+                            "operator": {"type": "string"},
+                            "value": {"type": "number"}
+                        }
+                    }
+                }
+            }
+        },
+        "grouping": {
+            "type": "string",
+            "enum": [
+                "none", "total",
+                "5min", "10min", "15min", "30min", "hour",
+                "day", "week", "month", "quarter", "year",
+                "weekday", "session"
+            ]
+        },
+        "metrics": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "metric": {"type": "string"},
+                    "column": {"type": "string"},
+                    "alias": {"type": "string"}
+                }
+            }
+        },
+        "special_op": {
+            "type": "string",
+            "enum": ["none", "event_time", "top_n", "compare"]
+        },
+        "event_time_spec": {
+            "type": "object",
+            "properties": {
+                "find": {"type": "string", "enum": ["high", "low"]}
+            }
+        },
+        "top_n_spec": {
+            "type": "object",
+            "properties": {
+                "n": {"type": "integer"},
+                "order_by": {"type": "string"},
+                "direction": {"type": "string", "enum": ["ASC", "DESC"]}
+            }
+        }
+    }
+}
+
+# Полная схема ответа Understander
+RESPONSE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "type": {
+            "type": "string",
+            "enum": ["data", "concept", "chitchat", "out_of_scope", "clarification"]
+        },
+        "query_spec": QUERY_SPEC_SCHEMA,
+        "concept": {"type": "string"},
+        "response_text": {"type": "string"},
+        "clarification_question": {"type": "string"},
+        "suggestions": {
+            "type": "array",
+            "items": {"type": "string"}
+        }
+    },
+    "required": ["type"]
+}
+
+
+# =============================================================================
+# Understander Agent
 # =============================================================================
 
 class Understander:
     """
     Senior trading data analyst that understands user intent.
 
-    Uses Gemini with thinking to:
-    - Deeply understand what trader wants to know
-    - Detect analysis type (FILTER, EVENT, DISTRIBUTION, etc.)
-    - Generate detailed_spec for SQL Agent
+    Возвращает query_spec — структурированную спецификацию запроса,
+    которую QueryBuilder превращает в SQL.
+
+    Attributes:
+        name: Имя агента для логов
+        agent_type: Тип агента (routing)
     """
 
     name = "understander"
     agent_type = "routing"
 
     def __init__(self):
+        """Инициализация клиента Gemini."""
         self.client = genai.Client(api_key=config.GOOGLE_API_KEY)
-        self.model = config.GEMINI_MODEL  # Smart model with thinking
+        # Используем lite модель для скорости (парсинг не требует тяжёлой модели)
+        self.model = "gemini-2.5-flash-lite"
         self._last_usage = UsageStats(
             input_tokens=0,
             output_tokens=0,
@@ -53,18 +156,21 @@ class Understander:
         )
 
     def __call__(self, state: AgentState) -> dict:
-        """Parse question and return Intent.
+        """
+        Главный метод — парсит вопрос и возвращает Intent.
 
-        When clarification is needed, returns type="clarification" with
-        response_text and suggestions. User responds via normal chat,
-        and Understander sees full history on next invocation.
+        Args:
+            state: Текущее состояние агента с вопросом и историей
+
+        Returns:
+            dict с intent, usage, agents_used, step_number
         """
         question = state.get("question", "")
         chat_history = list(state.get("chat_history", []))
 
         print(f"[Understander] Question: {question[:50]}...")
 
-        # Call LLM with JSON mode
+        # Вызываем LLM
         intent = self._parse_with_llm(question, chat_history)
         print(f"[Understander] Intent type={intent.get('type')}")
 
@@ -75,8 +181,12 @@ class Understander:
             "step_number": state.get("step_number", 0) + 1,
         }
 
+    # =========================================================================
+    # Вспомогательные методы
+    # =========================================================================
+
     def _get_data_info(self) -> str:
-        """Get available data info."""
+        """Получает информацию о доступных данных."""
         data_range = get_data_range("NQ")
         if data_range:
             return (
@@ -87,8 +197,8 @@ class Understander:
         return "Данные: NQ"
 
     def _build_prompt(self, question: str, chat_history: list) -> str:
-        """Build full prompt for LLM using external template."""
-        # Format chat history
+        """Строит полный промпт из шаблона."""
+        # Форматируем историю чата
         history_str = ""
         if chat_history:
             for msg in chat_history[-config.CHAT_HISTORY_LIMIT:]:
@@ -104,7 +214,7 @@ class Understander:
         )
 
     def _parse_with_llm(self, question: str, chat_history: list) -> Intent:
-        """Call LLM with thinking and parse response into Intent."""
+        """Вызывает LLM и парсит ответ в Intent."""
         try:
             prompt = self._build_prompt(question, chat_history)
 
@@ -112,45 +222,22 @@ class Understander:
                 model=self.model,
                 contents=prompt,
                 config=types.GenerateContentConfig(
-                    temperature=0.3,  # Lower for more deterministic detailed_spec
-                    thinking_config=types.ThinkingConfig(include_thoughts=True),
+                    temperature=0.3,  # Низкая для детерминированности
+                    # thinking_config отключен для скорости
+                    # thinking_config=types.ThinkingConfig(include_thoughts=True),
                     response_mime_type="application/json",
-                    response_schema={
-                        "type": "object",
-                        "properties": {
-                            "type": {
-                                "type": "string",
-                                "enum": ["data", "concept", "chitchat", "out_of_scope", "clarification"]
-                            },
-                            "symbol": {"type": "string"},
-                            "period_start": {"type": "string"},
-                            "period_end": {"type": "string"},
-                            "granularity": {
-                                "type": "string",
-                                "enum": ["period", "daily", "weekly", "monthly", "quarterly", "yearly", "hourly", "weekday"]
-                            },
-                            "detailed_spec": {"type": "string"},  # Detailed specification for SQL Agent
-                            "search_condition": {"type": "string"},  # DEPRECATED
-                            "concept": {"type": "string"},
-                            "response_text": {"type": "string"},
-                            "needs_clarification": {"type": "boolean"},
-                            "clarification_question": {"type": "string"},
-                            "suggestions": {
-                                "type": "array",
-                                "items": {"type": "string"}
-                            }
-                        },
-                        "required": ["type"]
-                    }
+                    response_schema=RESPONSE_SCHEMA,
                 )
             )
 
-            # Track usage including thinking tokens
+            # Трекаем использование токенов
             if response.usage_metadata:
                 input_tokens = response.usage_metadata.prompt_token_count or 0
                 output_tokens = response.usage_metadata.candidates_token_count or 0
-                thinking_tokens = getattr(response.usage_metadata, 'thoughts_token_count', 0) or 0
-                cost = calculate_cost(input_tokens, output_tokens, thinking_tokens)
+                thinking_tokens = getattr(
+                    response.usage_metadata, 'thoughts_token_count', 0
+                ) or 0
+                cost = calculate_cost(input_tokens, output_tokens, thinking_tokens, GEMINI_2_5_FLASH_LITE)
                 self._last_usage = UsageStats(
                     input_tokens=input_tokens,
                     output_tokens=output_tokens,
@@ -158,42 +245,64 @@ class Understander:
                     cost_usd=cost
                 )
 
-            # Parse JSON response
+            # Парсим JSON
             data = json.loads(response.text)
             return self._build_intent(data)
 
         except Exception as e:
-            # Fallback to default intent on error
-            print(f"Understander error: {e}")
+            print(f"[Understander] Error: {e}")
             return self._default_intent()
 
     def _build_intent(self, data: dict) -> Intent:
-        """Build Intent from parsed data."""
+        """
+        Строит Intent из распарсенных данных.
+
+        Args:
+            data: JSON от LLM
+
+        Returns:
+            Intent с нужными полями
+        """
         intent_type = data.get("type", "data")
 
         intent: Intent = {
             "type": intent_type,
-            "symbol": data.get("symbol") or DEFAULT_SYMBOL,
+            "symbol": DEFAULT_SYMBOL,
             "suggestions": data.get("suggestions", []),
         }
 
-        # Add type-specific fields
         if intent_type == "data":
-            intent["period_start"] = data.get("period_start")
-            intent["period_end"] = data.get("period_end")
-            intent["granularity"] = data.get("granularity") or DEFAULT_GRANULARITY
-            intent["detailed_spec"] = data.get("detailed_spec")
+            # Извлекаем query_spec
+            query_spec = data.get("query_spec", {})
 
-            # Default period: ALL available data
-            if not intent["period_start"] or not intent["period_end"]:
-                intent["period_start"], intent["period_end"] = self._full_data_range()
+            # Получаем фильтры
+            filters = query_spec.get("filters", {})
+            period_start = filters.get("period_start")
+            period_end = filters.get("period_end")
+
+            # Дефолтный период: "all" или пустое значение → берём из БД
+            if not period_start or period_start == "all" or not period_end or period_end == "all":
+                period_start, period_end = self._full_data_range()
+                if "filters" not in query_spec:
+                    query_spec["filters"] = {}
+                query_spec["filters"]["period_start"] = period_start
+                query_spec["filters"]["period_end"] = period_end
+
+            # Добавляем query_spec в intent
+            intent["query_spec"] = query_spec
+
+            # Для совместимости добавляем period_start/end на верхний уровень
+            intent["period_start"] = period_start
+            intent["period_end"] = period_end
 
         elif intent_type == "concept":
             intent["concept"] = data.get("concept", "")
 
         elif intent_type == "clarification":
-            # Clarification needed - return question and suggestions
-            intent["response_text"] = data.get("clarification_question", "Уточните ваш запрос")
+            intent["response_text"] = data.get(
+                "clarification_question",
+                "Уточните ваш запрос"
+            )
 
         elif intent_type in ("chitchat", "out_of_scope"):
             intent["response_text"] = data.get("response_text", "")
@@ -201,21 +310,168 @@ class Understander:
         return intent
 
     def _default_intent(self) -> Intent:
-        """Return default intent for fallback."""
+        """Возвращает дефолтный intent при ошибке."""
         start, end = self._full_data_range()
-        return Intent(
-            type="data",
-            symbol=DEFAULT_SYMBOL,
-            period_start=start,
-            period_end=end,
-            granularity=DEFAULT_GRANULARITY,
-        )
+        return {
+            "type": "data",
+            "symbol": DEFAULT_SYMBOL,
+            "period_start": start,
+            "period_end": end,
+            "query_spec": {
+                "source": "daily",
+                "filters": {
+                    "period_start": start,
+                    "period_end": end,
+                },
+                "grouping": "total",
+                "metrics": [
+                    {"metric": "count", "alias": "trading_days"},
+                ],
+                "special_op": "none",
+            },
+        }
 
     def _full_data_range(self) -> tuple[str, str]:
-        """Get full available data range (default for all queries)."""
+        """Возвращает полный диапазон доступных данных."""
         data_range = get_data_range("NQ")
         if data_range:
             return data_range['start_date'], data_range['end_date']
-
-        # Fallback - wide range
         return "2008-01-01", datetime.now().strftime("%Y-%m-%d")
+
+
+# =============================================================================
+# Функции для конвертации query_spec в объекты QueryBuilder
+# =============================================================================
+
+def query_spec_to_builder(query_spec: dict) -> "QuerySpec":
+    """
+    Конвертирует JSON query_spec в объект QuerySpec.
+
+    Args:
+        query_spec: JSON dict от Understander
+
+    Returns:
+        QuerySpec объект для QueryBuilder
+    """
+    from agent.query_builder import (
+        QuerySpec,
+        Source,
+        Filters,
+        Condition,
+        Grouping,
+        Metric,
+        MetricSpec,
+        SpecialOp,
+        EventTimeSpec,
+        TopNSpec,
+    )
+
+    # Source
+    source_map = {
+        "minutes": Source.MINUTES,
+        "daily": Source.DAILY,
+        "daily_with_prev": Source.DAILY_WITH_PREV,
+    }
+    source = source_map.get(query_spec.get("source", "daily"), Source.DAILY)
+
+    # Filters
+    filters_data = query_spec.get("filters", {})
+    conditions = []
+    for cond in filters_data.get("conditions", []):
+        conditions.append(Condition(
+            column=cond.get("column", ""),
+            operator=cond.get("operator", ">"),
+            value=cond.get("value", 0),
+        ))
+
+    filters = Filters(
+        period_start=filters_data.get("period_start", "2020-01-01"),
+        period_end=filters_data.get("period_end", "2025-01-01"),
+        session=filters_data.get("session"),
+        conditions=conditions,
+    )
+
+    # Grouping
+    grouping_map = {
+        "none": Grouping.NONE,
+        "total": Grouping.TOTAL,
+        "5min": Grouping.MINUTE_5,
+        "10min": Grouping.MINUTE_10,
+        "15min": Grouping.MINUTE_15,
+        "30min": Grouping.MINUTE_30,
+        "hour": Grouping.HOUR,
+        "day": Grouping.DAY,
+        "week": Grouping.WEEK,
+        "month": Grouping.MONTH,
+        "quarter": Grouping.QUARTER,
+        "year": Grouping.YEAR,
+        "weekday": Grouping.WEEKDAY,
+        "session": Grouping.SESSION,
+    }
+    grouping = grouping_map.get(query_spec.get("grouping", "none"), Grouping.NONE)
+
+    # Metrics
+    metric_map = {
+        "open": Metric.OPEN,
+        "high": Metric.HIGH,
+        "low": Metric.LOW,
+        "close": Metric.CLOSE,
+        "volume": Metric.VOLUME,
+        "range": Metric.RANGE,
+        "change_pct": Metric.CHANGE_PCT,
+        "gap_pct": Metric.GAP_PCT,
+        "count": Metric.COUNT,
+        "avg": Metric.AVG,
+        "sum": Metric.SUM,
+        "min": Metric.MIN,
+        "max": Metric.MAX,
+        "stddev": Metric.STDDEV,
+        "median": Metric.MEDIAN,
+    }
+    metrics = []
+    for m in query_spec.get("metrics", []):
+        metric_type = metric_map.get(m.get("metric", "count"), Metric.COUNT)
+        metrics.append(MetricSpec(
+            metric=metric_type,
+            column=m.get("column"),
+            alias=m.get("alias"),
+        ))
+
+    # Special Op
+    special_op_map = {
+        "none": SpecialOp.NONE,
+        "event_time": SpecialOp.EVENT_TIME,
+        "top_n": SpecialOp.TOP_N,
+        "compare": SpecialOp.COMPARE,
+    }
+    special_op = special_op_map.get(
+        query_spec.get("special_op", "none"),
+        SpecialOp.NONE
+    )
+
+    # Event Time Spec
+    event_time_spec = None
+    if special_op == SpecialOp.EVENT_TIME:
+        ets = query_spec.get("event_time_spec", {})
+        event_time_spec = EventTimeSpec(find=ets.get("find", "high"))
+
+    # Top N Spec
+    top_n_spec = None
+    if special_op == SpecialOp.TOP_N:
+        tns = query_spec.get("top_n_spec", {})
+        top_n_spec = TopNSpec(
+            n=tns.get("n", 10),
+            order_by=tns.get("order_by", "range"),
+            direction=tns.get("direction", "DESC"),
+        )
+
+    return QuerySpec(
+        symbol="NQ",  # TODO: брать из query_spec когда добавим другие символы
+        source=source,
+        filters=filters,
+        grouping=grouping,
+        metrics=metrics,
+        special_op=special_op,
+        event_time_spec=event_time_spec,
+        top_n_spec=top_n_spec,
+    )

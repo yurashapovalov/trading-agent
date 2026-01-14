@@ -1,0 +1,534 @@
+[
+  {
+    "question": "во сколько high дня",
+    "runs": [
+      {
+        "run_id": 1,
+        "question": "во сколько high дня",
+        "timestamp": "2026-01-14T19:42:03.680820",
+        "steps": [
+          {
+            "agent": "understander",
+            "status": "completed",
+            "start_time": 1768412524.7502909,
+            "duration_ms": 1069,
+            "result": {
+              "type": "data",
+              "symbol": "NQ",
+              "source": "minutes",
+              "grouping": "hour",
+              "special_op": "event_time"
+            },
+            "output": {
+              "intent": {
+                "type": "data",
+                "symbol": "NQ",
+                "suggestions": [],
+                "query_spec": {
+                  "source": "minutes",
+                  "filters": {
+                    "period_start": "2008-01-02",
+                    "period_end": "2026-01-07"
+                  },
+                  "grouping": "hour",
+                  "metrics": [],
+                  "special_op": "event_time",
+                  "event_time_spec": {
+                    "find": "high"
+                  }
+                },
+                "period_start": "2008-01-02",
+                "period_end": "2026-01-07"
+              },
+              "usage": {
+                "input_tokens": 5357,
+                "output_tokens": 107,
+                "thinking_tokens": 0,
+                "cost_usd": 0.0005785
+              }
+            }
+          },
+          {
+            "agent": "query_builder",
+            "status": "completed",
+            "start_time": 1768412524.7509818,
+            "duration_ms": 0,
+            "result": {
+              "sql_generated": true,
+              "error": null
+            },
+            "output": {
+              "sql_query": "WITH filtered_data AS (\n    -- Минутные данные с фильтрами\n    SELECT\n        timestamp,\n        timestamp::date as date,\n        high,\n        low\n    FROM ohlcv_1min\n    WHERE symbol = 'NQ'\n      AND timestamp >= '2008-01-02'\n      AND timestamp < '2026-01-07'\n      \n),\ndaily_extremes AS (\n    -- Для каждого дня находим момент экстремума\n    SELECT\n        date,\n        FIRST(timestamp ORDER BY high DESC, timestamp ASC) as event_ts\n    FROM filtered_data\n    GROUP BY date\n),\ndistribution AS (\n    -- Группируем по временным интервалам\n    SELECT\n        STRFTIME(TIME_BUCKET(INTERVAL '1 hour', event_ts), '%H:%M') as time_bucket,\n        COUNT(*) as frequency\n    FROM daily_extremes\n    GROUP BY time_bucket\n)\nSELECT\n    time_bucket,\n    frequency,\n    ROUND(frequency * 100.0 / SUM(frequency) OVER (), 2) as percentage\nFROM distribution\nORDER BY time_bucket"
+            }
+          },
+          {
+            "agent": "data_fetcher",
+            "status": "completed",
+            "start_time": 1768412524.807817,
+            "duration_ms": 56,
+            "result": {
+              "rows": 24,
+              "granularity": "distribution"
+            },
+            "output": {
+              "rows": [
+                {
+                  "time_bucket": "00:00",
+                  "frequency": 203,
+                  "percentage": 3.62
+                },
+                {
+                  "time_bucket": "01:00",
+                  "frequency": 107,
+                  "percentage": 1.91
+                },
+                {
+                  "time_bucket": "02:00",
+                  "frequency": 147,
+                  "percentage": 2.62
+                },
+                {
+                  "time_bucket": "03:00",
+                  "frequency": 232,
+                  "percentage": 4.14
+                },
+                {
+                  "time_bucket": "04:00",
+                  "frequency": 122,
+                  "percentage": 2.18
+                },
+                {
+                  "time_bucket": "05:00",
+                  "frequency": 109,
+                  "percentage": 1.95
+                },
+                {
+                  "time_bucket": "06:00",
+                  "frequency": 75,
+                  "percentage": 1.34
+                },
+                {
+                  "time_bucket": "07:00",
+                  "frequency": 106,
+                  "percentage": 1.89
+                },
+                {
+                  "time_bucket": "08:00",
+                  "frequency": 190,
+                  "percentage": 3.39
+                },
+                {
+                  "time_bucket": "09:00",
+                  "frequency": 487,
+                  "percentage": 8.69
+                },
+                {
+                  "time_bucket": "10:00",
+                  "frequency": 439,
+                  "percentage": 7.84
+                },
+                {
+                  "time_bucket": "11:00",
+                  "frequency": 255,
+                  "percentage": 4.55
+                },
+                {
+                  "time_bucket": "12:00",
+                  "frequency": 196,
+                  "percentage": 3.5
+                },
+                {
+                  "time_bucket": "13:00",
+                  "frequency": 207,
+                  "percentage": 3.7
+                },
+                {
+                  "time_bucket": "14:00",
+                  "frequency": 274,
+                  "percentage": 4.89
+                },
+                {
+                  "time_bucket": "15:00",
+                  "frequency": 445,
+                  "percentage": 7.95
+                },
+                {
+                  "time_bucket": "16:00",
+                  "frequency": 308,
+                  "percentage": 5.5
+                },
+                {
+                  "time_bucket": "17:00",
+                  "frequency": 42,
+                  "percentage": 0.75
+                },
+                {
+                  "time_bucket": "18:00",
+                  "frequency": 515,
+                  "percentage": 9.19
+                },
+                {
+                  "time_bucket": "19:00",
+                  "frequency": 155,
+                  "percentage": 2.77
+                },
+                {
+                  "time_bucket": "20:00",
+                  "frequency": 202,
+                  "percentage": 3.61
+                },
+                {
+                  "time_bucket": "21:00",
+                  "frequency": 234,
+                  "percentage": 4.18
+                },
+                {
+                  "time_bucket": "22:00",
+                  "frequency": 228,
+                  "percentage": 4.07
+                },
+                {
+                  "time_bucket": "23:00",
+                  "frequency": 323,
+                  "percentage": 5.77
+                }
+              ],
+              "row_count": 24,
+              "granularity": "distribution",
+              "columns": [
+                "time_bucket",
+                "frequency",
+                "percentage"
+              ],
+              "sql_query": "WITH filtered_data AS (\n    -- Минутные данные с фильтрами\n    SELECT\n        timestamp,\n        timestamp::date as date,\n        high,\n        low\n    FROM ohlcv_1min\n    WHERE symbol = 'NQ'\n      AND timestamp >= '2008-01-02'\n      AND timestamp < '2026-01-07'\n      \n),\ndaily_extremes AS (\n    -- Для каждого дня находим момент экстремума\n    SELECT\n        date,\n        FIRST(timestamp ORDER BY high DESC, timestamp ASC) as event_ts\n    FROM filtered_data\n    GROUP BY date\n),\ndistribution AS (\n    -- Группируем по временным интервалам\n    SELECT\n        STRFTIME(TIME_BUCKET(INTERVAL '1 hour', event_ts), '%H:%M') as time_bucket,\n        COUNT(*) as frequency\n    FROM daily_extremes\n    GROUP BY time_bucket\n)\nSELECT\n    time_bucket,\n    frequency,\n    ROUND(frequency * 100.0 / SUM(frequency) OVER (), 2) as percentage\nFROM distribution\nORDER BY time_bucket",
+              "source": "query_builder"
+            }
+          },
+          {
+            "agent": "analyst",
+            "status": "completed",
+            "start_time": 1768412532.582397,
+            "duration_ms": 7774,
+            "result": {
+              "response_length": 1354,
+              "stats_count": 0
+            },
+            "output": {
+              "response": "На основе анализа данных по инструменту NQ за период с 2008 по 2026 год, максимум дня (high) чаще всего фиксируется в вечернее время и в период открытия американской сессии.\n\n### Основные временные интервалы\nНаибольшая вероятность формирования максимума дня приходится на следующие часы:\n\n| Время (time_bucket) | Частота (frequency) | Доля (%) |\n| :--- | :--- | :--- |\n| **18:00** | **515** | **9.19%** |\n| **09:00** | **487** | **8.69%** |\n| **15:00** | **445** | **7.95%** |\n| **10:00** | **439** | **7.84%** |\n\n### Анализ распределения\n1.  **Пик активности:** Самым вероятным часом для формирования максимума является **18:00** (9.19%).\n2.  **Утренняя активность:** Значительный кластер формируется в период с **09:00 до 11:00** (суммарно более 16%), что соответствует началу активных торгов.\n3.  **Дневной всплеск:** Интервал **15:00–16:00** также демонстрирует высокую частоту (суммарно 13.45%), что часто совпадает с волатильностью во второй половине торгового дня.\n4.  **Минимум:** Реже всего максимум дня устанавливается в **17:00** (всего 0.75% случаев), что может быть связано с технологическими перерывами или снижением ликвидности перед закрытием/открытием сессий.\n\n**Вывод:** Трейдерам стоит обращать особое внимание на экстремумы, формирующиеся в 09:00, 15:00 и 18:00, так как именно в эти периоды статистически чаще всего ставится хай дня.",
+              "stats": {},
+              "usage": {
+                "input_tokens": 2050,
+                "output_tokens": 473,
+                "thinking_tokens": 0,
+                "cost_usd": 0.002444
+              }
+            }
+          },
+          {
+            "agent": "validator",
+            "status": "completed",
+            "start_time": 1768412532.583054,
+            "duration_ms": 0,
+            "result": {
+              "status": "ok"
+            },
+            "output": {
+              "status": "ok",
+              "issues": [],
+              "feedback": ""
+            }
+          }
+        ],
+        "final_response": "На основе анализа данных по инструменту NQ за период с 2008 по 2026 год, максимум дня (high) чаще всего фиксируется в вечернее время и в период открытия американской сессии.\n\n### Основные временные интервалы\nНаибольшая вероятность формирования максимума дня приходится на следующие часы:\n\n| Время (time_bucket) | Частота (frequency) | Доля (%) |\n| :--- | :--- | :--- |\n| **18:00** | **515** | **9.19%** |\n| **09:00** | **487** | **8.69%** |\n| **15:00** | **445** | **7.95%** |\n| **10:00** | **439** | **7.84%** |\n\n### Анализ распределения\n1.  **Пик активности:** Самым вероятным часом для формирования максимума является **18:00** (9.19%).\n2.  **Утренняя активность:** Значительный кластер формируется в период с **09:00 до 11:00** (суммарно более 16%), что соответствует началу активных торгов.\n3.  **Дневной всплеск:** Интервал **15:00–16:00** также демонстрирует высокую частоту (суммарно 13.45%), что часто совпадает с волатильностью во второй половине торгового дня.\n4.  **Минимум:** Реже всего максимум дня устанавливается в **17:00** (всего 0.75% случаев), что может быть связано с технологическими перерывами или снижением ликвидности перед закрытием/открытием сессий.\n\n**Вывод:** Трейдерам стоит обращать особое внимание на экстремумы, формирующиеся в 09:00, 15:00 и 18:00, так как именно в эти периоды статистически чаще всего ставится хай дня.",
+        "error": null,
+        "usage": {
+          "input_tokens": 7407,
+          "output_tokens": 580,
+          "thinking_tokens": 0,
+          "cost": 0.0030225
+        },
+        "total_duration_ms": 8903,
+        "wall_time_ms": 8903
+      },
+      {
+        "run_id": 2,
+        "question": "во сколько high дня",
+        "timestamp": "2026-01-14T19:42:12.584834",
+        "steps": [
+          {
+            "agent": "understander",
+            "status": "completed",
+            "start_time": 1768412533.6821601,
+            "duration_ms": 1097,
+            "result": {
+              "type": "data",
+              "symbol": "NQ",
+              "source": "minutes",
+              "grouping": "hour",
+              "special_op": "event_time"
+            },
+            "output": {
+              "intent": {
+                "type": "data",
+                "symbol": "NQ",
+                "suggestions": [],
+                "query_spec": {
+                  "source": "minutes",
+                  "filters": {
+                    "period_start": "2008-01-02",
+                    "period_end": "2026-01-07"
+                  },
+                  "grouping": "hour",
+                  "metrics": [],
+                  "special_op": "event_time",
+                  "event_time_spec": {
+                    "find": "high"
+                  }
+                },
+                "period_start": "2008-01-02",
+                "period_end": "2026-01-07"
+              },
+              "usage": {
+                "input_tokens": 5357,
+                "output_tokens": 107,
+                "thinking_tokens": 0,
+                "cost_usd": 0.0005785
+              }
+            }
+          },
+          {
+            "agent": "query_builder",
+            "status": "completed",
+            "start_time": 1768412533.682847,
+            "duration_ms": 0,
+            "result": {
+              "sql_generated": true,
+              "error": null
+            },
+            "output": {
+              "sql_query": "WITH filtered_data AS (\n    -- Минутные данные с фильтрами\n    SELECT\n        timestamp,\n        timestamp::date as date,\n        high,\n        low\n    FROM ohlcv_1min\n    WHERE symbol = 'NQ'\n      AND timestamp >= '2008-01-02'\n      AND timestamp < '2026-01-07'\n      \n),\ndaily_extremes AS (\n    -- Для каждого дня находим момент экстремума\n    SELECT\n        date,\n        FIRST(timestamp ORDER BY high DESC, timestamp ASC) as event_ts\n    FROM filtered_data\n    GROUP BY date\n),\ndistribution AS (\n    -- Группируем по временным интервалам\n    SELECT\n        STRFTIME(TIME_BUCKET(INTERVAL '1 hour', event_ts), '%H:%M') as time_bucket,\n        COUNT(*) as frequency\n    FROM daily_extremes\n    GROUP BY time_bucket\n)\nSELECT\n    time_bucket,\n    frequency,\n    ROUND(frequency * 100.0 / SUM(frequency) OVER (), 2) as percentage\nFROM distribution\nORDER BY time_bucket"
+            }
+          },
+          {
+            "agent": "data_fetcher",
+            "status": "completed",
+            "start_time": 1768412533.731903,
+            "duration_ms": 49,
+            "result": {
+              "rows": 24,
+              "granularity": "distribution"
+            },
+            "output": {
+              "rows": [
+                {
+                  "time_bucket": "00:00",
+                  "frequency": 203,
+                  "percentage": 3.62
+                },
+                {
+                  "time_bucket": "01:00",
+                  "frequency": 107,
+                  "percentage": 1.91
+                },
+                {
+                  "time_bucket": "02:00",
+                  "frequency": 147,
+                  "percentage": 2.62
+                },
+                {
+                  "time_bucket": "03:00",
+                  "frequency": 232,
+                  "percentage": 4.14
+                },
+                {
+                  "time_bucket": "04:00",
+                  "frequency": 122,
+                  "percentage": 2.18
+                },
+                {
+                  "time_bucket": "05:00",
+                  "frequency": 109,
+                  "percentage": 1.95
+                },
+                {
+                  "time_bucket": "06:00",
+                  "frequency": 75,
+                  "percentage": 1.34
+                },
+                {
+                  "time_bucket": "07:00",
+                  "frequency": 106,
+                  "percentage": 1.89
+                },
+                {
+                  "time_bucket": "08:00",
+                  "frequency": 190,
+                  "percentage": 3.39
+                },
+                {
+                  "time_bucket": "09:00",
+                  "frequency": 487,
+                  "percentage": 8.69
+                },
+                {
+                  "time_bucket": "10:00",
+                  "frequency": 439,
+                  "percentage": 7.84
+                },
+                {
+                  "time_bucket": "11:00",
+                  "frequency": 255,
+                  "percentage": 4.55
+                },
+                {
+                  "time_bucket": "12:00",
+                  "frequency": 196,
+                  "percentage": 3.5
+                },
+                {
+                  "time_bucket": "13:00",
+                  "frequency": 207,
+                  "percentage": 3.7
+                },
+                {
+                  "time_bucket": "14:00",
+                  "frequency": 274,
+                  "percentage": 4.89
+                },
+                {
+                  "time_bucket": "15:00",
+                  "frequency": 445,
+                  "percentage": 7.95
+                },
+                {
+                  "time_bucket": "16:00",
+                  "frequency": 308,
+                  "percentage": 5.5
+                },
+                {
+                  "time_bucket": "17:00",
+                  "frequency": 42,
+                  "percentage": 0.75
+                },
+                {
+                  "time_bucket": "18:00",
+                  "frequency": 515,
+                  "percentage": 9.19
+                },
+                {
+                  "time_bucket": "19:00",
+                  "frequency": 155,
+                  "percentage": 2.77
+                },
+                {
+                  "time_bucket": "20:00",
+                  "frequency": 202,
+                  "percentage": 3.61
+                },
+                {
+                  "time_bucket": "21:00",
+                  "frequency": 234,
+                  "percentage": 4.18
+                },
+                {
+                  "time_bucket": "22:00",
+                  "frequency": 228,
+                  "percentage": 4.07
+                },
+                {
+                  "time_bucket": "23:00",
+                  "frequency": 323,
+                  "percentage": 5.77
+                }
+              ],
+              "row_count": 24,
+              "granularity": "distribution",
+              "columns": [
+                "time_bucket",
+                "frequency",
+                "percentage"
+              ],
+              "sql_query": "WITH filtered_data AS (\n    -- Минутные данные с фильтрами\n    SELECT\n        timestamp,\n        timestamp::date as date,\n        high,\n        low\n    FROM ohlcv_1min\n    WHERE symbol = 'NQ'\n      AND timestamp >= '2008-01-02'\n      AND timestamp < '2026-01-07'\n      \n),\ndaily_extremes AS (\n    -- Для каждого дня находим момент экстремума\n    SELECT\n        date,\n        FIRST(timestamp ORDER BY high DESC, timestamp ASC) as event_ts\n    FROM filtered_data\n    GROUP BY date\n),\ndistribution AS (\n    -- Группируем по временным интервалам\n    SELECT\n        STRFTIME(TIME_BUCKET(INTERVAL '1 hour', event_ts), '%H:%M') as time_bucket,\n        COUNT(*) as frequency\n    FROM daily_extremes\n    GROUP BY time_bucket\n)\nSELECT\n    time_bucket,\n    frequency,\n    ROUND(frequency * 100.0 / SUM(frequency) OVER (), 2) as percentage\nFROM distribution\nORDER BY time_bucket",
+              "source": "query_builder"
+            }
+          },
+          {
+            "agent": "analyst",
+            "status": "completed",
+            "start_time": 1768412540.969867,
+            "duration_ms": 7237,
+            "result": {
+              "response_length": 1213,
+              "stats_count": 0
+            },
+            "output": {
+              "response": "На основе анализа данных по инструменту NQ (Nasdaq-100) за период с 2008 по 2026 годы, распределение максимумов дня (high) по часовым интервалам выглядит следующим образом:\n\n### Основные временные интервалы формирования максимума\n\n| Время (интервал) | Частота (дней) | Процент |\n| :--- | :--- | :--- |\n| **18:00** | **515** | **9.19%** |\n| **09:00** | 487 | 8.69% |\n| **15:00** | 445 | 7.95% |\n| **10:00** | 439 | 7.84% |\n| **23:00** | 323 | 5.77% |\n\n### Аналитические выводы:\n\n1.  **Пиковая активность:** Чаще всего максимум дня формируется в **18:00** (9.19% случаев). Это наиболее вероятное время установления дневного экстремума.\n2.  **Утренний и дневной кластеры:** Значительная вероятность формирования максимума наблюдается в период открытия европейской сессии и начала американской пре-сессии (**09:00–10:00** — суммарно 16.53%), а также в **15:00** (7.95%), что соответствует активной фазе торгов в США.\n3.  **Минимум вероятности:** Реже всего максимум дня устанавливается в **17:00** (всего 0.75% случаев) и в период с **06:00 до 07:00** (суммарно около 3.2%).\n\nТаким образом, если high дня не был сформирован в утренние часы (09:00-10:00), наиболее вероятно его обновление или установление в **18:00**.",
+              "stats": {},
+              "usage": {
+                "input_tokens": 2050,
+                "output_tokens": 459,
+                "thinking_tokens": 0,
+                "cost_usd": 0.002402
+              }
+            }
+          },
+          {
+            "agent": "validator",
+            "status": "completed",
+            "start_time": 1768412540.970594,
+            "duration_ms": 0,
+            "result": {
+              "status": "ok"
+            },
+            "output": {
+              "status": "ok",
+              "issues": [],
+              "feedback": ""
+            }
+          }
+        ],
+        "final_response": "На основе анализа данных по инструменту NQ (Nasdaq-100) за период с 2008 по 2026 годы, распределение максимумов дня (high) по часовым интервалам выглядит следующим образом:\n\n### Основные временные интервалы формирования максимума\n\n| Время (интервал) | Частота (дней) | Процент |\n| :--- | :--- | :--- |\n| **18:00** | **515** | **9.19%** |\n| **09:00** | 487 | 8.69% |\n| **15:00** | 445 | 7.95% |\n| **10:00** | 439 | 7.84% |\n| **23:00** | 323 | 5.77% |\n\n### Аналитические выводы:\n\n1.  **Пиковая активность:** Чаще всего максимум дня формируется в **18:00** (9.19% случаев). Это наиболее вероятное время установления дневного экстремума.\n2.  **Утренний и дневной кластеры:** Значительная вероятность формирования максимума наблюдается в период открытия европейской сессии и начала американской пре-сессии (**09:00–10:00** — суммарно 16.53%), а также в **15:00** (7.95%), что соответствует активной фазе торгов в США.\n3.  **Минимум вероятности:** Реже всего максимум дня устанавливается в **17:00** (всего 0.75% случаев) и в период с **06:00 до 07:00** (суммарно около 3.2%).\n\nТаким образом, если high дня не был сформирован в утренние часы (09:00-10:00), наиболее вероятно его обновление или установление в **18:00**.",
+        "error": null,
+        "usage": {
+          "input_tokens": 7407,
+          "output_tokens": 566,
+          "thinking_tokens": 0,
+          "cost": 0.0029805
+        },
+        "total_duration_ms": 8387,
+        "wall_time_ms": 8388
+      }
+    ],
+    "comparison": {
+      "num_runs": 2,
+      "query_spec_identical": true,
+      "sql_identical": true,
+      "data_identical": true,
+      "all_identical": true,
+      "query_specs": [
+        "{\"event_time_spec\": {\"find\": \"high\"}, \"filters\": {\"period_end\": \"2026-01-07\", \"period_start\": \"2008-01-02\"}, \"grouping\": \"hour\", \"metrics\": [], \"source\": \"minutes\", \"special_op\": \"event_time\"}",
+        "{\"event_time_spec\": {\"find\": \"high\"}, \"filters\": {\"period_end\": \"2026-01-07\", \"period_start\": \"2008-01-02\"}, \"grouping\": \"hour\", \"metrics\": [], \"source\": \"minutes\", \"special_op\": \"event_time\"}"
+      ],
+      "sqls": [
+        "WITH filtered_data AS (\n    -- Минутные данные с фильтрами\n    SELECT\n        timestamp,\n        timestamp::date as date,\n        high,\n        low\n    FROM ohlcv_1min\n    WHERE symbol = 'NQ'\n      AND timestamp >= '2008-01-02'\n      AND timestamp < '2026-01-07'\n      \n),\ndaily_extremes AS (\n    -- Для каждого дня находим момент экстремума\n    SELECT\n        date,\n        FIRST(timestamp ORDER BY high DESC, timestamp ASC) as event_ts\n    FROM filtered_data\n    GROUP BY date\n),\ndistribution AS (\n    -- Группируем по временным интервалам\n    SELECT\n        STRFTIME(TIME_BUCKET(INTERVAL '1 hour', event_ts), '%H:%M') as time_bucket,\n        COUNT(*) as frequency\n    FROM daily_extremes\n    GROUP BY time_bucket\n)\nSELECT\n    time_bucket,\n    frequency,\n    ROUND(frequency * 100.0 / SUM(frequency) OVER (), 2) as percentage\nFROM distribution\nORDER BY time_bucket",
+        "WITH filtered_data AS (\n    -- Минутные данные с фильтрами\n    SELECT\n        timestamp,\n        timestamp::date as date,\n        high,\n        low\n    FROM ohlcv_1min\n    WHERE symbol = 'NQ'\n      AND timestamp >= '2008-01-02'\n      AND timestamp < '2026-01-07'\n      \n),\ndaily_extremes AS (\n    -- Для каждого дня находим момент экстремума\n    SELECT\n        date,\n        FIRST(timestamp ORDER BY high DESC, timestamp ASC) as event_ts\n    FROM filtered_data\n    GROUP BY date\n),\ndistribution AS (\n    -- Группируем по временным интервалам\n    SELECT\n        STRFTIME(TIME_BUCKET(INTERVAL '1 hour', event_ts), '%H:%M') as time_bucket,\n        COUNT(*) as frequency\n    FROM daily_extremes\n    GROUP BY time_bucket\n)\nSELECT\n    time_bucket,\n    frequency,\n    ROUND(frequency * 100.0 / SUM(frequency) OVER (), 2) as percentage\nFROM distribution\nORDER BY time_bucket"
+      ],
+      "row_counts": [
+        24,
+        24
+      ],
+      "data_hashes": [
+        "9d39669909ce",
+        "9d39669909ce"
+      ],
+      "durations": [
+        8903,
+        8387
+      ],
+      "costs": [
+        0.0030225,
+        0.0029805
+      ]
+    }
+  }
+]

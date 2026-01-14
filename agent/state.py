@@ -38,23 +38,22 @@ class Intent(TypedDict, total=False):
     """
     Structured intent parsed by Understander.
 
-    LLM parses user question into this structure.
-    DataFetcher uses this to decide what data to fetch.
+    Understander parses user question into query_spec (building blocks).
+    QueryBuilder converts query_spec to SQL.
+    DataFetcher executes SQL and returns data.
     """
     # Type of request
-    type: Literal["data", "concept", "chitchat", "out_of_scope"]
+    type: Literal["data", "concept", "chitchat", "out_of_scope", "clarification"]
 
-    # Data parameters (for type="data")
+    # Symbol (for type="data")
     symbol: str | None            # "NQ", "ES", etc.
+
+    # Query specification - building blocks for QueryBuilder
+    query_spec: dict | None       # {source, filters, grouping, metrics, special_op, ...}
+
+    # Period (extracted from query_spec for convenience)
     period_start: str | None      # ISO date "2025-01-01"
     period_end: str | None        # ISO date "2025-01-31"
-    granularity: Literal["period", "daily", "weekly", "monthly", "quarterly", "yearly", "hourly", "weekday"] | None
-
-    # For complex queries - detailed specification for SQL Agent
-    detailed_spec: str | None     # Markdown spec with Task, Logic, SQL Hints, etc.
-
-    # DEPRECATED - use detailed_spec instead
-    search_condition: str | None
 
     # For strategy/backtest requests (future)
     strategy: StrategyDef | None
@@ -62,13 +61,11 @@ class Intent(TypedDict, total=False):
     # For concept requests (type="concept")
     concept: str | None           # "RSI", "MACD", "support/resistance"
 
-    # For chitchat/out_of_scope (type="chitchat" or "out_of_scope")
-    response_text: str | None     # Direct response from Understander (no data needed)
+    # For chitchat/out_of_scope/clarification
+    response_text: str | None     # Direct response from Understander
 
-    # Clarification
-    needs_clarification: bool
-    clarification_question: str | None
-    suggestions: list[str]        # Suggested answers for clarification
+    # Suggestions for follow-up questions
+    suggestions: list[str]
 
 
 # =============================================================================
@@ -127,11 +124,7 @@ class ValidationResult(TypedDict, total=False):
     feedback: str
 
 
-class SQLValidation(TypedDict, total=False):
-    """Result from SQL Validator agent."""
-    status: Literal["ok", "rewrite"]
-    issues: list[str]
-    feedback: str
+# SQLValidation removed - no longer using SQL Validator
 
 
 class UsageStats(TypedDict, total=False):
@@ -157,13 +150,11 @@ class AgentState(TypedDict, total=False):
     question: str
     chat_history: list[dict]      # Previous messages for context
 
-    # Understander output (replaces route)
+    # Understander output
     intent: Intent | None
-    clarification_attempts: int
 
-    # SQL Agent output
-    sql_query: str | None         # Generated SQL from SQL Agent
-    sql_validation: SQLValidation | None  # Validation result from SQL Validator
+    # QueryBuilder output
+    sql_query: str | None         # Generated SQL from QueryBuilder (deterministic)
 
     # DataFetcher output
     sql_queries: list[SQLResult]  # Keep for logging
@@ -210,10 +201,8 @@ def create_initial_state(
         chat_history=chat_history or [],
         # Understander
         intent=None,
-        clarification_attempts=0,
-        # SQL Agent
+        # QueryBuilder
         sql_query=None,
-        sql_validation=None,
         # DataFetcher
         sql_queries=[],
         data={},

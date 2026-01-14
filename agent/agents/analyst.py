@@ -83,7 +83,6 @@ class Analyst:
                 question=question,
                 data=data,
                 chat_history=chat_history,
-                search_condition=intent.get("search_condition"),
             )
             return self._generate_with_streaming(prompt, writer, state)
         else:
@@ -95,7 +94,6 @@ class Analyst:
                 previous_response=previous_response,
                 issues=issues,
                 chat_history=chat_history,
-                search_condition=intent.get("search_condition"),
             )
             return self._generate_batch(prompt, state)
 
@@ -211,7 +209,6 @@ class Analyst:
             intent_type=intent_type,
             previous_response=previous_response,
             issues=issues,
-            search_condition=intent.get("search_condition"),
         )
 
         full_text = ""

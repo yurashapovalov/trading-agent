@@ -25,18 +25,16 @@ import {
 import { Loader } from "@/components/ai/loader"
 
 import type { AgentStep, ChatMessage } from "@/types/chat"
-import { DatabaseIcon, BrainIcon, CheckCircleIcon, RouteIcon, MessageCircleIcon } from "lucide-react"
+import { DatabaseIcon, BrainIcon, CheckCircleIcon, RouteIcon, MessageCircleIcon, CodeIcon } from "lucide-react"
 
 // Map agent names to icons
 const agentIcons: Record<string, any> = {
   understander: RouteIcon,
+  query_builder: CodeIcon,
   responder: MessageCircleIcon,
   data_fetcher: DatabaseIcon,
   analyst: BrainIcon,
   validator: CheckCircleIcon,
-  router: RouteIcon,
-  data_agent: DatabaseIcon,
-  educator: BrainIcon,
 }
 
 function getStepDescription(step: AgentStep): string | undefined {
@@ -52,6 +50,9 @@ function getStepDescription(step: AgentStep): string | undefined {
       const symbol = step.result.symbol as string
       if (type) parts.push(`→ ${type}`)
       if (symbol) parts.push(symbol)
+    } else if (step.agent === "query_builder") {
+      const sqlGenerated = step.result.sql_generated as boolean
+      if (sqlGenerated) parts.push("SQL ✓")
     } else if (step.agent === "data_fetcher") {
       const rows = step.result.rows as number
       if (rows !== undefined) parts.push(`${rows} rows`)

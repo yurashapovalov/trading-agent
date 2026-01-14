@@ -1,21 +1,18 @@
 """
-LangGraph definition for multi-agent trading system v2.
+LangGraph v2 — с QueryBuilder вместо SQL Agent.
 
-Flow:
+Упрощённый flow:
                     ┌─ chitchat/out_of_scope/clarification ─► Responder ──► END
                     │
-Question ─► Understander ─┼────────────────────────────────────────────────────────────┐
-                    │                            ┌──────────────────────────────────────┤
-                    │                            │ (rewrite loop)                       │
-                    └─ data ─► SQL Agent ─► SQL Validator ─► DataFetcher ─► Analyst ─► Validator ─► END
-                                   ↑_______________|                           ↑____________| (rewrite loop)
+Question ─► Understander ─┤
+                    │
+                    └─ data ─► QueryBuilder ─► DataFetcher ─► Analyst ─► Validator ─► END
 
-Clarification:
-- When Understander needs clarification, it returns type="clarification" with response_text
-- Responder outputs the question, user responds via normal chat
-- On next message, Understander sees full chat history and understands context
-
-Note: SQL Agent runs if detailed_spec exists in Intent.
+Преимущества:
+- Нет SQL Agent (LLM для генерации SQL)
+- Нет SQL Validator + retry loop
+- QueryBuilder генерирует SQL детерминированно
+- Быстрее и надёжнее
 """
 
 from typing import Literal
@@ -23,19 +20,20 @@ from langgraph.graph import StateGraph, START, END
 from langgraph.types import Command
 
 from agent.state import AgentState, create_initial_state
-from agent.agents.understander import Understander
-from agent.agents.sql_agent import SQLAgent
-from agent.agents.sql_validator import SQLValidator
+from agent.agents.understander import Understander, query_spec_to_builder
 from agent.agents.data_fetcher import DataFetcher
 from agent.agents.analyst import Analyst
 from agent.agents.validator import Validator
+from agent.query_builder import QueryBuilder
 from agent.checkpointer import get_checkpointer
 
 
+# =============================================================================
 # Initialize agents (singletons)
+# =============================================================================
+
 understander = Understander()
-sql_agent = SQLAgent()
-sql_validator = SQLValidator()
+query_builder = QueryBuilder()
 data_fetcher = DataFetcher()
 analyst = Analyst()
 validator = Validator()
@@ -47,65 +45,95 @@ validator = Validator()
 
 def understand_question(state: AgentState) -> Command:
     """
-    Understander node - parses question into Intent and routes to next node.
-    Uses Command API to combine state update with routing decision.
+    Understander node — парсит вопрос и возвращает query_spec.
+
+    Routing:
+    - chitchat/out_of_scope/concept/clarification → responder
+    - data с query_spec → query_builder
+    - data без query_spec → data_fetcher (простые запросы)
     """
     result = understander(state)
     intent = result.get("intent") or {}
     intent_type = intent.get("type", "data")
 
-    # Determine next node based on intent type
+    # Определяем следующий node
     if intent_type in ("chitchat", "out_of_scope", "concept", "clarification"):
         next_node = "responder"
-    elif intent.get("detailed_spec"):
-        next_node = "sql_agent"
+    elif intent.get("query_spec"):
+        next_node = "query_builder"
     else:
+        # Простой запрос без query_spec — сразу в data_fetcher
         next_node = "data_fetcher"
 
     return Command(update=result, goto=next_node)
 
 
-def generate_sql(state: AgentState) -> dict:
-    """SQL Agent node - generates SQL from detailed_spec or search_condition."""
-    return sql_agent(state)
+def build_query(state: AgentState) -> dict:
+    """
+    QueryBuilder node — строит SQL из query_spec.
 
+    Детерминированно, без LLM, всегда валидный SQL.
+    """
+    intent = state.get("intent") or {}
+    query_spec_dict = intent.get("query_spec", {})
 
-def validate_sql(state: AgentState) -> dict:
-    """SQL Validator node - validates SQL before execution."""
-    return sql_validator(state)
+    try:
+        # Конвертируем JSON в объект QuerySpec
+        query_spec = query_spec_to_builder(query_spec_dict)
+
+        # Строим SQL
+        sql = query_builder.build(query_spec)
+
+        return {
+            "sql_query": sql,
+            "agents_used": ["query_builder"],
+            "step_number": state.get("step_number", 0) + 1,
+        }
+
+    except Exception as e:
+        print(f"[QueryBuilder] Error: {e}")
+        # Fallback — пустой SQL, data_fetcher использует дефолтный
+        return {
+            "sql_query": None,
+            "query_builder_error": str(e),
+            "agents_used": ["query_builder"],
+            "step_number": state.get("step_number", 0) + 1,
+        }
 
 
 def fetch_data(state: AgentState) -> dict:
-    """DataFetcher node - fetches data based on Intent."""
+    """DataFetcher node — получает данные."""
     return data_fetcher(state)
 
 
 def analyze_data(state: AgentState) -> dict:
-    """Analyst node - interprets data and writes response."""
+    """Analyst node — интерпретирует данные и пишет ответ."""
     return analyst(state)
 
 
 def validate_response(state: AgentState) -> dict:
-    """Validator node - checks stats against data."""
+    """Validator node — проверяет корректность статистики."""
     return validator(state)
 
 
 def simple_respond(state: AgentState) -> dict:
     """
-    Responder node - returns response for chitchat/out_of_scope/concept/clarification.
-    No data fetching or analysis needed.
+    Responder node — для chitchat/out_of_scope/concept/clarification.
+    Без данных, просто возвращает response_text.
     """
     intent = state.get("intent") or {}
 
-    # Return response from intent
-    response_text = intent.get("response_text", "Чем могу помочь с анализом торговых данных?")
+    response_text = intent.get(
+        "response_text",
+        "Чем могу помочь с анализом торговых данных?"
+    )
 
     result = {
         "response": response_text,
         "agents_used": ["responder"],
     }
 
-    # Include suggestions for clarification (frontend shows as quick-reply buttons)
+    # Suggestions для clarification (кнопки в UI)
     if intent.get("suggestions"):
         result["suggestions"] = intent.get("suggestions")
 
@@ -116,37 +144,19 @@ def simple_respond(state: AgentState) -> dict:
 # Conditional Edges
 # =============================================================================
 
-# Note: after_understander removed - routing now in understand_question via Command API
-
-def after_sql_validation(state: AgentState) -> Literal["data_fetcher", "sql_agent"]:
-    """Route based on SQL validation result."""
-    sql_validation = state.get("sql_validation") or {}
-    status = sql_validation.get("status", "ok")
-    step_number = state.get("step_number", 0)
-
-    # Max 3 attempts
-    if step_number >= 6:  # 2 cycles of sql_agent + sql_validator
-        return "data_fetcher"
-
-    if status == "ok":
-        return "data_fetcher"
-    else:  # rewrite
-        return "sql_agent"
-
-
 def after_validation(state: AgentState) -> Literal["end", "analyst"]:
-    """Decide whether to end or rewrite."""
+    """Решает, закончить или переписать ответ."""
     validation = state.get("validation") or {}
     status = validation.get("status", "ok")
     attempts = state.get("validation_attempts", 0)
 
-    # Max 3 attempts
+    # Максимум 3 попытки
     if attempts >= 3:
         return "end"
 
     if status == "ok":
         return "end"
-    else:  # rewrite
+    else:
         return "analyst"
 
 
@@ -155,15 +165,14 @@ def after_validation(state: AgentState) -> Literal["end", "analyst"]:
 # =============================================================================
 
 def build_graph() -> StateGraph:
-    """Build the multi-agent graph."""
+    """Строит граф агентов."""
 
     graph = StateGraph(AgentState)
 
-    # Add nodes
+    # Nodes
     graph.add_node("understander", understand_question)
-    graph.add_node("responder", simple_respond)  # For chitchat/out_of_scope/clarification
-    graph.add_node("sql_agent", generate_sql)
-    graph.add_node("sql_validator", validate_sql)
+    graph.add_node("responder", simple_respond)
+    graph.add_node("query_builder", build_query)
     graph.add_node("data_fetcher", fetch_data)
     graph.add_node("analyst", analyze_data)
     graph.add_node("validator", validate_response)
@@ -171,25 +180,13 @@ def build_graph() -> StateGraph:
     # START → understander
     graph.add_edge(START, "understander")
 
-    # Note: understander uses Command API for dynamic routing (no add_conditional_edges needed)
+    # understander использует Command API для routing
 
-    # Responder → END (no validation needed for chitchat/clarification)
+    # responder → END
     graph.add_edge("responder", END)
 
-    # SQL flow: sql_agent → sql_validator → conditional routing
-    graph.add_edge("sql_agent", "sql_validator")
-
-    # After SQL validation: ok → data_fetcher, rewrite → sql_agent
-    graph.add_conditional_edges(
-        "sql_validator",
-        after_sql_validation,
-        {
-            "data_fetcher": "data_fetcher",
-            "sql_agent": "sql_agent",
-        }
-    )
-
-    # Data flow: data_fetcher → analyst → validator
+    # query_builder → data_fetcher → analyst → validator
+    graph.add_edge("query_builder", "data_fetcher")
     graph.add_edge("data_fetcher", "analyst")
     graph.add_edge("analyst", "validator")
 
@@ -207,7 +204,7 @@ def build_graph() -> StateGraph:
 
 
 def compile_graph(checkpointer=None):
-    """Compile graph with optional checkpointer."""
+    """Компилирует граф с checkpointer."""
     graph = build_graph()
 
     if checkpointer is None:
@@ -217,7 +214,7 @@ def compile_graph(checkpointer=None):
 
 
 def get_app():
-    """Get compiled graph application."""
+    """Возвращает скомпилированное приложение."""
     return compile_graph(get_checkpointer())
 
 
@@ -227,8 +224,11 @@ def get_app():
 
 class TradingGraph:
     """
-    Wrapper class for the trading multi-agent graph.
-    Provides convenient methods for invoking the graph.
+    Обёртка для графа v2 с QueryBuilder.
+
+    Использование:
+        graph = TradingGraph()
+        result = graph.invoke("Покажи статистику", "user1")
     """
 
     def __init__(self):
@@ -237,7 +237,7 @@ class TradingGraph:
 
     @property
     def app(self):
-        """Lazy initialization of the compiled graph."""
+        """Ленивая инициализация графа."""
         if self._app is None:
             self._checkpointer = get_checkpointer()
             self._app = compile_graph(self._checkpointer)
@@ -250,18 +250,7 @@ class TradingGraph:
         session_id: str = "default",
         chat_history: list = None,
     ) -> AgentState:
-        """
-        Run the graph synchronously.
-
-        Args:
-            question: User's question
-            user_id: User ID for logging
-            session_id: Session/thread ID for persistence
-            chat_history: Optional chat history for context
-
-        Returns:
-            Final state with response
-        """
+        """Синхронный запуск графа."""
         initial_state = create_initial_state(
             question=question,
             user_id=user_id,
@@ -277,37 +266,6 @@ class TradingGraph:
 
         return self.app.invoke(initial_state, config)
 
-    def stream(
-        self,
-        question: str,
-        user_id: str,
-        session_id: str = "default",
-        chat_history: list = None,
-    ):
-        """
-        Run the graph with streaming.
-        Yields events for each step.
-
-        Note: For production reliability, can add durability="sync" to stream():
-            self.app.stream(..., durability="sync")
-        Modes: "exit" (fast), "async" (balanced), "sync" (reliable checkpoint per step)
-        """
-        initial_state = create_initial_state(
-            question=question,
-            user_id=user_id,
-            session_id=session_id,
-            chat_history=chat_history,
-        )
-
-        config = {
-            "configurable": {
-                "thread_id": f"{user_id}_{session_id}"
-            }
-        }
-
-        for event in self.app.stream(initial_state, config, stream_mode="updates"):
-            yield event
-
     def stream_sse(
         self,
         question: str,
@@ -316,20 +274,18 @@ class TradingGraph:
         chat_history: list = None,
     ):
         """
-        Run the graph with SSE-formatted events for frontend.
+        Streaming с SSE событиями для frontend.
 
-        Yields dict events:
-        - step_start: agent starting
-        - step_end: agent finished
-        - text_delta: streaming text
-        - validation: validation result
-        - usage: token usage
-        - done: completion
+        Events:
+        - step_start: агент начал работу
+        - step_end: агент закончил
+        - text_delta: текст ответа
+        - usage: токены
+        - done: завершение
         """
         import time
 
         start_time = time.time()
-        step_number = 0
         last_step_time = start_time
 
         initial_state = create_initial_state(
@@ -345,124 +301,92 @@ class TradingGraph:
             }
         }
 
-        # Track accumulated state for input_data
         accumulated_state = {
             "question": question,
             "chat_history": chat_history,
         }
 
-        # Use both "updates" and "custom" stream modes for real-time streaming
         for event in self.app.stream(initial_state, config, stream_mode=["updates", "custom"]):
             stream_type, data = event
 
-            # Custom events (text_delta from agents) - yield directly
+            # Custom events (text_delta) — пробрасываем напрямую
             if stream_type == "custom":
                 yield data
                 continue
 
-            # Updates events - process node outputs
+            # Updates events
             for node_name, updates in data.items():
-                step_number += 1
                 current_time = time.time()
                 step_duration_ms = int((current_time - last_step_time) * 1000)
                 last_step_time = current_time
 
-                # Build input_data based on what this agent received
-                input_data = self._get_agent_input(node_name, accumulated_state)
-
-                # Emit step_start
+                # step_start
                 yield {
                     "type": "step_start",
                     "agent": node_name,
                     "message": self._get_agent_message(node_name)
                 }
 
-                # Emit specific events based on node
-                # Each step_end has:
-                #   - result: summary for UI display
-                #   - input: what agent received
-                #   - output: full data for logging/traces
+                # Обработка по типу node
                 if node_name == "understander":
                     intent = updates.get("intent") or {}
                     usage = updates.get("usage") or {}
+                    query_spec = intent.get("query_spec", {})
+
                     yield {
                         "type": "step_end",
                         "agent": node_name,
                         "duration_ms": step_duration_ms,
                         "result": {
                             "type": intent.get("type"),
-                            "symbol": intent.get("symbol"),
-                            "period": f"{intent.get('period_start')} — {intent.get('period_end')}" if intent.get("period_start") else None,
-                            "granularity": intent.get("granularity"),
-                            "search_condition": intent.get("search_condition"),
+                            "symbol": "NQ",
+                            "source": query_spec.get("source"),
+                            "grouping": query_spec.get("grouping"),
+                            "special_op": query_spec.get("special_op"),
                         },
-                        "input": input_data,
                         "output": {
                             "intent": intent,
                             "usage": usage,
                         }
                     }
-                    # Update accumulated state
                     accumulated_state["intent"] = intent
 
-                elif node_name == "sql_agent":
+                elif node_name == "query_builder":
                     sql_query = updates.get("sql_query")
-                    usage = updates.get("usage") or {}
+                    error = updates.get("query_builder_error")
+
                     yield {
                         "type": "step_end",
                         "agent": node_name,
                         "duration_ms": step_duration_ms,
                         "result": {
                             "sql_generated": sql_query is not None,
+                            "error": error,
                         },
-                        "input": input_data,
                         "output": {
                             "sql_query": sql_query,
-                            "usage": usage,
                         }
                     }
-                    # Update accumulated state
                     accumulated_state["sql_query"] = sql_query
 
-                elif node_name == "sql_validator":
-                    sql_validation = updates.get("sql_validation") or {}
-                    yield {
-                        "type": "step_end",
-                        "agent": node_name,
-                        "duration_ms": step_duration_ms,
-                        "result": {
-                            "status": sql_validation.get("status"),
-                            "issues": sql_validation.get("issues"),
-                        },
-                        "input": input_data,
-                        "output": sql_validation
-                    }
-                    # Update accumulated state
-                    accumulated_state["sql_validation"] = sql_validation
-
                 elif node_name == "data_fetcher":
-                    data = updates.get("data") or {}
+                    data_result = updates.get("data") or {}
                     yield {
                         "type": "step_end",
                         "agent": node_name,
                         "duration_ms": step_duration_ms,
                         "result": {
-                            "rows": data.get("row_count") or data.get("matches_count", 0),
-                            "granularity": data.get("granularity"),
+                            "rows": data_result.get("row_count", 0),
+                            "granularity": data_result.get("granularity"),
                         },
-                        "input": input_data,
-                        "output": data
+                        "output": data_result
                     }
-                    # Update accumulated state
-                    accumulated_state["data"] = data
+                    accumulated_state["data"] = data_result
 
                 elif node_name == "analyst":
                     response = updates.get("response") or ""
                     stats = updates.get("stats") or {}
                     usage = updates.get("usage") or {}
-
-                    # Note: text_delta events now come from custom stream mode (real-time)
-                    # No fake chunking needed here
 
                     yield {
                         "type": "step_end",
@@ -472,30 +396,21 @@ class TradingGraph:
                             "response_length": len(response),
                             "stats_count": len(stats) if stats else 0,
                         },
-                        "input": input_data,
                         "output": {
                             "response": response,
                             "stats": stats,
                             "usage": usage,
                         }
                     }
-                    # Update accumulated state
                     accumulated_state["response"] = response
-                    accumulated_state["stats"] = stats
 
                 elif node_name == "validator":
                     validation = updates.get("validation") or {}
-                    yield {
-                        "type": "validation",
-                        "status": validation.get("status", "ok"),
-                        "issues": validation.get("issues", []),
-                    }
                     yield {
                         "type": "step_end",
                         "agent": node_name,
                         "duration_ms": step_duration_ms,
                         "result": {"status": validation.get("status")},
-                        "input": input_data,
                         "output": validation
                     }
 
@@ -503,7 +418,7 @@ class TradingGraph:
                     response = updates.get("response") or ""
                     suggestions = updates.get("suggestions") or []
 
-                    # Stream response in chunks
+                    # Stream response
                     chunk_size = 50
                     for i in range(0, len(response), chunk_size):
                         yield {
@@ -512,7 +427,6 @@ class TradingGraph:
                             "content": response[i:i+chunk_size]
                         }
 
-                    # Emit suggestions if present (for clarification quick-replies)
                     if suggestions:
                         yield {
                             "type": "suggestions",
@@ -524,12 +438,10 @@ class TradingGraph:
                         "agent": node_name,
                         "duration_ms": step_duration_ms,
                         "result": {"response_length": len(response)},
-                        "input": input_data,
                         "output": {"response": response, "suggestions": suggestions}
                     }
-                    accumulated_state["response"] = response
 
-        # Get final state with accumulated usage from graph
+        # Final events
         duration_ms = int((time.time() - start_time) * 1000)
         final_state = self.app.get_state(config)
         usage = (final_state.values.get("usage") or {}) if final_state else {}
@@ -549,56 +461,17 @@ class TradingGraph:
         }
 
     def _get_agent_message(self, agent: str) -> str:
-        """Get human-readable message for agent."""
+        """Возвращает сообщение для агента."""
         messages = {
             "understander": "Understanding question...",
             "responder": "Responding...",
-            "sql_agent": "Generating SQL...",
-            "sql_validator": "Validating SQL...",
+            "query_builder": "Building SQL query...",
             "data_fetcher": "Fetching data...",
             "analyst": "Analyzing data...",
             "validator": "Validating response...",
         }
         return messages.get(agent, f"Running {agent}...")
 
-    def _get_agent_input(self, agent: str, state: dict) -> dict:
-        """Get input data for agent based on accumulated state."""
-        if agent == "understander":
-            return {
-                "question": state.get("question"),
-            }
-        elif agent == "responder":
-            return {
-                "intent": state.get("intent"),
-            }
-        elif agent == "sql_agent":
-            return {
-                "intent": state.get("intent"),
-                "sql_validation": state.get("sql_validation"),  # For rewrite
-            }
-        elif agent == "sql_validator":
-            return {
-                "sql_query": state.get("sql_query"),
-            }
-        elif agent == "data_fetcher":
-            return {
-                "intent": state.get("intent"),
-                "sql_query": state.get("sql_query"),
-                "sql_validation": state.get("sql_validation"),
-            }
-        elif agent == "analyst":
-            return {
-                "question": state.get("question"),
-                "data": state.get("data"),
-            }
-        elif agent == "validator":
-            return {
-                "response": state.get("response"),
-                "stats": state.get("stats"),
-                "data": state.get("data"),
-            }
-        return {}
 
-
-# Singleton instance
+# Singleton
 trading_graph = TradingGraph()

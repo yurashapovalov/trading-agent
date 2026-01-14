@@ -1,4 +1,4 @@
-"""Agent implementations for v2 architecture."""
+"""Agent implementations for QueryBuilder architecture."""
 
 from agent.agents.understander import Understander
 from agent.agents.data_fetcher import DataFetcher
