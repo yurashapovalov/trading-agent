@@ -337,6 +337,9 @@ class TradingGraph:
                         "type": "step_end",
                         "agent": node_name,
                         "duration_ms": step_duration_ms,
+                        "input": {
+                            "question": accumulated_state.get("question"),
+                        },
                         "result": {
                             "type": intent.get("type"),
                             "symbol": "NQ",
@@ -359,6 +362,9 @@ class TradingGraph:
                         "type": "step_end",
                         "agent": node_name,
                         "duration_ms": step_duration_ms,
+                        "input": {
+                            "query_spec": accumulated_state.get("intent", {}).get("query_spec"),
+                        },
                         "result": {
                             "sql_generated": sql_query is not None,
                             "error": error,
@@ -371,17 +377,28 @@ class TradingGraph:
 
                 elif node_name == "data_fetcher":
                     data_result = updates.get("data") or {}
+                    full_data = updates.get("full_data") or {}
+
                     yield {
                         "type": "step_end",
                         "agent": node_name,
                         "duration_ms": step_duration_ms,
+                        "input": {
+                            "sql_query": accumulated_state.get("sql_query"),
+                        },
                         "result": {
-                            "rows": data_result.get("row_count", 0),
+                            "rows": full_data.get("row_count", data_result.get("row_count", 0)),
+                            "showing": data_result.get("showing", data_result.get("row_count", 0)),
+                            "truncated": data_result.get("truncated", False),
                             "granularity": data_result.get("granularity"),
                         },
-                        "output": data_result
+                        "output": {
+                            "summary": data_result,   # Top-N for Analyst
+                            "full_data": full_data,   # All rows (saved to logs + UI)
+                        },
                     }
                     accumulated_state["data"] = data_result
+                    accumulated_state["full_data"] = full_data
 
                 elif node_name == "analyst":
                     response = updates.get("response") or ""
@@ -392,6 +409,10 @@ class TradingGraph:
                         "type": "step_end",
                         "agent": node_name,
                         "duration_ms": step_duration_ms,
+                        "input": {
+                            "data": accumulated_state.get("data"),  # Summary that Analyst sees
+                            "data_row_count": accumulated_state.get("data", {}).get("row_count", 0),
+                        },
                         "result": {
                             "response_length": len(response),
                             "stats_count": len(stats) if stats else 0,

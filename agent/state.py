@@ -168,7 +168,8 @@ class AgentState(TypedDict, total=False):
 
     # DataFetcher output
     sql_queries: list[SQLResult]  # Keep for logging
-    data: dict                    # Aggregated data for Analyst
+    data: dict                    # Summary data for Analyst (top-N rows)
+    full_data: dict               # Full data for UI (all rows, download)
     missing_capabilities: list[str]  # Features we don't support yet
 
     # Analyst output
@@ -216,6 +217,7 @@ def create_initial_state(
         # DataFetcher
         sql_queries=[],
         data={},
+        full_data={},
         missing_capabilities=[],
         # Analyst
         response="",

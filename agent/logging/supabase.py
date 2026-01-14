@@ -59,11 +59,6 @@ async def log_trace_step(
         serializable_input = make_json_serializable(input_data)
         serializable_output = make_json_serializable(output_data)
 
-        # Truncate large output to avoid storage issues
-        output_str = json.dumps(serializable_output) if serializable_output else ""
-        if len(output_str) > 50000:
-            serializable_output = {"_truncated": True, "preview": output_str[:1000]}
-
         supabase.table("request_traces").insert({
             "request_id": request_id,
             "user_id": user_id,

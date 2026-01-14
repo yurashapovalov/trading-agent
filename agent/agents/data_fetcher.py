@@ -4,12 +4,17 @@ Pure Python agent (no LLM). Executes SQL from QueryBuilder or falls back
 to template queries for simple requests.
 
 Architecture:
-    QueryBuilder → SQL → DataFetcher → rows → Analyst
+    QueryBuilder → SQL → DataFetcher → summary (for Analyst) + full_data (for UI)
+
+The agent automatically summarizes large result sets to reduce token usage:
+- Analyst receives top-N rows + stats (cheap, accurate)
+- UI can access full_data for display/download
 
 Example:
     fetcher = DataFetcher()
     result = fetcher({"sql_query": "SELECT ...", "intent": {...}})
-    # result["data"]["rows"] contains query results
+    # result["data"]["rows"] - summary for Analyst (max 50 rows)
+    # result["full_data"]["rows"] - all rows for UI
 """
 
 import time
@@ -19,6 +24,9 @@ from typing import Any
 import config
 from agent.state import AgentState, Intent
 from agent.modules import sql
+
+# Maximum rows to send to Analyst (to reduce token usage)
+MAX_ROWS_FOR_ANALYST = 50
 
 
 class DataFetcher:
@@ -69,16 +77,20 @@ class DataFetcher:
         # 4. Fallback - use templates
         if sql_query and (sql_validation.get("status") == "ok" or not sql_validation):
             # Execute SQL (from QueryBuilder or validated SQL Agent)
-            data = self._execute_sql(sql_query, intent)
+            full_data = self._execute_sql(sql_query, intent)
         elif intent_type == "concept":
-            data = self._handle_concept(intent)
+            full_data = self._handle_concept(intent)
         else:  # "data" or default - use templates
-            data = self._handle_data(intent)
+            full_data = self._handle_data(intent)
+
+        # Create summary for Analyst (truncate large result sets)
+        data = self._create_summary(full_data)
 
         duration_ms = int((time.time() - start_time) * 1000)
 
         return {
-            "data": data,
+            "data": data,           # Summary for Analyst (max N rows)
+            "full_data": full_data, # Full data for UI
             "agents_used": [self.name],
             "step_number": state.get("step_number", 0) + 1,
             "total_duration_ms": state.get("total_duration_ms", 0) + duration_ms,
@@ -162,3 +174,71 @@ class DataFetcher:
             "concept": intent.get("concept", ""),
             "message": "No data needed for concept explanation",
         }
+
+    def _create_summary(self, full_data: dict[str, Any]) -> dict[str, Any]:
+        """Create summary of data for Analyst (to reduce token usage).
+
+        If data has more than MAX_ROWS_FOR_ANALYST rows, truncates to top-N
+        and adds summary statistics. Otherwise returns data unchanged.
+
+        Args:
+            full_data: Full query result with rows, row_count, etc.
+
+        Returns:
+            Summary dict with truncated rows and added stats if needed.
+        """
+        rows = full_data.get("rows", [])
+        row_count = full_data.get("row_count", len(rows))
+
+        # If small enough, return as-is
+        if row_count <= MAX_ROWS_FOR_ANALYST:
+            return full_data
+
+        # Create summary with truncated rows
+        summary = {
+            **full_data,
+            "rows": rows[:MAX_ROWS_FOR_ANALYST],
+            "row_count": row_count,  # Keep original count
+            "truncated": True,
+            "showing": MAX_ROWS_FOR_ANALYST,
+            "summary_note": f"Showing top {MAX_ROWS_FOR_ANALYST} of {row_count} rows. Full data available for download.",
+        }
+
+        # Add aggregate stats if data has numeric columns
+        if rows:
+            summary["summary_stats"] = self._calculate_summary_stats(rows)
+
+        return summary
+
+    def _calculate_summary_stats(self, rows: list[dict]) -> dict[str, Any]:
+        """Calculate summary statistics for numeric columns.
+
+        Args:
+            rows: List of row dicts.
+
+        Returns:
+            Dict with stats like total_count, column sums, etc.
+        """
+        stats = {"total_rows": len(rows)}
+
+        if not rows:
+            return stats
+
+        # Find numeric columns (check first row)
+        first_row = rows[0]
+        numeric_cols = [
+            k for k, v in first_row.items()
+            if isinstance(v, (int, float)) and k not in ("day_num",)
+        ]
+
+        # Calculate sum/avg for key columns like 'count', 'frequency', 'pct'
+        for col in numeric_cols:
+            if col in ("count", "frequency", "cnt", "occurrences"):
+                total = sum(r.get(col, 0) for r in rows)
+                stats[f"total_{col}"] = total
+            elif col in ("pct", "percent", "percentage"):
+                # For percentage columns, sum shows coverage of top-N
+                total_pct = sum(r.get(col, 0) for r in rows[:MAX_ROWS_FOR_ANALYST])
+                stats["top_n_coverage_pct"] = round(total_pct, 2)
+
+        return stats

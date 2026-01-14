@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 import config
 from supabase import create_client
 
-OUTPUT_FILE = Path(__file__).parent.parent / "docs" / "logs" / "responce.md"
+OUTPUT_FILE = Path(__file__).parent.parent.parent / "docs" / "logs" / "responce.md"
 
 
 def export_log(log_id: int):
