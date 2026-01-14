@@ -186,11 +186,24 @@ Ask for clarification when:
 1. ACTION is unclear - "show data" → what to do with it?
 2. AMBIGUOUS - could mean multiple things
 3. MISSING critical info with no reasonable default
+4. TIME OF DAY specified without timezone context
+
+CRITICAL - Time of Day Rules:
+When user specifies specific hours (e.g., "с 6 до 16", "в 10:30"):
+- Database stores timestamps in ET (Eastern Time)
+- Standard sessions are defined in ET: RTH = 09:30-16:00 ET, ETH = 18:00-09:30 ET
+- If user says "06:00-16:00" - this is NOT a standard session, ASK what they mean:
+  - Is this ET timezone?
+  - Did they mean RTH (09:30-16:00)?
+  - Some custom analysis window?
+- If user says "RTH" or "регулярная сессия" - no clarification needed (09:30-16:00 ET)
+- Always specify timezone assumption in detailed_spec: "Time filter: 06:00-16:00 ET"
 
 DO NOT ask when:
 - Period not specified → use ALL available data (more data = better analytics)
 - Symbol not specified (default NQ for now, will change when more instruments added)
 - Context from chat history provides the answer
+- User explicitly mentions timezone or uses standard session names (RTH/ETH)
 
 When user asks for unavailable features (technical indicators, backtesting, etc.):
 - type: "out_of_scope"
@@ -257,7 +270,7 @@ Intent:
 }}
 ```
 
-## Clarification Needed
+## Clarification Needed - Ambiguous Request
 
 Question: "Покажи high low"
 Intent:
@@ -272,6 +285,24 @@ Intent:
     "Найти дни с максимальным диапазоном (high-low)",
     "Узнать в какое время обычно формируется high/low дня",
     "Сравнить high/low по дням недели"
+  ]
+}}
+```
+
+## Clarification Needed - Non-standard Time Window
+
+Question: "Какое время чаще всего становится high/low с 6 утра до 16 дня"
+Intent:
+```json
+{{
+  "type": "data",
+  "symbol": "NQ",
+  "needs_clarification": true,
+  "clarification_question": "Уточните временное окно 06:00-16:00. Данные хранятся в ET (Eastern Time). Это:",
+  "suggestions": [
+    "06:00-16:00 ET (pre-market + RTH до закрытия)",
+    "RTH сессия (09:30-16:00 ET) - стандартные торговые часы",
+    "Московское время 06:00-16:00 (нужен перевод в ET)"
   ]
 }}
 ```
