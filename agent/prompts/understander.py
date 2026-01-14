@@ -255,9 +255,8 @@ Use event_time when:
 
 IMPORTANT for event_time:
 - Always requires source: "minutes"
-- Always requires grouping by time: "5min", "10min", "15min", "30min", or "hour"
-- Default grouping: "10min" — optimal for pattern analysis
-- If user asks "в какую минуту точно" — use "5min" or "1min"
+- Always requires grouping by time: "1min", "5min", "10min", "15min", "30min", or "hour"
+- Default grouping: "1min" — most precise, user can ask for coarser if needed
 - Returns distribution: how many days had high/low in each time bucket
 
 IMPORTANT for find_extremum:
@@ -398,7 +397,7 @@ Question: "В какое время чаще всего формируется h
       "period_end": "2025-01-01",
       "session": "RTH"
     }},
-    "grouping": "10min",
+    "grouping": "1min",
     "metrics": [],
     "special_op": "event_time",
     "event_time_spec": {{"find": "high"}}
@@ -439,7 +438,7 @@ Question: "Когда формируется high и low на RTH?"
       "period_end": "all",
       "session": "RTH"
     }},
-    "grouping": "10min",
+    "grouping": "1min",
     "metrics": [],
     "special_op": "event_time",
     "event_time_spec": {{"find": "both"}}
@@ -741,7 +740,7 @@ Question: "Когда формируется high по вторникам на R
       "session": "RTH",
       "weekdays": ["Tuesday"]
     }},
-    "grouping": "10min",
+    "grouping": "1min",
     "metrics": [],
     "special_op": "event_time",
     "event_time_spec": {{"find": "high"}}
