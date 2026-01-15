@@ -37,6 +37,36 @@ def get_supabase():
     return _supabase
 
 
+async def init_chat_log(
+    request_id: str,
+    user_id: str,
+    chat_id: str | None,
+    session_id: str,
+    question: str,
+):
+    """
+    Create initial chat_log entry at the START of request.
+
+    This allows request_traces to reference the request_id via FK.
+    Response and stats will be updated at the end via complete_chat_log.
+    """
+    supabase = get_supabase()
+    if not supabase:
+        return
+
+    try:
+        supabase.table("chat_logs").insert({
+            "request_id": request_id,
+            "user_id": user_id,
+            "chat_id": chat_id,
+            "session_id": session_id,
+            "question": question,
+            "response": None,  # Will be updated at completion
+        }).execute()
+    except Exception as e:
+        print(f"Failed to init chat log: {e}")
+
+
 async def log_trace_step(
     request_id: str,
     user_id: str,
@@ -72,13 +102,10 @@ async def log_trace_step(
         print(f"Failed to log trace step: {e}")
 
 
-async def log_completion(
+async def complete_chat_log(
     request_id: str,
-    user_id: str,
-    session_id: str,
-    question: str,
-    response: str,
     chat_id: str | None = None,
+    response: str = "",
     route: str | None = None,
     agents_used: list[str] | None = None,
     validation_attempts: int = 1,
@@ -92,9 +119,9 @@ async def log_completion(
     provider: str = "gemini",
 ):
     """
-    Log completed request to chat_logs.
+    Complete chat_log entry at the END of request.
 
-    Called when the entire request is finished.
+    Updates the row created by init_chat_log with response and stats.
     Also updates chat_sessions stats if chat_id provided.
     """
     supabase = get_supabase()
@@ -106,12 +133,7 @@ async def log_completion(
         if len(response) > 10000:
             response = response[:10000] + "... [truncated]"
 
-        supabase.table("chat_logs").insert({
-            "request_id": request_id,
-            "user_id": user_id,
-            "chat_id": chat_id,
-            "session_id": session_id,
-            "question": question,
+        supabase.table("chat_logs").update({
             "response": response,
             "route": route,
             "agents_used": agents_used or [],
@@ -124,7 +146,7 @@ async def log_completion(
             "duration_ms": duration_ms,
             "model": model,
             "provider": provider,
-        }).execute()
+        }).eq("request_id", request_id).execute()
 
         # Update chat_sessions stats if chat_id provided
         if chat_id:
@@ -137,7 +159,7 @@ async def log_completion(
             )
 
     except Exception as e:
-        print(f"Failed to log completion: {e}")
+        print(f"Failed to complete chat log: {e}")
 
 
 async def update_chat_session_stats(

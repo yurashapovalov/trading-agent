@@ -25,7 +25,7 @@ from typing import Optional
 from supabase import create_client
 
 from data import get_data_info, init_database
-from agent.logging.supabase import log_completion, log_trace_step
+from agent.logging.supabase import init_chat_log, complete_chat_log, log_trace_step
 import config
 
 
@@ -502,6 +502,15 @@ async def chat_stream(request: ChatRequest, user_id: str = Depends(require_auth)
         validation_passed = None
         step_number = 0
 
+        # Create chat_log entry FIRST so traces can reference it via FK
+        await init_chat_log(
+            request_id=request_id,
+            user_id=user_id,
+            chat_id=chat_id,
+            session_id=chat_id,
+            question=request.message,
+        )
+
         try:
             for event in trading_graph.stream_sse(
                 question=request.message,
@@ -556,13 +565,10 @@ async def chat_stream(request: ChatRequest, user_id: str = Depends(require_auth)
                 elif event_type == "done":
                     duration_ms = event.get("total_duration_ms", 0)
 
-                    # Log to Supabase
-                    await log_completion(
+                    # Complete chat_log with response and stats
+                    await complete_chat_log(
                         request_id=request_id,
-                        user_id=user_id,
                         chat_id=chat_id,
-                        session_id=chat_id,  # Keep for backward compatibility
-                        question=request.message,
                         response=final_text[:10000],
                         route=route,
                         agents_used=list(set(agents_used)),
