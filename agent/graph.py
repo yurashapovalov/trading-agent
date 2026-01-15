@@ -278,6 +278,7 @@ class TradingGraph:
         question: str,
         user_id: str,
         session_id: str = "default",
+        request_id: str | None = None,
         chat_history: list = None,  # DEPRECATED: ignored, checkpointer manages history
     ):
         """
@@ -303,6 +304,7 @@ class TradingGraph:
             question=question,
             user_id=user_id,
             session_id=session_id,
+            request_id=request_id,
         )
 
         config = {

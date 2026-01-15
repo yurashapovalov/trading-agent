@@ -209,6 +209,7 @@ def create_initial_input(
     question: str,
     user_id: str,
     session_id: str = "default",
+    request_id: str | None = None,
 ) -> dict:
     """
     Create initial input for graph.invoke().
@@ -220,13 +221,14 @@ def create_initial_input(
         question: User's current question
         user_id: User identifier
         session_id: Session identifier (used in thread_id)
+        request_id: Request identifier (generated if not provided)
 
     Returns:
         Dict with messages and metadata for graph.invoke()
     """
     return {
         "messages": [HumanMessage(content=question)],
-        "request_id": str(uuid4()),
+        "request_id": request_id or str(uuid4()),
         "user_id": user_id,
         "session_id": session_id,
         # Reset fields that should NOT accumulate across messages

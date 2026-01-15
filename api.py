@@ -600,7 +600,7 @@ async def chat_stream(request: ChatRequest, user_id: str = Depends(require_auth)
                 question=request.message,
                 user_id=user_id,
                 session_id=chat_id,  # Use chat_id as session_id for LangGraph checkpointer
-                # chat_history NOT passed - checkpointer manages history automatically
+                request_id=request_id,  # Pass request_id so frontend gets the same ID saved to DB
             ):
                 yield f"data: {json.dumps(clean_for_json(event), default=str)}\n\n"
                 await asyncio.sleep(0)  # Force flush
