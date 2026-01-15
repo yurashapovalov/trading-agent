@@ -5,7 +5,6 @@ import {
   Dialog,
   DialogContent,
   DialogHeader,
-  DialogTitle,
 } from "@/components/ui/dialog"
 import { ChevronRightIcon } from "lucide-react"
 
@@ -31,18 +30,23 @@ export function Processed({ steps, isLoading }: ProcessedProps) {
       </button>
 
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="sm:max-w-4xl h-[90vh]">
+        <DialogContent className="sm:max-w-4xl h-[90vh] overflow-y-auto content-start">
           <DialogHeader>
-            <DialogTitle>Processing Steps</DialogTitle>
+            <h2 className="text-xl leading-none font-semibold">Processing Steps</h2>
           </DialogHeader>
-          <div className="space-y-2">
+          <div className="grid gap-4">
             {steps.map((step, index) => (
-              <div key={index} className="text-sm">
-                <span className="font-medium">{step.agent}</span>
+              <div key={index}>
+                <h3 className="text-lg leading-none font-semibold capitalize">{index + 1}. {step.agent}</h3>
                 {step.durationMs && (
-                  <span className="text-muted-foreground ml-2">
+                  <div className="text-sm text-muted-foreground mt-1">
                     {step.durationMs}ms
-                  </span>
+                  </div>
+                )}
+                {step.result && (
+                  <pre className="text-xs mt-2 overflow-x-auto">
+                    {JSON.stringify(step.result, null, 2)}
+                  </pre>
                 )}
               </div>
             ))}
