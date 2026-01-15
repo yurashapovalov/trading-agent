@@ -200,7 +200,7 @@ export function ChatPanel({
                           "positive",
                           message.feedback?.positive_feedback || ""
                         )}
-                        className={message.feedback?.positive_feedback ? "text-green-500" : ""}
+                        className={message.feedback?.positive_feedback ? "text-foreground" : ""}
                       >
                         <ThumbsUpIcon className="size-4" />
                       </Action>
@@ -211,7 +211,7 @@ export function ChatPanel({
                           "negative",
                           message.feedback?.negative_feedback || ""
                         )}
-                        className={message.feedback?.negative_feedback ? "text-red-500" : ""}
+                        className={message.feedback?.negative_feedback ? "text-foreground" : ""}
                       >
                         <ThumbsDownIcon className="size-4" />
                       </Action>
