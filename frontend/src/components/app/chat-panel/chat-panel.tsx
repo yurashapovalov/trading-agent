@@ -11,12 +11,7 @@ import {
   MessageContent,
   MessageResponse,
 } from "@/components/ai/message"
-import {
-  ChainOfThought,
-  ChainOfThoughtHeader,
-  ChainOfThoughtContent,
-  ChainOfThoughtStep,
-} from "@/components/ai/chain-of-thought"
+import { Processed } from "@/components/app/processed/processed"
 import {
   PromptInput,
   PromptInputBody,
@@ -25,7 +20,6 @@ import {
   PromptInputTextarea,
   PromptInputTools,
 } from "@/components/ai/prompt-input"
-import { Loader } from "@/components/ai/loader"
 import {
   Dialog,
   DialogContent,
@@ -37,75 +31,8 @@ import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 
 import type { AgentStep, ChatMessage } from "@/types/chat"
-import { DatabaseIcon, BrainIcon, CheckCircleIcon, RouteIcon, MessageCircleIcon, CodeIcon, ThumbsUpIcon, ThumbsDownIcon } from "lucide-react"
+import { ThumbsUpIcon, ThumbsDownIcon } from "lucide-react"
 import { Actions, Action } from "@/components/ai/actions"
-
-// Map agent names to icons
-const agentIcons: Record<string, any> = {
-  understander: RouteIcon,
-  query_builder: CodeIcon,
-  responder: MessageCircleIcon,
-  data_fetcher: DatabaseIcon,
-  analyst: BrainIcon,
-  validator: CheckCircleIcon,
-}
-
-function getStepDescription(step: AgentStep): string | undefined {
-  const parts: string[] = []
-
-  if (step.durationMs) {
-    parts.push(`${step.durationMs}ms`)
-  }
-
-  if (step.result) {
-    if (step.agent === "understander") {
-      const type = step.result.type as string
-      const symbol = step.result.symbol as string
-      if (type) parts.push(`→ ${type}`)
-      if (symbol) parts.push(symbol)
-    } else if (step.agent === "query_builder") {
-      const sqlGenerated = step.result.sql_generated as boolean
-      if (sqlGenerated) parts.push("SQL ✓")
-    } else if (step.agent === "data_fetcher") {
-      const rows = step.result.rows as number
-      if (rows !== undefined) parts.push(`${rows} rows`)
-    } else if (step.agent === "analyst") {
-      const len = step.result.response_length as number
-      if (len) parts.push(`${len} chars`)
-    } else if (step.agent === "validator") {
-      const status = step.result.status as string
-      if (status) parts.push(status === "ok" ? "✓" : "rewrite")
-    } else if (step.agent === "responder") {
-      const len = step.result.response_length as number
-      if (len) parts.push(`${len} chars`)
-    }
-  }
-
-  return parts.length > 0 ? parts.join(" · ") : undefined
-}
-
-function AgentStepsDisplay({ steps, isStreaming }: { steps: AgentStep[]; isStreaming?: boolean }) {
-  if (steps.length === 0) return null
-
-  return (
-    <ChainOfThought defaultOpen={isStreaming}>
-      <ChainOfThoughtHeader>
-        {isStreaming ? "Thinking..." : `${steps.length} steps`}
-      </ChainOfThoughtHeader>
-      <ChainOfThoughtContent>
-        {steps.map((step, index) => (
-          <ChainOfThoughtStep
-            key={index}
-            label={step.message}
-            status={step.status === "running" ? "active" : "complete"}
-            icon={agentIcons[step.agent] || BrainIcon}
-            description={getStepDescription(step)}
-          />
-        ))}
-      </ChainOfThoughtContent>
-    </ChainOfThought>
-  )
-}
 
 type ChatPanelProps = {
   header?: React.ReactNode
@@ -184,7 +111,9 @@ export function ChatPanel({
             <Message from={message.role} key={index} className="max-w-full group">
               <div>
                 {message.role === "assistant" && message.agent_steps && message.agent_steps.length > 0 && (
-                  <AgentStepsDisplay steps={message.agent_steps} />
+                  <div className="mb-2">
+                    <Processed steps={message.agent_steps} isLoading={false} />
+                  </div>
                 )}
 
                 <MessageContent>
@@ -231,7 +160,7 @@ export function ChatPanel({
           {currentSteps.length > 0 && (
             <Message from="assistant" className="max-w-full">
               <div>
-                <AgentStepsDisplay steps={currentSteps} isStreaming />
+                <Processed steps={currentSteps} isLoading={true} />
               </div>
             </Message>
           )}
@@ -245,10 +174,11 @@ export function ChatPanel({
           )}
 
           {isLoading && currentSteps.length === 0 && !streamingText && (
-            <div className="flex items-center gap-2 text-muted-foreground">
-              <Loader className="size-4" />
-              <span className="text-sm">Thinking...</span>
-            </div>
+            <Message from="assistant" className="max-w-full">
+              <div>
+                <Processed steps={[]} isLoading={true} />
+              </div>
+            </Message>
           )}
         </ConversationContent>
         <ConversationScrollButton />
