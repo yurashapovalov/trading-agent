@@ -139,6 +139,7 @@ class Analyst:
 
                 # Emit text chunk in real-time
                 if chunk.text:
+                    print(f"[Analyst] Chunk: {len(chunk.text)} chars")
                     writer({"type": "text_delta", "agent": self.name, "content": chunk.text})
                     full_text += chunk.text
 
