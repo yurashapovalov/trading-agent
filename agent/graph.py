@@ -315,6 +315,13 @@ class TradingGraph:
         accumulated_state = {
             "question": question,
         }
+        # Track usage separately - sum from all agents in this request
+        accumulated_usage = {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "thinking_tokens": 0,
+            "cost_usd": 0.0,
+        }
 
         for event in self.app.stream(initial_input, config, stream_mode=["updates", "custom"]):
             stream_type, data = event
@@ -363,6 +370,12 @@ class TradingGraph:
                         }
                     }
                     accumulated_state["intent"] = intent
+                    # Accumulate usage from understander
+                    if usage:
+                        accumulated_usage["input_tokens"] += usage.get("input_tokens", 0)
+                        accumulated_usage["output_tokens"] += usage.get("output_tokens", 0)
+                        accumulated_usage["thinking_tokens"] += usage.get("thinking_tokens", 0)
+                        accumulated_usage["cost_usd"] += usage.get("cost_usd", 0.0)
 
                 elif node_name == "query_builder":
                     sql_query = updates.get("sql_query")
@@ -434,6 +447,12 @@ class TradingGraph:
                         }
                     }
                     accumulated_state["response"] = response
+                    # Accumulate usage from analyst
+                    if usage:
+                        accumulated_usage["input_tokens"] += usage.get("input_tokens", 0)
+                        accumulated_usage["output_tokens"] += usage.get("output_tokens", 0)
+                        accumulated_usage["thinking_tokens"] += usage.get("thinking_tokens", 0)
+                        accumulated_usage["cost_usd"] += usage.get("cost_usd", 0.0)
 
                 elif node_name == "validator":
                     validation = updates.get("validation") or {}
@@ -474,15 +493,15 @@ class TradingGraph:
 
         # Final events
         duration_ms = int((time.time() - start_time) * 1000)
-        final_state = self.app.get_state(config)
-        usage = (final_state.values.get("usage") or {}) if final_state else {}
 
+        # Use accumulated_usage (summed from step_end events) instead of final_state
+        # This ensures we only count this request's usage, not accumulated from checkpointer
         yield {
             "type": "usage",
-            "input_tokens": usage.get("input_tokens", 0),
-            "output_tokens": usage.get("output_tokens", 0),
-            "thinking_tokens": usage.get("thinking_tokens", 0),
-            "cost": usage.get("cost_usd", 0)
+            "input_tokens": accumulated_usage["input_tokens"],
+            "output_tokens": accumulated_usage["output_tokens"],
+            "thinking_tokens": accumulated_usage["thinking_tokens"],
+            "cost": accumulated_usage["cost_usd"]
         }
 
         yield {

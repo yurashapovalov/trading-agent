@@ -21,31 +21,11 @@ Example:
     )
 """
 
-from typing import TypedDict, Literal, Annotated
+from typing import TypedDict, Literal
 from uuid import uuid4
-import operator
 
 from langgraph.graph import MessagesState
 from langchain_core.messages import HumanMessage, AIMessage, AnyMessage
-
-
-def merge_lists(a: list, b: list) -> list:
-    """Merge two lists, used for accumulating agents_used."""
-    return a + b
-
-
-def merge_usage(a: dict, b: dict) -> dict:
-    """Sum usage stats from multiple agents."""
-    if not a:
-        return b
-    if not b:
-        return a
-    return {
-        "input_tokens": (a.get("input_tokens") or 0) + (b.get("input_tokens") or 0),
-        "output_tokens": (a.get("output_tokens") or 0) + (b.get("output_tokens") or 0),
-        "thinking_tokens": (a.get("thinking_tokens") or 0) + (b.get("thinking_tokens") or 0),
-        "cost_usd": (a.get("cost_usd") or 0) + (b.get("cost_usd") or 0),
-    }
 
 
 # =============================================================================
@@ -208,12 +188,13 @@ class TradingState(MessagesState, total=False):
     was_interrupted: bool
     interrupt_reason: str
 
-    # Tracking (use Annotated for list accumulation)
-    agents_used: Annotated[list[str], merge_lists]
+    # Tracking - reset each request (no accumulation across messages)
+    agents_used: list[str]
     step_number: int
 
-    # Usage aggregation (summed across all LLM agents)
-    usage: Annotated[UsageStats, merge_usage]
+    # Usage - reset each request (no accumulation across messages)
+    # Within single request, graph.py sums usage from agents manually
+    usage: UsageStats
     total_duration_ms: int
 
     # Error handling
@@ -233,6 +214,7 @@ def create_initial_input(
     Create initial input for graph.invoke().
 
     Only includes the NEW message - checkpointer will restore previous messages.
+    Explicitly resets fields that should NOT accumulate across messages.
 
     Args:
         question: User's current question
@@ -247,6 +229,16 @@ def create_initial_input(
         "request_id": str(uuid4()),
         "user_id": user_id,
         "session_id": session_id,
+        # Reset fields that should NOT accumulate across messages
+        "agents_used": [],
+        "step_number": 0,
+        "validation_attempts": 0,
+        "usage": UsageStats(
+            input_tokens=0,
+            output_tokens=0,
+            thinking_tokens=0,
+            cost_usd=0.0,
+        ),
     }
 
 
