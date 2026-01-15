@@ -5,7 +5,14 @@ import {
   Dialog,
   DialogContent,
   DialogHeader,
+  DialogTitle,
 } from "@/components/ui/dialog"
+import {
+  Accordion,
+  AccordionItem,
+  AccordionTrigger,
+  AccordionContent,
+} from "@/components/ui/accordion"
 import { ChevronRightIcon } from "lucide-react"
 
 import type { AgentStep } from "@/types/chat"
@@ -32,25 +39,29 @@ export function Processed({ steps, isLoading }: ProcessedProps) {
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="sm:max-w-4xl h-[90vh] overflow-y-auto content-start">
           <DialogHeader>
-            <h2 className="text-xl leading-none font-semibold">Processing Steps</h2>
+            <DialogTitle className="text-xl">Processing Steps</DialogTitle>
           </DialogHeader>
-          <div className="grid gap-4">
+          <Accordion type="multiple" className="w-full">
             {steps.map((step, index) => (
-              <div key={index}>
-                <h3 className="text-lg leading-none font-semibold capitalize">{index + 1}. {step.agent}</h3>
-                {step.durationMs && (
-                  <div className="text-sm text-muted-foreground mt-1">
-                    {step.durationMs}ms
-                  </div>
-                )}
-                {step.result && (
-                  <pre className="text-xs mt-2 overflow-x-auto">
-                    {JSON.stringify(step.result, null, 2)}
-                  </pre>
-                )}
-              </div>
+              <AccordionItem key={index} value={`step-${index}`}>
+                <AccordionTrigger className="text-lg font-semibold capitalize hover:no-underline">
+                  {index + 1}. {step.agent}
+                  {step.durationMs && (
+                    <span className="text-sm text-muted-foreground font-normal ml-2">
+                      {step.durationMs}ms
+                    </span>
+                  )}
+                </AccordionTrigger>
+                <AccordionContent>
+                  {step.result && (
+                    <pre className="text-xs whitespace-pre-wrap break-words">
+                      {JSON.stringify(step.result, null, 2)}
+                    </pre>
+                  )}
+                </AccordionContent>
+              </AccordionItem>
             ))}
-          </div>
+          </Accordion>
         </DialogContent>
       </Dialog>
     </div>

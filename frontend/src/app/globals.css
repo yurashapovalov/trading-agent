@@ -209,4 +209,11 @@ body {
   body {
     @apply bg-background text-foreground;
   }
+  button,
+  [role="button"],
+  [type="button"],
+  [type="submit"],
+  a {
+    cursor: pointer;
+  }
 }
