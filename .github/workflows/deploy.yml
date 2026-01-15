@@ -26,5 +26,9 @@ jobs:
             git pull origin main
             source venv/bin/activate
             pip install -r requirements.txt --quiet
-            systemctl restart trading-api
+            # Clean restart: stop service, kill any zombies, start fresh
+            systemctl stop trading-api || true
+            fuser -k 8000/tcp 2>/dev/null || true
+            sleep 1
+            systemctl start trading-api
             echo "Deployed successfully!"
