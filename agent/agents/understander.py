@@ -92,11 +92,8 @@ class Understander:
         # Get chat history for context (all messages except current question)
         chat_history = get_chat_history(state)
 
-        print(f"[Understander] Question: {question[:50]}...")
-
         # Вызываем LLM
         intent = self._parse_with_llm(question, chat_history)
-        print(f"[Understander] Intent type={intent.get('type')}")
 
         return {
             "intent": intent,
@@ -142,19 +139,6 @@ class Understander:
         try:
             prompt = self._build_prompt(question, chat_history)
 
-            # === DEBUG LOGGING ===
-            print(f"\n{'='*60}")
-            print(f"[Understander DEBUG] Input Analysis:")
-            print(f"  Question: {question[:100]}...")
-            print(f"  Chat history messages: {len(chat_history)}")
-            if chat_history:
-                for i, msg in enumerate(chat_history[-3:]):  # Last 3 messages
-                    content = str(msg.get('content', ''))[:80]
-                    print(f"    [{i}] {msg.get('role')}: {content}...")
-            print(f"  Prompt length: {len(prompt)} chars (~{len(prompt)//4} tokens est.)")
-            print(f"  Response schema size: {len(str(RESPONSE_SCHEMA))} chars")
-            print(f"{'='*60}\n")
-
             response = self.client.models.generate_content(
                 model=self.model,
                 contents=prompt,
@@ -181,17 +165,6 @@ class Understander:
                     thinking_tokens=thinking_tokens,
                     cost_usd=cost
                 )
-
-                # === DEBUG: Gemini reported tokens ===
-                print(f"\n{'='*60}")
-                print(f"[Understander DEBUG] Gemini Response:")
-                print(f"  Gemini input_tokens:    {input_tokens:,}")
-                print(f"  Gemini output_tokens:   {output_tokens:,}")
-                print(f"  Gemini thinking_tokens: {thinking_tokens:,}")
-                print(f"  Our estimate:           ~{len(prompt)//4:,} tokens")
-                print(f"  DIFFERENCE:             {input_tokens - len(prompt)//4:,} tokens")
-                print(f"  Cost: ${cost:.6f}")
-                print(f"{'='*60}\n")
 
             # Парсим JSON
             data = json.loads(response.text)

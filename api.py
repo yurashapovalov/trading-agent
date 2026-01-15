@@ -123,7 +123,6 @@ def root():
 def get_recent_chat_history(user_id: str, limit: int = config.CHAT_HISTORY_LIMIT) -> list[dict]:
     """Fetch recent chat history from Supabase for context."""
     if not supabase:
-        print(f"[API DEBUG] No supabase client, returning empty history")
         return []
 
     try:
@@ -135,34 +134,16 @@ def get_recent_chat_history(user_id: str, limit: int = config.CHAT_HISTORY_LIMIT
             .limit(limit) \
             .execute()
 
-        # === DEBUG LOGGING ===
-        print(f"\n{'='*60}")
-        print(f"[API DEBUG] Chat History Load:")
-        print(f"  User ID: {user_id[:8]}...")
-        print(f"  Limit: {limit}")
-        print(f"  Rows from DB: {len(result.data) if result.data else 0}")
-        if result.data:
-            for i, row in enumerate(result.data[:5]):  # Show first 5
-                q = row.get('question', '')[:40]
-                r_len = len(row.get('response', '') or '')
-                sid = row.get('session_id', '')[-20:] if row.get('session_id') else 'N/A'
-                print(f"    [{i}] Q: {q}... | R: {r_len} chars | session: ...{sid}")
-        print(f"{'='*60}\n")
-
         if not result.data:
             return []
 
         # Convert to chat format and reverse to chronological order
         history = []
-        total_chars = 0
         for row in reversed(result.data):
             history.append({"role": "user", "content": row["question"]})
-            total_chars += len(row["question"])
             if row.get("response"):
                 history.append({"role": "assistant", "content": row["response"]})
-                total_chars += len(row["response"])
 
-        print(f"[API DEBUG] History built: {len(history)} messages, {total_chars} total chars (~{total_chars//4} tokens est.)")
         return history
     except Exception as e:
         print(f"Failed to fetch chat history: {e}")
@@ -188,17 +169,9 @@ async def chat_stream(request: ChatRequest, user_id: str = Depends(require_auth)
     import uuid
     from agent.graph import trading_graph
 
-    print(f"\n{'='*60}")
-    print(f"[CHAT] NEW REQUEST:")
-    print(f"  Message: {request.message[:80]}...")
-    print(f"  User: {user_id[:8]}...")
-    print(f"  Session: {request.session_id}")
-    print(f"{'='*60}")
-
     # NOTE: chat_history is NOT loaded for LLM context anymore!
     # LangGraph checkpointer handles message accumulation automatically by thread_id.
     # Supabase is only used for UI history display and analytics.
-    print(f"[CHAT] Using LangGraph checkpointer for history (thread_id={user_id}_{request.session_id})")
 
     async def generate():
         final_text = ""
@@ -226,14 +199,12 @@ async def chat_stream(request: ChatRequest, user_id: str = Depends(require_auth)
                 if event_type == "step_start":
                     agent_name = event.get("agent")
                     agents_used.append(agent_name)
-                    print(f"[{agent_name.upper()}] Starting...")
 
                 elif event_type == "step_end":
                     agent_name = event.get("agent")
                     step_number += 1
                     duration_ms = event.get("duration_ms", 0)
                     result = event.get("result") or {}
-                    print(f"[{agent_name.upper()}] Done in {duration_ms}ms, result: {result}")
 
                     # Get route from understander
                     if agent_name == "understander":
