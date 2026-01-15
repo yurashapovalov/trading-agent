@@ -56,9 +56,34 @@ export function useChats() {
         const chatList: ChatSession[] = Array.isArray(data) ? data : []
         setChats(chatList)
 
-        // Auto-select first chat if none selected
-        if (!currentChatId && chatList.length > 0) {
-          setCurrentChatId(chatList[0].id)
+        // Auto-select first chat or create one if empty
+        if (chatList.length > 0) {
+          if (!currentChatId) {
+            setCurrentChatId(chatList[0].id)
+          }
+        } else {
+          // Create first chat automatically
+          const title = "New Chat"
+          const createResponse = await fetch(`${API_URL}/chats`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${session.access_token}`,
+            },
+            body: JSON.stringify({ title }),
+          })
+          if (createResponse.ok) {
+            const data = await createResponse.json()
+            const newChat: ChatSession = {
+              id: data.id,
+              title,
+              stats: null,
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            }
+            setChats([newChat])
+            setCurrentChatId(newChat.id)
+          }
         }
       }
     } catch (e) {
