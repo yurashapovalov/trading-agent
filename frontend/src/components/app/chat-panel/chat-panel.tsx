@@ -312,7 +312,7 @@ export function ChatPanel({
               ? "Tell us what was helpful..."
               : "Tell us what went wrong..."
             }
-            rows={4}
+            rows={8}
           />
           <DialogFooter>
             <Button variant="outline" onClick={closeFeedbackModal}>
