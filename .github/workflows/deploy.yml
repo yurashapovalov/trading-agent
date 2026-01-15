@@ -26,9 +26,12 @@ jobs:
             git pull origin main
             source venv/bin/activate
             pip install -r requirements.txt --quiet
-            # Clean restart: stop service, kill any zombies, start fresh
+            # Clean restart: stop service, kill ALL zombies, start fresh
             systemctl stop trading-api || true
+            pkill -9 -f "uvicorn api:app" || true
             fuser -k 8000/tcp 2>/dev/null || true
-            sleep 1
+            sleep 2
             systemctl start trading-api
+            sleep 2
+            systemctl status trading-api --no-pager || true
             echo "Deployed successfully!"
