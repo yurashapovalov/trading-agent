@@ -8,6 +8,9 @@ on:
       - 'data/**'
       - 'api.py'
       - 'config.py'
+      - 'Dockerfile'
+      - 'docker-compose.yml'
+      - 'requirements.txt'
 
 jobs:
   deploy:
@@ -23,11 +26,10 @@ jobs:
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           timeout: 300s
           command_timeout: 10m
-          debug: true
           script: |
             cd /root/stock
             git pull origin main
-            source venv/bin/activate
-            pip install -r requirements.txt --quiet
-            systemctl restart trading-api
+            docker compose down
+            docker compose up --build -d
+            docker compose logs --tail=20
             echo "Deployed successfully!"
