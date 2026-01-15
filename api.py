@@ -449,7 +449,8 @@ async def maybe_generate_chat_title(chat_id: str) -> str | None:
         response = client.models.generate_content(
             model="gemini-2.0-flash-lite",  # Fast model for simple task
             contents=f"""Generate a short title (3-5 words, max 40 chars) for this chat conversation.
-The title should capture the main topic. Reply with ONLY the title, no quotes or explanation.
+The title should capture the main topic. Use the SAME LANGUAGE as the conversation.
+Reply with ONLY the title, no quotes or explanation.
 
 Conversation:
 {messages_text}""",
