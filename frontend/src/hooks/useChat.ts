@@ -296,6 +296,7 @@ export function useChat({ chatId, onChatCreated, onTitleUpdated }: UseChatOption
                     {
                       role: "assistant",
                       content: stripSuggestions(finalText),
+                      request_id: event.request_id,
                       agent_steps: [...stepsCollected],
                       route,
                       validation_passed: validationPassed,
