@@ -75,9 +75,10 @@ function tracesToAgentSteps(traces: any[]): AgentStep[] {
 type UseChatOptions = {
   chatId: string | null
   onChatCreated?: (chatId: string) => void
+  onTitleUpdated?: (chatId: string, title: string) => void
 }
 
-export function useChat({ chatId, onChatCreated }: UseChatOptions) {
+export function useChat({ chatId, onChatCreated, onTitleUpdated }: UseChatOptions) {
   const { session } = useAuth()
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [isLoading, setIsLoading] = useState(false)
@@ -281,6 +282,11 @@ export function useChat({ chatId, onChatCreated }: UseChatOptions) {
                   // Backend created or resolved chat - notify parent to update state
                   if (event.chat_id && onChatCreated) {
                     onChatCreated(event.chat_id)
+                  }
+                } else if (event.type === "chat_title") {
+                  // Backend generated a title for the chat
+                  if (event.chat_id && event.title && onTitleUpdated) {
+                    onTitleUpdated(event.chat_id, event.title)
                   }
                 } else if (event.type === "done") {
                   setMessages((prev) => [

@@ -396,10 +396,11 @@ def get_or_create_chat_session(user_id: str, chat_id: str | None) -> str:
     return result.data[0]["id"]
 
 
-async def maybe_generate_chat_title(chat_id: str):
-    """Generate chat title if this is the 2nd or 3rd message and no title yet."""
+async def maybe_generate_chat_title(chat_id: str) -> str | None:
+    """Generate chat title if this is the 2nd or 3rd message and no title yet.
+    Returns the new title if generated, None otherwise."""
     if not supabase:
-        return
+        return None
 
     try:
         # Check if title already exists
@@ -408,8 +409,10 @@ async def maybe_generate_chat_title(chat_id: str):
             .eq("id", chat_id) \
             .execute()
 
-        if not chat_result.data or chat_result.data[0].get("title"):
-            return  # Already has title
+        current_title = chat_result.data[0].get("title") if chat_result.data else None
+        # Skip if already has a real title (not "New Chat")
+        if current_title and not current_title.startswith("New Chat"):
+            return None  # Already has custom title
 
         # Count messages in this chat
         count_result = supabase.table("chat_logs") \
@@ -421,7 +424,7 @@ async def maybe_generate_chat_title(chat_id: str):
 
         # Generate title after 2-3 messages
         if message_count < 2:
-            return
+            return None
 
         # Get first 3 messages for title generation
         messages_result = supabase.table("chat_logs") \
@@ -432,7 +435,7 @@ async def maybe_generate_chat_title(chat_id: str):
             .execute()
 
         if not messages_result.data:
-            return
+            return None
 
         # Generate title using Gemini
         from google import genai
@@ -460,8 +463,11 @@ Conversation:
             .eq("id", chat_id) \
             .execute()
 
+        return title
+
     except Exception as e:
         print(f"Failed to generate chat title: {e}")
+        return None
 
 
 def get_recent_chat_history(user_id: str, limit: int = config.CHAT_HISTORY_LIMIT) -> list[dict]:
@@ -612,7 +618,9 @@ async def chat_stream(request: ChatRequest, user_id: str = Depends(require_auth)
                     )
 
                     # Generate chat title after 2-3 messages
-                    await maybe_generate_chat_title(chat_id)
+                    new_title = await maybe_generate_chat_title(chat_id)
+                    if new_title:
+                        yield f"data: {json.dumps({'type': 'chat_title', 'chat_id': chat_id, 'title': new_title})}\n\n"
 
                     # Include chat_id in done event for frontend
                     yield f"data: {json.dumps({'type': 'chat_id', 'chat_id': chat_id})}\n\n"

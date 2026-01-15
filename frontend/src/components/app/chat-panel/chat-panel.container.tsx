@@ -9,7 +9,7 @@ import { PageHeaderContainer } from "@/components/app/page-header/page-header.co
 
 export default function ChatPanelContainer() {
   const { user } = useAuth()
-  const { currentChatId, selectChat, refreshChats } = useChatsContext()
+  const { currentChatId, selectChat, refreshChats, updateChatTitle } = useChatsContext()
   const [text, setText] = useState("")
 
   const handleChatCreated = useCallback((chatId: string) => {
@@ -25,7 +25,11 @@ export default function ChatPanelContainer() {
     suggestions,
     sendMessage,
     stopGeneration,
-  } = useChat({ chatId: currentChatId, onChatCreated: handleChatCreated })
+  } = useChat({
+    chatId: currentChatId,
+    onChatCreated: handleChatCreated,
+    onTitleUpdated: updateChatTitle,
+  })
 
   const handleSubmit = async () => {
     if (!text.trim()) return

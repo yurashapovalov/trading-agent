@@ -47,5 +47,6 @@ export type SSEEvent =
   | { type: "suggestions"; suggestions: string[] }
   | { type: "usage"; input_tokens: number; output_tokens: number; thinking_tokens?: number; cost: number }
   | { type: "chat_id"; chat_id: string }
+  | { type: "chat_title"; chat_id: string; title: string }
   | { type: "done" }
   | { type: "error"; message: string }
