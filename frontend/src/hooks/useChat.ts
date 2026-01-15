@@ -103,7 +103,9 @@ export function useChat({ chatId, onChatCreated }: UseChatOptions) {
         })
         if (response.ok) {
           const data = await response.json()
-          const loadedMessages: ChatMessage[] = data.messages
+          // API returns array directly, not {messages: [...]}
+          const messages = Array.isArray(data) ? data : []
+          const loadedMessages: ChatMessage[] = messages
             .map((item: any) => [
               { role: "user" as const, content: item.question },
               {
@@ -133,7 +135,7 @@ export function useChat({ chatId, onChatCreated }: UseChatOptions) {
   }, [session?.access_token, chatId])
 
   const sendMessage = useCallback(
-    async (text: string) => {
+    async (text: string, chatIdOverride?: string | null) => {
       if (!text.trim() || isLoading) return
 
       setMessages((prev) => [...prev, { role: "user", content: text }])
@@ -142,6 +144,9 @@ export function useChat({ chatId, onChatCreated }: UseChatOptions) {
       setStreamingText("")
 
       abortControllerRef.current = new AbortController()
+
+      // Use override if provided (for freshly materialized chats)
+      const effectiveChatId = chatIdOverride !== undefined ? chatIdOverride : chatId
 
       try {
         const response = await fetch(`${API_URL}/chat/stream`, {
@@ -154,7 +159,7 @@ export function useChat({ chatId, onChatCreated }: UseChatOptions) {
           },
           body: JSON.stringify({
             message: text,
-            chat_id: chatId,
+            chat_id: effectiveChatId,
           }),
           signal: abortControllerRef.current.signal,
         })

@@ -9,7 +9,7 @@ import { PageHeaderContainer } from "@/components/app/page-header/page-header.co
 
 export default function ChatPanelContainer() {
   const { user } = useAuth()
-  const { currentChatId, selectChat, refreshChats } = useChatsContext()
+  const { currentChatId, selectChat, refreshChats, materializeChat, isCurrentChatVirtual } = useChatsContext()
   const [text, setText] = useState("")
 
   const handleChatCreated = useCallback((chatId: string) => {
@@ -27,15 +27,39 @@ export default function ChatPanelContainer() {
     stopGeneration,
   } = useChat({ chatId: currentChatId, onChatCreated: handleChatCreated })
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!text.trim()) return
-    sendMessage(text)
+
+    let chatIdToUse = currentChatId
+
+    // Materialize virtual chat before sending first message
+    if (currentChatId && isCurrentChatVirtual()) {
+      const realId = await materializeChat(currentChatId)
+      if (!realId) {
+        console.error("Failed to create chat")
+        return
+      }
+      chatIdToUse = realId
+    }
+
+    sendMessage(text, chatIdToUse)
     setText("")
   }
 
-  const handleSuggestionClick = (suggestion: string) => {
-    // Send suggestion as a normal message
-    sendMessage(suggestion)
+  const handleSuggestionClick = async (suggestion: string) => {
+    let chatIdToUse = currentChatId
+
+    // Materialize virtual chat before sending
+    if (currentChatId && isCurrentChatVirtual()) {
+      const realId = await materializeChat(currentChatId)
+      if (!realId) {
+        console.error("Failed to create chat")
+        return
+      }
+      chatIdToUse = realId
+    }
+
+    sendMessage(suggestion, chatIdToUse)
   }
 
   return (

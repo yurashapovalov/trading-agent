@@ -41,7 +41,7 @@ export function LeftPanelContainer() {
     console.log("Settings")
   }
 
-  const history = chats.map((chat) => ({
+  const history = (chats || []).map((chat) => ({
     id: chat.id,
     title: chat.title || "New Chat",
   }))
