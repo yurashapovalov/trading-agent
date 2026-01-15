@@ -1,6 +1,6 @@
 """FastAPI server for Trading Analytics Agent.
 
-v2.2.1 - Fix request_id passing for feedback
+v2.2.2 - Fix request_id passing for feedback
 
 Provides REST API and SSE streaming endpoints for the multi-agent trading
 analysis system. Handles authentication via Supabase JWT, chat history,
