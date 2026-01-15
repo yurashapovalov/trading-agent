@@ -94,8 +94,9 @@ class Analyst:
         if HAS_STREAM_WRITER:
             try:
                 writer = get_stream_writer()
-            except Exception:
-                pass  # Not in streaming context
+                print(f"[Analyst] Got stream writer: {writer}")
+            except Exception as e:
+                print(f"[Analyst] No stream writer: {e}")
 
         if writer:
             # Real-time streaming mode - use simpler prompt without JSON requirement
