@@ -135,7 +135,7 @@ export function useChat({ chatId, onChatCreated }: UseChatOptions) {
   }, [session?.access_token, chatId])
 
   const sendMessage = useCallback(
-    async (text: string, chatIdOverride?: string | null) => {
+    async (text: string) => {
       if (!text.trim() || isLoading) return
 
       setMessages((prev) => [...prev, { role: "user", content: text }])
@@ -144,9 +144,6 @@ export function useChat({ chatId, onChatCreated }: UseChatOptions) {
       setStreamingText("")
 
       abortControllerRef.current = new AbortController()
-
-      // Use override if provided (for freshly materialized chats)
-      const effectiveChatId = chatIdOverride !== undefined ? chatIdOverride : chatId
 
       try {
         const response = await fetch(`${API_URL}/chat/stream`, {
@@ -159,7 +156,7 @@ export function useChat({ chatId, onChatCreated }: UseChatOptions) {
           },
           body: JSON.stringify({
             message: text,
-            chat_id: effectiveChatId,
+            chat_id: chatId,
           }),
           signal: abortControllerRef.current.signal,
         })

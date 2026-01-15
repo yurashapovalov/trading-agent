@@ -17,11 +17,7 @@ export type ChatSession = {
   } | null
   created_at: string
   updated_at: string
-  isVirtual?: boolean // Not saved to DB yet
 }
-
-// Generate temporary ID for virtual chats
-const generateVirtualId = () => `virtual_${Date.now()}_${Math.random().toString(36).slice(2)}`
 
 export function useChats() {
   const { session } = useAuth()
@@ -47,60 +43,6 @@ export function useChats() {
     return `New Chat ${maxNum}`
   }, [])
 
-  // Create virtual chat (local only, no API call)
-  const createVirtualChat = useCallback((title: string): ChatSession => {
-    return {
-      id: generateVirtualId(),
-      title,
-      stats: null,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-      isVirtual: true,
-    }
-  }, [])
-
-  // Materialize virtual chat in DB (called on first message)
-  const materializeChat = useCallback(async (virtualId: string): Promise<string | null> => {
-    if (!session?.access_token) return null
-
-    const virtualChat = chats.find(c => c.id === virtualId)
-    if (!virtualChat || !virtualChat.isVirtual) return virtualId // Already real
-
-    try {
-      const response = await fetch(`${API_URL}/chats`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${session.access_token}`,
-        },
-        body: JSON.stringify({ title: virtualChat.title }),
-      })
-      if (response.ok) {
-        const data = await response.json()
-        const realId = data.id
-
-        // Replace virtual chat with real one
-        setChats((prev) =>
-          prev.map((c) =>
-            c.id === virtualId
-              ? { ...c, id: realId, isVirtual: false }
-              : c
-          )
-        )
-
-        // Update currentChatId if it was the virtual one
-        if (currentChatId === virtualId) {
-          setCurrentChatId(realId)
-        }
-
-        return realId
-      }
-    } catch (e) {
-      console.error("Failed to materialize chat:", e)
-    }
-    return null
-  }, [session?.access_token, chats, currentChatId])
-
   // Fetch chats from DB
   const fetchChats = useCallback(async () => {
     if (!session?.access_token) return
@@ -112,18 +54,11 @@ export function useChats() {
       if (response.ok) {
         const data = await response.json()
         const chatList: ChatSession[] = Array.isArray(data) ? data : []
+        setChats(chatList)
 
-        if (chatList.length === 0) {
-          // No chats in DB - create virtual one locally
-          const virtualChat = createVirtualChat("New Chat")
-          setChats([virtualChat])
-          setCurrentChatId(virtualChat.id)
-        } else {
-          setChats(chatList)
-          // Auto-select first chat if none selected
-          if (!currentChatId) {
-            setCurrentChatId(chatList[0].id)
-          }
+        // Auto-select first chat if none selected
+        if (!currentChatId && chatList.length > 0) {
+          setCurrentChatId(chatList[0].id)
         }
       }
     } catch (e) {
@@ -131,43 +66,47 @@ export function useChats() {
     } finally {
       setIsLoading(false)
     }
-  }, [session?.access_token, currentChatId, createVirtualChat])
+  }, [session?.access_token, currentChatId])
 
   useEffect(() => {
     fetchChats()
   }, [fetchChats])
 
-  // Create new chat (virtual, no API call)
-  const createChat = useCallback((): string => {
+  // Create new chat in API
+  const createChat = useCallback(async (): Promise<string | null> => {
+    if (!session?.access_token) return null
+
     const title = getNextNewChatTitle(chats)
-    const virtualChat = createVirtualChat(title)
-    setChats((prev) => [virtualChat, ...prev])
-    setCurrentChatId(virtualChat.id)
-    return virtualChat.id
-  }, [chats, createVirtualChat, getNextNewChatTitle])
+
+    try {
+      const response = await fetch(`${API_URL}/chats`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({ title }),
+      })
+      if (response.ok) {
+        const data = await response.json()
+        const newChat: ChatSession = {
+          id: data.id,
+          title,
+          stats: null,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        }
+        setChats((prev) => [newChat, ...prev])
+        setCurrentChatId(newChat.id)
+        return newChat.id
+      }
+    } catch (e) {
+      console.error("Failed to create chat:", e)
+    }
+    return null
+  }, [session?.access_token, chats, getNextNewChatTitle])
 
   const deleteChat = useCallback(async (chatId: string) => {
-    const chatToDelete = chats.find(c => c.id === chatId)
-
-    // If virtual, just remove from state
-    if (chatToDelete?.isVirtual) {
-      const remainingChats = chats.filter((c) => c.id !== chatId)
-      setChats(remainingChats)
-
-      if (currentChatId === chatId) {
-        if (remainingChats.length > 0) {
-          setCurrentChatId(remainingChats[0].id)
-        } else {
-          // Create new virtual chat
-          const virtualChat = createVirtualChat("New Chat")
-          setChats([virtualChat])
-          setCurrentChatId(virtualChat.id)
-        }
-      }
-      return
-    }
-
-    // Real chat - delete from DB
     if (!session?.access_token) return
 
     try {
@@ -183,17 +122,14 @@ export function useChats() {
           if (remainingChats.length > 0) {
             setCurrentChatId(remainingChats[0].id)
           } else {
-            // All chats deleted - create virtual one
-            const virtualChat = createVirtualChat("New Chat")
-            setChats([virtualChat])
-            setCurrentChatId(virtualChat.id)
+            setCurrentChatId(null)
           }
         }
       }
     } catch (e) {
       console.error("Failed to delete chat:", e)
     }
-  }, [session?.access_token, currentChatId, chats, createVirtualChat])
+  }, [session?.access_token, currentChatId, chats])
 
   const selectChat = useCallback((chatId: string) => {
     setCurrentChatId(chatId)
@@ -205,12 +141,6 @@ export function useChats() {
     )
   }, [])
 
-  // Check if current chat is virtual
-  const isCurrentChatVirtual = useCallback(() => {
-    const current = chats.find(c => c.id === currentChatId)
-    return current?.isVirtual ?? false
-  }, [chats, currentChatId])
-
   return {
     chats,
     currentChatId,
@@ -220,7 +150,5 @@ export function useChats() {
     selectChat,
     updateChatTitle,
     refreshChats: fetchChats,
-    materializeChat,
-    isCurrentChatVirtual,
   }
 }
