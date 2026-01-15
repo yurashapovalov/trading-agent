@@ -123,27 +123,46 @@ def root():
 def get_recent_chat_history(user_id: str, limit: int = config.CHAT_HISTORY_LIMIT) -> list[dict]:
     """Fetch recent chat history from Supabase for context."""
     if not supabase:
+        print(f"[API DEBUG] No supabase client, returning empty history")
         return []
 
     try:
         # Load by user_id only (no session filter until we implement multiple chats)
         result = supabase.table("chat_logs") \
-            .select("question, response") \
+            .select("question, response, session_id, created_at") \
             .eq("user_id", user_id) \
             .order("created_at", desc=True) \
             .limit(limit) \
             .execute()
+
+        # === DEBUG LOGGING ===
+        print(f"\n{'='*60}")
+        print(f"[API DEBUG] Chat History Load:")
+        print(f"  User ID: {user_id[:8]}...")
+        print(f"  Limit: {limit}")
+        print(f"  Rows from DB: {len(result.data) if result.data else 0}")
+        if result.data:
+            for i, row in enumerate(result.data[:5]):  # Show first 5
+                q = row.get('question', '')[:40]
+                r_len = len(row.get('response', '') or '')
+                sid = row.get('session_id', '')[-20:] if row.get('session_id') else 'N/A'
+                print(f"    [{i}] Q: {q}... | R: {r_len} chars | session: ...{sid}")
+        print(f"{'='*60}\n")
 
         if not result.data:
             return []
 
         # Convert to chat format and reverse to chronological order
         history = []
+        total_chars = 0
         for row in reversed(result.data):
             history.append({"role": "user", "content": row["question"]})
+            total_chars += len(row["question"])
             if row.get("response"):
                 history.append({"role": "assistant", "content": row["response"]})
+                total_chars += len(row["response"])
 
+        print(f"[API DEBUG] History built: {len(history)} messages, {total_chars} total chars (~{total_chars//4} tokens est.)")
         return history
     except Exception as e:
         print(f"Failed to fetch chat history: {e}")
@@ -169,10 +188,17 @@ async def chat_stream(request: ChatRequest, user_id: str = Depends(require_auth)
     import uuid
     from agent.graph import trading_graph
 
-    print(f"[CHAT] Processing: {request.message[:50]}... for user {user_id[:8]}...")
+    print(f"\n{'='*60}")
+    print(f"[CHAT] NEW REQUEST:")
+    print(f"  Message: {request.message[:80]}...")
+    print(f"  User: {user_id[:8]}...")
+    print(f"  Session: {request.session_id}")
+    print(f"{'='*60}")
 
     # Load recent chat history for context
     chat_history = get_recent_chat_history(user_id)
+
+    print(f"[CHAT] Loaded {len(chat_history)} history messages for context")
 
     async def generate():
         final_text = ""
