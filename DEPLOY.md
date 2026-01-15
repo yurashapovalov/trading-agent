@@ -4,7 +4,7 @@
 
 - **Server**: Hetzner VPS (37.27.204.135:2222)
 - **Path**: `/root/stock`
-- **Service**: `trading-api` (systemd)
+- **Service**: Docker Compose
 - **Auto-deploy**: GitHub Actions on push to `main`
 
 ## Auto Deployment
@@ -21,13 +21,16 @@ on:
       - 'data/**'
       - 'api.py'
       - 'config.py'
+      - 'Dockerfile'
+      - 'docker-compose.yml'
+      - 'requirements.txt'
 ```
 
 GitHub Actions will:
 1. SSH to server
 2. `git pull origin main`
-3. `pip install -r requirements.txt`
-4. `systemctl restart trading-api`
+3. `docker compose down`
+4. `docker compose up --build -d`
 
 ## Manual Deployment
 
@@ -35,19 +38,18 @@ GitHub Actions will:
 ssh -p 2222 root@37.27.204.135
 cd /root/stock
 git pull
-source venv/bin/activate
-pip install -r requirements.txt
-systemctl restart trading-api
+docker compose down
+docker compose up --build -d
 ```
 
 ## Check Status
 
 ```bash
-# Service status
-systemctl status trading-api
+# Container status
+docker compose ps
 
 # Logs
-journalctl -u trading-api -f
+docker compose logs -f
 
 # Test API
 curl http://localhost:8000/
@@ -69,15 +71,28 @@ DATABASE_PATH=data/trading.duckdb
 
 Frontend is on Vercel, auto-deploys from `frontend/` folder.
 
+## Domain Configuration
+
+- **Frontend**: askbar.ai (Vercel)
+- **API**: api.askbar.ai → 37.27.204.135 (Hetzner)
+
+DNS A-record needed:
+```
+api.askbar.ai → 37.27.204.135
+```
+
 ## Troubleshooting
 
 ```bash
-# Restart service
-systemctl restart trading-api
+# Restart container
+docker compose restart
 
-# Check Python errors
-journalctl -u trading-api -n 100
+# Rebuild container
+docker compose up --build -d
 
-# Test locally
-python api.py
+# Check container logs
+docker compose logs --tail=100
+
+# Enter container shell
+docker compose exec api bash
 ```
