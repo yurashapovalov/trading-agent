@@ -21,7 +21,7 @@ jobs:
           port: 2222
           username: root
           key: ${{ secrets.DEPLOY_SSH_KEY }}
-          timeout: 60s
+          timeout: 300s
           command_timeout: 10m
           script: |
             cd /root/stock
