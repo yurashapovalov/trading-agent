@@ -41,8 +41,7 @@ export function PageHeaderContainer({ title, userEmail }: PageHeaderContainerPro
         !isLeftOpen ? (
           <Button
             variant="ghost"
-            size="icon"
-            className="-ml-1 size-7"
+            size="icon-sm"
             onClick={handleOpenLeft}
           >
             <PanelLeftIcon className="size-4" />
@@ -54,8 +53,7 @@ export function PageHeaderContainer({ title, userEmail }: PageHeaderContainerPro
         !isRightOpen ? (
           <Button
             variant="ghost"
-            size="icon"
-            className="size-7"
+            size="icon-sm"
             onClick={handleOpenRight}
           >
             <PanelRightIcon className="size-4" />
