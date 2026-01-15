@@ -8,13 +8,13 @@ __pycache__
 .git
 .gitignore
 
-# Data files (large!)
-data/
-*.db
-*.duckdb
-*.duckdb.tmp
-*.duckdb-shm
-*.duckdb-wal
+# Data files (large!) - but keep Python code in data/
+data/*.db
+data/*.duckdb
+data/*.duckdb.tmp
+data/*.duckdb-shm
+data/*.duckdb-wal
+data/trading.duckdb.tmp/
 
 # Docs and misc
 *.md
@@ -22,6 +22,6 @@ docs/
 frontend/
 .github/
 
-# Env files
+# Env files (use env_file in docker-compose)
 .env
 .env.*
