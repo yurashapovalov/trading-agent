@@ -25,7 +25,8 @@ import {
 import { Loader } from "@/components/ai/loader"
 
 import type { AgentStep, ChatMessage } from "@/types/chat"
-import { DatabaseIcon, BrainIcon, CheckCircleIcon, RouteIcon, MessageCircleIcon, CodeIcon } from "lucide-react"
+import { DatabaseIcon, BrainIcon, CheckCircleIcon, RouteIcon, MessageCircleIcon, CodeIcon, ThumbsUpIcon, ThumbsDownIcon } from "lucide-react"
+import { Actions, Action } from "@/components/ai/actions"
 
 // Map agent names to icons
 const agentIcons: Record<string, any> = {
@@ -140,10 +141,20 @@ export function ChatPanel({
                 </MessageContent>
 
                 {message.role === "assistant" && message.usage && (
-                  <div className="mt-2 text-xs text-muted-foreground">
-                    {message.usage.input_tokens.toLocaleString()} / {message.usage.output_tokens.toLocaleString()}
-                    {message.usage.thinking_tokens ? ` / ${message.usage.thinking_tokens.toLocaleString()}` : ""}
-                    {" · $"}{message.usage.cost.toFixed(4)}
+                  <div className="mt-2 flex items-center gap-4">
+                    <div className="text-xs text-muted-foreground">
+                      {message.usage.input_tokens.toLocaleString()} / {message.usage.output_tokens.toLocaleString()}
+                      {message.usage.thinking_tokens ? ` / ${message.usage.thinking_tokens.toLocaleString()}` : ""}
+                      {" · $"}{message.usage.cost.toFixed(4)}
+                    </div>
+                    <Actions>
+                      <Action tooltip="Good response">
+                        <ThumbsUpIcon className="size-4" />
+                      </Action>
+                      <Action tooltip="Bad response">
+                        <ThumbsDownIcon className="size-4" />
+                      </Action>
+                    </Actions>
                   </div>
                 )}
               </div>
