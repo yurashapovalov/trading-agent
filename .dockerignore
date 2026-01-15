@@ -1,12 +1,27 @@
+# Dependencies
 .venv
 venv
 __pycache__
 *.pyc
+
+# Git
 .git
-.env
+.gitignore
+
+# Data files (large!)
+data/
+*.db
+*.duckdb
+*.duckdb.tmp
+*.duckdb-shm
+*.duckdb-wal
+
+# Docs and misc
 *.md
 docs/
 frontend/
 .github/
-data/*.db
-data/*.duckdb
+
+# Env files
+.env
+.env.*
