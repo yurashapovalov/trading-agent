@@ -94,9 +94,8 @@ class Analyst:
         if HAS_STREAM_WRITER:
             try:
                 writer = get_stream_writer()
-                print(f"[Analyst] Got stream writer: {writer}")
-            except Exception as e:
-                print(f"[Analyst] No stream writer: {e}")
+            except Exception:
+                pass  # Not in streaming context
 
         if writer:
             # Real-time streaming mode - use simpler prompt without JSON requirement
@@ -139,7 +138,6 @@ class Analyst:
 
                 # Emit text chunk in real-time
                 if chunk.text:
-                    print(f"[Analyst] Chunk: {len(chunk.text)} chars")
                     writer({"type": "text_delta", "agent": self.name, "content": chunk.text})
                     full_text += chunk.text
 
