@@ -24,14 +24,21 @@ export type Usage = {
   cost: number
 }
 
+export type Feedback = {
+  rating?: "like" | "dislike"
+  comment?: string
+}
+
 export type ChatMessage = {
   role: "user" | "assistant"
   content: string
+  request_id?: string
   tools_used?: ToolUsage[]
   agent_steps?: AgentStep[]
   route?: string
   validation_passed?: boolean
   usage?: Usage
+  feedback?: Feedback
 }
 
 // SSE event types from backend

@@ -299,7 +299,7 @@ async def get_chat_messages(
 
         # Get messages for this chat
         result = supabase.table("chat_logs") \
-            .select("id, request_id, question, response, route, agents_used, validation_passed, input_tokens, output_tokens, thinking_tokens, cost_usd, created_at") \
+            .select("id, request_id, question, response, route, agents_used, validation_passed, input_tokens, output_tokens, thinking_tokens, cost_usd, feedback, created_at") \
             .eq("chat_id", chat_id) \
             .order("created_at") \
             .limit(limit) \
@@ -337,6 +337,48 @@ async def get_chat_messages(
     except Exception as e:
         print(f"Failed to get chat messages: {e}")
         return []
+
+
+class FeedbackUpdate(BaseModel):
+    rating: Optional[str] = None  # 'like' or 'dislike'
+    comment: Optional[str] = None
+
+
+@app.patch("/messages/{request_id}/feedback")
+async def update_message_feedback(
+    request_id: str,
+    feedback: FeedbackUpdate,
+    user_id: str = Depends(require_auth),
+):
+    """Update feedback (like/dislike/comment) for a message."""
+    if not supabase:
+        raise HTTPException(status_code=503, detail="Database not available")
+
+    try:
+        # Build feedback JSONB
+        feedback_data = {}
+        if feedback.rating:
+            feedback_data["rating"] = feedback.rating
+        if feedback.comment:
+            feedback_data["comment"] = feedback.comment
+
+        # Update only if message belongs to user
+        result = supabase.table("chat_logs") \
+            .update({"feedback": feedback_data if feedback_data else None}) \
+            .eq("request_id", request_id) \
+            .eq("user_id", user_id) \
+            .execute()
+
+        if not result.data:
+            raise HTTPException(status_code=404, detail="Message not found")
+
+        return {"status": "ok", "feedback": feedback_data}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Failed to update feedback: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 def get_or_create_chat_session(user_id: str, chat_id: str | None) -> str:

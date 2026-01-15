@@ -107,6 +107,7 @@ type ChatPanelProps = {
   onSubmit: () => void
   onStop: () => void
   onSuggestionClick: (suggestion: string) => void
+  onFeedback: (requestId: string, rating: "like" | "dislike") => void
 }
 
 export function ChatPanel({
@@ -121,6 +122,7 @@ export function ChatPanel({
   onSubmit,
   onStop,
   onSuggestionClick,
+  onFeedback,
 }: ChatPanelProps) {
   return (
     <div className="relative flex h-full w-full flex-col overflow-hidden">
@@ -140,13 +142,25 @@ export function ChatPanel({
                   <MessageResponse>{message.content}</MessageResponse>
                 </MessageContent>
 
-                {message.role === "assistant" && (
-                  <div className="mt-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+                {message.role === "assistant" && message.request_id && (
+                  <div className={`mt-2 transition-opacity duration-200 ${
+                    message.feedback?.rating
+                      ? "opacity-100"
+                      : "opacity-0 group-hover:opacity-100"
+                  }`}>
                     <Actions>
-                      <Action tooltip="Good response">
+                      <Action
+                        tooltip="Good response"
+                        onClick={() => onFeedback(message.request_id!, "like")}
+                        className={message.feedback?.rating === "like" ? "text-green-500" : ""}
+                      >
                         <ThumbsUpIcon className="size-4" />
                       </Action>
-                      <Action tooltip="Bad response">
+                      <Action
+                        tooltip="Bad response"
+                        onClick={() => onFeedback(message.request_id!, "dislike")}
+                        className={message.feedback?.rating === "dislike" ? "text-red-500" : ""}
+                      >
                         <ThumbsDownIcon className="size-4" />
                       </Action>
                     </Actions>

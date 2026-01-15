@@ -25,6 +25,7 @@ export default function ChatPanelContainer() {
     suggestions,
     sendMessage,
     stopGeneration,
+    updateFeedback,
   } = useChat({
     chatId: currentChatId,
     onChatCreated: handleChatCreated,
@@ -59,6 +60,7 @@ export default function ChatPanelContainer() {
       onSubmit={handleSubmit}
       onStop={stopGeneration}
       onSuggestionClick={handleSuggestionClick}
+      onFeedback={updateFeedback}
     />
   )
 }

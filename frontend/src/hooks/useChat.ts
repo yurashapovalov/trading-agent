@@ -112,6 +112,7 @@ export function useChat({ chatId, onChatCreated, onTitleUpdated }: UseChatOption
               {
                 role: "assistant" as const,
                 content: item.response,
+                request_id: item.request_id,
                 tools_used: [],
                 agent_steps: tracesToAgentSteps(item.traces || []),
                 route: item.route,
@@ -122,6 +123,7 @@ export function useChat({ chatId, onChatCreated, onTitleUpdated }: UseChatOption
                   thinking_tokens: item.thinking_tokens,
                   cost: parseFloat(item.cost_usd) || 0,
                 },
+                feedback: item.feedback,
               },
             ])
             .flat()
@@ -345,6 +347,37 @@ export function useChat({ chatId, onChatCreated, onTitleUpdated }: UseChatOption
     ])
   }, [])
 
+  const updateFeedback = useCallback(
+    async (requestId: string, rating: "like" | "dislike") => {
+      if (!session?.access_token) return
+
+      try {
+        const response = await fetch(`${API_URL}/messages/${requestId}/feedback`, {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${session.access_token}`,
+          },
+          body: JSON.stringify({ rating }),
+        })
+
+        if (response.ok) {
+          // Update local state
+          setMessages((prev) =>
+            prev.map((msg) =>
+              msg.request_id === requestId
+                ? { ...msg, feedback: { ...msg.feedback, rating } }
+                : msg
+            )
+          )
+        }
+      } catch (e) {
+        console.error("Failed to update feedback:", e)
+      }
+    },
+    [session?.access_token]
+  )
+
   return {
     messages,
     isLoading,
@@ -353,5 +386,6 @@ export function useChat({ chatId, onChatCreated, onTitleUpdated }: UseChatOption
     suggestions,
     sendMessage,
     stopGeneration,
+    updateFeedback,
   }
 }
