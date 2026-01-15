@@ -140,13 +140,8 @@ export function ChatPanel({
                   <MessageResponse>{message.content}</MessageResponse>
                 </MessageContent>
 
-                {message.role === "assistant" && message.usage && (
-                  <div className="mt-2 flex items-center gap-4">
-                    <div className="text-xs text-muted-foreground">
-                      {message.usage.input_tokens.toLocaleString()} / {message.usage.output_tokens.toLocaleString()}
-                      {message.usage.thinking_tokens ? ` / ${message.usage.thinking_tokens.toLocaleString()}` : ""}
-                      {" · $"}{message.usage.cost.toFixed(4)}
-                    </div>
+                {message.role === "assistant" && (
+                  <div className="mt-2">
                     <Actions>
                       <Action tooltip="Good response">
                         <ThumbsUpIcon className="size-4" />
