@@ -328,6 +328,7 @@ class TradingGraph:
 
             # Custom events (text_delta) — пробрасываем напрямую
             if stream_type == "custom":
+                print(f"[SSE] Custom event: {data.get('type', 'unknown')}")
                 yield data
                 continue
 
