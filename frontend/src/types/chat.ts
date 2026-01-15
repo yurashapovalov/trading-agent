@@ -25,8 +25,8 @@ export type Usage = {
 }
 
 export type Feedback = {
-  rating?: "like" | "dislike"
-  comment?: string
+  positive_feedback?: string
+  negative_feedback?: string
 }
 
 export type ChatMessage = {

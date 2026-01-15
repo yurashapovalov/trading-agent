@@ -340,8 +340,8 @@ async def get_chat_messages(
 
 
 class FeedbackUpdate(BaseModel):
-    rating: Optional[str] = None  # 'like' or 'dislike'
-    comment: Optional[str] = None
+    positive_feedback: Optional[str] = None
+    negative_feedback: Optional[str] = None
 
 
 @app.patch("/messages/{request_id}/feedback")
@@ -350,29 +350,36 @@ async def update_message_feedback(
     feedback: FeedbackUpdate,
     user_id: str = Depends(require_auth),
 ):
-    """Update feedback (like/dislike/comment) for a message."""
+    """Update feedback for a message."""
     if not supabase:
         raise HTTPException(status_code=503, detail="Database not available")
 
     try:
-        # Build feedback JSONB
-        feedback_data = {}
-        if feedback.rating:
-            feedback_data["rating"] = feedback.rating
-        if feedback.comment:
-            feedback_data["comment"] = feedback.comment
-
-        # Update only if message belongs to user
-        result = supabase.table("chat_logs") \
-            .update({"feedback": feedback_data if feedback_data else None}) \
+        # Get current feedback
+        current = supabase.table("chat_logs") \
+            .select("feedback") \
             .eq("request_id", request_id) \
             .eq("user_id", user_id) \
             .execute()
 
-        if not result.data:
+        if not current.data:
             raise HTTPException(status_code=404, detail="Message not found")
 
-        return {"status": "ok", "feedback": feedback_data}
+        # Merge with existing feedback
+        existing = current.data[0].get("feedback") or {}
+        if feedback.positive_feedback is not None:
+            existing["positive_feedback"] = feedback.positive_feedback
+        if feedback.negative_feedback is not None:
+            existing["negative_feedback"] = feedback.negative_feedback
+
+        # Update
+        result = supabase.table("chat_logs") \
+            .update({"feedback": existing if existing else None}) \
+            .eq("request_id", request_id) \
+            .eq("user_id", user_id) \
+            .execute()
+
+        return {"status": "ok", "feedback": existing}
 
     except HTTPException:
         raise

@@ -348,8 +348,10 @@ export function useChat({ chatId, onChatCreated, onTitleUpdated }: UseChatOption
   }, [])
 
   const updateFeedback = useCallback(
-    async (requestId: string, rating: "like" | "dislike") => {
+    async (requestId: string, type: "positive" | "negative", text: string) => {
       if (!session?.access_token) return
+
+      const field = type === "positive" ? "positive_feedback" : "negative_feedback"
 
       try {
         const response = await fetch(`${API_URL}/messages/${requestId}/feedback`, {
@@ -358,7 +360,7 @@ export function useChat({ chatId, onChatCreated, onTitleUpdated }: UseChatOption
             "Content-Type": "application/json",
             Authorization: `Bearer ${session.access_token}`,
           },
-          body: JSON.stringify({ rating }),
+          body: JSON.stringify({ [field]: text }),
         })
 
         if (response.ok) {
@@ -366,7 +368,7 @@ export function useChat({ chatId, onChatCreated, onTitleUpdated }: UseChatOption
           setMessages((prev) =>
             prev.map((msg) =>
               msg.request_id === requestId
-                ? { ...msg, feedback: { ...msg.feedback, rating } }
+                ? { ...msg, feedback: { ...msg.feedback, [field]: text } }
                 : msg
             )
           )

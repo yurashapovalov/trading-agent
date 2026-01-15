@@ -1,3 +1,6 @@
+"use client"
+
+import { useState } from "react"
 import {
   Conversation,
   ConversationContent,
@@ -23,6 +26,15 @@ import {
   PromptInputTools,
 } from "@/components/ai/prompt-input"
 import { Loader } from "@/components/ai/loader"
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog"
+import { Button } from "@/components/ui/button"
+import { Textarea } from "@/components/ui/textarea"
 
 import type { AgentStep, ChatMessage } from "@/types/chat"
 import { DatabaseIcon, BrainIcon, CheckCircleIcon, RouteIcon, MessageCircleIcon, CodeIcon, ThumbsUpIcon, ThumbsDownIcon } from "lucide-react"
@@ -107,7 +119,14 @@ type ChatPanelProps = {
   onSubmit: () => void
   onStop: () => void
   onSuggestionClick: (suggestion: string) => void
-  onFeedback: (requestId: string, rating: "like" | "dislike") => void
+  onFeedback: (requestId: string, type: "positive" | "negative", text: string) => void
+}
+
+type FeedbackModal = {
+  open: boolean
+  requestId: string
+  type: "positive" | "negative"
+  existingText: string
 }
 
 export function ChatPanel({
@@ -124,6 +143,31 @@ export function ChatPanel({
   onSuggestionClick,
   onFeedback,
 }: ChatPanelProps) {
+  const [feedbackModal, setFeedbackModal] = useState<FeedbackModal>({
+    open: false,
+    requestId: "",
+    type: "positive",
+    existingText: "",
+  })
+  const [feedbackText, setFeedbackText] = useState("")
+
+  const openFeedbackModal = (requestId: string, type: "positive" | "negative", existingText: string = "") => {
+    setFeedbackModal({ open: true, requestId, type, existingText })
+    setFeedbackText(existingText)
+  }
+
+  const closeFeedbackModal = () => {
+    setFeedbackModal({ ...feedbackModal, open: false })
+    setFeedbackText("")
+  }
+
+  const submitFeedback = () => {
+    if (feedbackText.trim()) {
+      onFeedback(feedbackModal.requestId, feedbackModal.type, feedbackText.trim())
+    }
+    closeFeedbackModal()
+  }
+
   return (
     <div className="relative flex h-full w-full flex-col overflow-hidden">
       {header}
@@ -144,22 +188,30 @@ export function ChatPanel({
 
                 {message.role === "assistant" && message.request_id && (
                   <div className={`mt-2 transition-opacity duration-200 ${
-                    message.feedback?.rating
+                    message.feedback?.positive_feedback || message.feedback?.negative_feedback
                       ? "opacity-100"
                       : "opacity-0 group-hover:opacity-100"
                   }`}>
                     <Actions>
                       <Action
-                        tooltip="Good response"
-                        onClick={() => onFeedback(message.request_id!, "like")}
-                        className={message.feedback?.rating === "like" ? "text-green-500" : ""}
+                        tooltip="Give positive feedback"
+                        onClick={() => openFeedbackModal(
+                          message.request_id!,
+                          "positive",
+                          message.feedback?.positive_feedback || ""
+                        )}
+                        className={message.feedback?.positive_feedback ? "text-green-500" : ""}
                       >
                         <ThumbsUpIcon className="size-4" />
                       </Action>
                       <Action
-                        tooltip="Bad response"
-                        onClick={() => onFeedback(message.request_id!, "dislike")}
-                        className={message.feedback?.rating === "dislike" ? "text-red-500" : ""}
+                        tooltip="Give negative feedback"
+                        onClick={() => openFeedbackModal(
+                          message.request_id!,
+                          "negative",
+                          message.feedback?.negative_feedback || ""
+                        )}
+                        className={message.feedback?.negative_feedback ? "text-red-500" : ""}
                       >
                         <ThumbsDownIcon className="size-4" />
                       </Action>
@@ -238,6 +290,34 @@ export function ChatPanel({
           </PromptInputFooter>
         </PromptInput>
       </div>
+
+      {/* Feedback Modal */}
+      <Dialog open={feedbackModal.open} onOpenChange={(open) => !open && closeFeedbackModal()}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {feedbackModal.type === "positive" ? "What did you like?" : "What could be improved?"}
+            </DialogTitle>
+          </DialogHeader>
+          <Textarea
+            value={feedbackText}
+            onChange={(e) => setFeedbackText(e.target.value)}
+            placeholder={feedbackModal.type === "positive"
+              ? "Tell us what was helpful..."
+              : "Tell us what went wrong..."
+            }
+            rows={4}
+          />
+          <DialogFooter>
+            <Button variant="outline" onClick={closeFeedbackModal}>
+              Cancel
+            </Button>
+            <Button onClick={submitFeedback} disabled={!feedbackText.trim()}>
+              Submit
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
