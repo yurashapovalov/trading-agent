@@ -1,18 +1,13 @@
 "use client"
 
 import { useAuth } from "@/components/auth-provider"
+import { useChatsContext } from "@/components/chats-provider"
 import { useSidebar } from "@/components/ui/sidebar"
 import { LeftPanel } from "./left-panel"
 
-// TODO: Replace with real data from API/state
-const mockHistory = [
-  { id: "1", title: "NQ Statistics" },
-  { id: "2", title: "Entry Points Analysis" },
-  { id: "3", title: "Backtest 9:30" },
-]
-
 export function LeftPanelContainer() {
   const { signOut } = useAuth()
+  const { chats, currentChatId, createChat, selectChat, deleteChat } = useChatsContext()
   const { isMobile, setOpen, setOpenMobile } = useSidebar("left")
 
   const handleClose = () => {
@@ -22,25 +17,43 @@ export function LeftPanelContainer() {
       setOpen(false)
     }
   }
-  const handleNewChat = () => {
-    // TODO: Implement new chat
-    console.log("New chat")
+
+  const handleNewChat = async () => {
+    await createChat()
+    if (isMobile) {
+      setOpenMobile(false)
+    }
   }
+
   const handleSelectChat = (id: string) => {
-    // TODO: Implement chat selection
-    console.log("Select chat:", id)
+    selectChat(id)
+    if (isMobile) {
+      setOpenMobile(false)
+    }
   }
+
+  const handleDeleteChat = async (id: string) => {
+    await deleteChat(id)
+  }
+
   const handleSettings = () => {
-    // TODO: Implement settings
+    // TODO: Navigate to settings page
     console.log("Settings")
   }
 
+  const history = chats.map((chat) => ({
+    id: chat.id,
+    title: chat.title || "New Chat",
+  }))
+
   return (
     <LeftPanel
-      history={mockHistory}
+      history={history}
+      currentChatId={currentChatId}
       onClose={handleClose}
       onNewChat={handleNewChat}
       onSelectChat={handleSelectChat}
+      onDeleteChat={handleDeleteChat}
       onSettings={handleSettings}
       onSignOut={signOut}
     />

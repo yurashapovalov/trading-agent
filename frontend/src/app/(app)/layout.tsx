@@ -1,10 +1,8 @@
 import { cookies } from "next/headers"
 import { LeftPanelContainer } from "@/components/app/left-panel/left-panel.container"
 import { RightPanelContainer } from "@/components/app/right-panel/right-panel.container"
-import {
-  SidebarInset,
-  SidebarProvider,
-} from "@/components/ui/sidebar"
+import { SidebarInset } from "@/components/ui/sidebar"
+import { AppProviders } from "./app-providers"
 
 export default async function Layout({
   children,
@@ -15,24 +13,23 @@ export default async function Layout({
   const defaultLeftOpen = cookieStore.get("sidebar_left")?.value !== "false"
   const defaultRightOpen = cookieStore.get("sidebar_right")?.value === "true"
 
-  // Read saved widths from cookies
   const leftWidthCookie = cookieStore.get("sidebar_left_width")?.value
   const rightWidthCookie = cookieStore.get("sidebar_right_width")?.value
   const defaultLeftWidth = leftWidthCookie ? parseInt(leftWidthCookie, 10) : undefined
   const defaultRightWidth = rightWidthCookie ? parseInt(rightWidthCookie, 10) : undefined
 
   return (
-    <SidebarProvider
-      defaultOpen={defaultLeftOpen}
+    <AppProviders
+      defaultLeftOpen={defaultLeftOpen}
       defaultRightOpen={defaultRightOpen}
-      {...(defaultLeftWidth && { defaultLeftWidth })}
-      {...(defaultRightWidth && { defaultRightWidth })}
+      defaultLeftWidth={defaultLeftWidth}
+      defaultRightWidth={defaultRightWidth}
     >
       <LeftPanelContainer />
       <SidebarInset className="overflow-hidden">
         {children}
       </SidebarInset>
       <RightPanelContainer />
-    </SidebarProvider>
+    </AppProviders>
   )
 }

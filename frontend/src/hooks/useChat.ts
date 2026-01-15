@@ -72,7 +72,12 @@ function tracesToAgentSteps(traces: any[]): AgentStep[] {
   })
 }
 
-export function useChat() {
+type UseChatOptions = {
+  chatId: string | null
+  onChatCreated?: (chatId: string) => void
+}
+
+export function useChat({ chatId, onChatCreated }: UseChatOptions) {
   const { session } = useAuth()
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [isLoading, setIsLoading] = useState(false)
@@ -81,23 +86,24 @@ export function useChat() {
   const [suggestions, setSuggestions] = useState<string[]>(DEFAULT_SUGGESTIONS)
   const abortControllerRef = useRef<AbortController | null>(null)
 
-  const sessionIdRef = useRef<string>("")
-  if (typeof window !== "undefined" && !sessionIdRef.current) {
-    sessionIdRef.current = `session_${Date.now()}_${Math.random().toString(36).slice(2)}`
-  }
-
-  // Load chat history
+  // Load messages when chatId changes
   useEffect(() => {
     if (!session?.access_token) return
 
-    const loadHistory = async () => {
+    // Clear messages when switching chats
+    setMessages([])
+    setSuggestions(DEFAULT_SUGGESTIONS)
+
+    if (!chatId) return
+
+    const loadChatMessages = async () => {
       try {
-        const response = await fetch(`${API_URL}/chat/history`, {
+        const response = await fetch(`${API_URL}/chats/${chatId}/messages`, {
           headers: { Authorization: `Bearer ${session.access_token}` },
         })
         if (response.ok) {
-          const history = await response.json()
-          const loadedMessages: ChatMessage[] = history
+          const data = await response.json()
+          const loadedMessages: ChatMessage[] = data.messages
             .map((item: any) => [
               { role: "user" as const, content: item.question },
               {
@@ -119,12 +125,12 @@ export function useChat() {
           setMessages(loadedMessages)
         }
       } catch (e) {
-        console.error("Failed to load history:", e)
+        console.error("Failed to load chat messages:", e)
       }
     }
 
-    loadHistory()
-  }, [session?.access_token])
+    loadChatMessages()
+  }, [session?.access_token, chatId])
 
   const sendMessage = useCallback(
     async (text: string) => {
@@ -146,7 +152,10 @@ export function useChat() {
               Authorization: `Bearer ${session.access_token}`,
             }),
           },
-          body: JSON.stringify({ message: text, session_id: sessionIdRef.current }),
+          body: JSON.stringify({
+            message: text,
+            chat_id: chatId,
+          }),
           signal: abortControllerRef.current.signal,
         })
 
@@ -266,6 +275,11 @@ export function useChat() {
                     thinking_tokens: event.thinking_tokens,
                     cost: event.cost,
                   }
+                } else if (event.type === "chat_id") {
+                  // Backend created or resolved chat - notify parent to update state
+                  if (event.chat_id && onChatCreated) {
+                    onChatCreated(event.chat_id)
+                  }
                 } else if (event.type === "done") {
                   setMessages((prev) => [
                     ...prev,
@@ -306,7 +320,7 @@ export function useChat() {
         abortControllerRef.current = null
       }
     },
-    [isLoading, session?.access_token]
+    [isLoading, session?.access_token, chatId]
   )
 
   const stopGeneration = useCallback(() => {

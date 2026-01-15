@@ -1,14 +1,22 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useCallback } from "react"
 import { useAuth } from "@/components/auth-provider"
+import { useChatsContext } from "@/components/chats-provider"
 import { useChat } from "@/hooks/useChat"
 import { ChatPanel } from "./chat-panel"
 import { PageHeaderContainer } from "@/components/app/page-header/page-header.container"
 
 export default function ChatPanelContainer() {
   const { user } = useAuth()
+  const { currentChatId, selectChat, refreshChats } = useChatsContext()
   const [text, setText] = useState("")
+
+  const handleChatCreated = useCallback((chatId: string) => {
+    selectChat(chatId)
+    refreshChats()
+  }, [selectChat, refreshChats])
+
   const {
     messages,
     isLoading,
@@ -17,7 +25,7 @@ export default function ChatPanelContainer() {
     suggestions,
     sendMessage,
     stopGeneration,
-  } = useChat()
+  } = useChat({ chatId: currentChatId, onChatCreated: handleChatCreated })
 
   const handleSubmit = () => {
     if (!text.trim()) return

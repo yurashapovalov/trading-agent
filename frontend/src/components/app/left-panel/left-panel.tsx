@@ -3,6 +3,7 @@ import {
   MessageSquareIcon,
   PlusIcon,
   SettingsIcon,
+  TrashIcon,
   XIcon,
 } from "lucide-react"
 
@@ -15,6 +16,7 @@ import {
   SidebarGroupLabel,
   SidebarHeader,
   SidebarMenu,
+  SidebarMenuAction,
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarRail,
@@ -28,18 +30,22 @@ type HistoryItem = {
 
 type LeftPanelProps = {
   history: HistoryItem[]
+  currentChatId: string | null
   onClose: () => void
   onNewChat: () => void
   onSelectChat: (id: string) => void
+  onDeleteChat: (id: string) => void
   onSettings: () => void
   onSignOut: () => void
 }
 
 export function LeftPanel({
   history,
+  currentChatId,
   onClose,
   onNewChat,
   onSelectChat,
+  onDeleteChat,
   onSettings,
   onSignOut,
 }: LeftPanelProps) {
@@ -71,14 +77,33 @@ export function LeftPanel({
           <SidebarGroupLabel>History</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {history.map((item) => (
-                <SidebarMenuItem key={item.id}>
-                  <SidebarMenuButton onClick={() => onSelectChat(item.id)}>
-                    <MessageSquareIcon />
-                    <span>{item.title}</span>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
+              {history.length === 0 ? (
+                <div className="px-2 py-4 text-sm text-muted-foreground text-center">
+                  No chats yet
+                </div>
+              ) : (
+                history.map((item) => (
+                  <SidebarMenuItem key={item.id}>
+                    <SidebarMenuButton
+                      isActive={item.id === currentChatId}
+                      onClick={() => onSelectChat(item.id)}
+                    >
+                      <MessageSquareIcon />
+                      <span>{item.title}</span>
+                    </SidebarMenuButton>
+                    <SidebarMenuAction
+                      showOnHover
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        onDeleteChat(item.id)
+                      }}
+                    >
+                      <TrashIcon className="size-4" />
+                      <span className="sr-only">Delete chat</span>
+                    </SidebarMenuAction>
+                  </SidebarMenuItem>
+                ))
+              )}
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
