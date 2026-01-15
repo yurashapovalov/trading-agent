@@ -92,6 +92,11 @@ class Understander:
         # Get chat history for context (all messages except current question)
         chat_history = get_chat_history(state)
 
+        # DEBUG: Check what messages we actually received
+        messages = state.get("messages", [])
+        print(f"[Understander] Total messages in state: {len(messages)}")
+        print(f"[Understander] Chat history items: {len(chat_history)}")
+
         # Вызываем LLM
         intent = self._parse_with_llm(question, chat_history)
 
