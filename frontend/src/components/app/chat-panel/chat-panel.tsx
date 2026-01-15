@@ -312,7 +312,7 @@ export function ChatPanel({
               ? "Tell us what was helpful..."
               : "Tell us what went wrong..."
             }
-            rows={8}
+            className="min-h-48 field-sizing-fixed"
           />
           <DialogFooter>
             <Button variant="outline" onClick={closeFeedbackModal}>
