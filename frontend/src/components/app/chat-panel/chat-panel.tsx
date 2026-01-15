@@ -130,7 +130,7 @@ export function ChatPanel({
       <Conversation>
         <ConversationContent className="max-w-2xl mx-auto">
           {messages.map((message, index) => (
-            <Message from={message.role} key={index} className="max-w-full">
+            <Message from={message.role} key={index} className="max-w-full group">
               <div>
                 {message.role === "assistant" && message.agent_steps && message.agent_steps.length > 0 && (
                   <AgentStepsDisplay steps={message.agent_steps} />
@@ -141,7 +141,7 @@ export function ChatPanel({
                 </MessageContent>
 
                 {message.role === "assistant" && (
-                  <div className="mt-2">
+                  <div className="mt-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
                     <Actions>
                       <Action tooltip="Good response">
                         <ThumbsUpIcon className="size-4" />
