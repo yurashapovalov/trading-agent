@@ -1,5 +1,7 @@
 """FastAPI server for Trading Analytics Agent.
 
+v2.1 - Chat sessions with smart context preservation
+
 Provides REST API and SSE streaming endpoints for the multi-agent trading
 analysis system. Handles authentication via Supabase JWT, chat history,
 and request logging.
