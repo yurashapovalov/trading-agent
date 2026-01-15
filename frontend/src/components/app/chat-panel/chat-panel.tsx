@@ -175,7 +175,12 @@ export function ChatPanel({
       {/* Conversation */}
       <Conversation>
         <ConversationContent className="max-w-2xl mx-auto">
-          {messages.map((message, index) => (
+          {messages.map((message, index) => {
+            // Check if this is the last assistant message
+            const isLastAssistant = message.role === "assistant" &&
+              !messages.slice(index + 1).some(m => m.role === "assistant")
+
+            return (
             <Message from={message.role} key={index} className="max-w-full group">
               <div>
                 {message.role === "assistant" && message.agent_steps && message.agent_steps.length > 0 && (
@@ -188,7 +193,7 @@ export function ChatPanel({
 
                 {message.role === "assistant" && message.request_id && (
                   <div className={`mt-2 transition-opacity duration-200 ${
-                    message.feedback?.positive_feedback || message.feedback?.negative_feedback
+                    isLastAssistant
                       ? "opacity-100"
                       : "opacity-0 group-hover:opacity-100"
                   }`}>
@@ -220,7 +225,8 @@ export function ChatPanel({
                 )}
               </div>
             </Message>
-          ))}
+          )})}
+
 
           {currentSteps.length > 0 && (
             <Message from="assistant" className="max-w-full">
