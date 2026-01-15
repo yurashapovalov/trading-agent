@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import { useAuth } from "@/components/auth-provider"
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
@@ -24,6 +24,7 @@ export function useChats() {
   const [chats, setChats] = useState<ChatSession[]>([])
   const [currentChatId, setCurrentChatId] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(true)
+  const initialChatCreated = useRef(false)
 
   // Generate next "New Chat N" title based on current chats
   const getNextNewChatTitle = useCallback((chatList: ChatSession[]) => {
@@ -61,8 +62,9 @@ export function useChats() {
           if (!currentChatId) {
             setCurrentChatId(chatList[0].id)
           }
-        } else {
-          // Create first chat automatically
+        } else if (!initialChatCreated.current) {
+          // Create first chat automatically (only once)
+          initialChatCreated.current = true
           const title = "New Chat"
           const createResponse = await fetch(`${API_URL}/chats`, {
             method: "POST",
