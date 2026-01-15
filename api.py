@@ -338,12 +338,21 @@ async def get_chat_messages(
 
 
 def get_or_create_chat_session(user_id: str, chat_id: str | None) -> str:
-    """Get existing active chat session or create new one. Returns chat_id."""
+    """
+    Get existing active chat session or create new one.
+
+    Logic:
+    - If chat_id provided and valid → use it
+    - If chat_id not provided → find user's most recent active chat
+    - If no active chats → create new one
+
+    This ensures page reload preserves context (uses last chat).
+    """
     if not supabase:
         return chat_id or "default"
 
+    # If chat_id provided, verify and use it
     if chat_id:
-        # Verify chat exists, belongs to user, and is active
         result = supabase.table("chat_sessions") \
             .select("id") \
             .eq("id", chat_id) \
@@ -352,14 +361,31 @@ def get_or_create_chat_session(user_id: str, chat_id: str | None) -> str:
             .execute()
 
         if result.data:
-            # Update updated_at
             supabase.table("chat_sessions") \
                 .update({"updated_at": "now()"}) \
                 .eq("id", chat_id) \
                 .execute()
             return chat_id
 
-    # Create new chat session
+    # No chat_id provided → find most recent active chat
+    result = supabase.table("chat_sessions") \
+        .select("id") \
+        .eq("user_id", user_id) \
+        .eq("status", "active") \
+        .order("updated_at", desc=True) \
+        .limit(1) \
+        .execute()
+
+    if result.data:
+        # Use existing chat → context preserved!
+        existing_chat_id = result.data[0]["id"]
+        supabase.table("chat_sessions") \
+            .update({"updated_at": "now()"}) \
+            .eq("id", existing_chat_id) \
+            .execute()
+        return existing_chat_id
+
+    # No active chats → create new one
     result = supabase.table("chat_sessions").insert({
         "user_id": user_id,
         "title": None,  # Will be generated after 2-3 messages
