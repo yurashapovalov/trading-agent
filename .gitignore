@@ -38,3 +38,7 @@ data/*.txt
 .vercel
 .env*.local
 .github/deploy_key
+
+# SQLite temp files
+*.db-shm
+*.db-wal
