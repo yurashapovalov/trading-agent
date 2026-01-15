@@ -102,7 +102,32 @@ def require_auth(authorization: Optional[str] = Header(None)) -> str:
 # Request/Response models
 class ChatRequest(BaseModel):
     message: str
-    session_id: Optional[str] = "default"
+    chat_id: Optional[str] = None  # If None, creates new chat session
+    session_id: Optional[str] = None  # Deprecated, use chat_id
+
+
+class ChatSessionCreate(BaseModel):
+    title: Optional[str] = None
+
+
+class ChatSessionUpdate(BaseModel):
+    title: str
+
+
+class ChatSessionStats(BaseModel):
+    message_count: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    thinking_tokens: int = 0
+    cost_usd: float = 0.0
+
+
+class ChatSession(BaseModel):
+    id: str
+    title: Optional[str]
+    stats: ChatSessionStats = ChatSessionStats()
+    created_at: str
+    updated_at: str
 
 
 class DataInfo(BaseModel):
@@ -118,6 +143,297 @@ class DataInfo(BaseModel):
 def root():
     """Health check."""
     return {"status": "ok", "service": "Trading Analytics Agent", "version": "2.0"}
+
+
+# =============================================================================
+# Chat Sessions API
+# =============================================================================
+
+@app.get("/chats", response_model=list[ChatSession])
+async def list_chats(user_id: str = Depends(require_auth)):
+    """Get all active chat sessions for the authenticated user."""
+    if not supabase:
+        return []
+
+    try:
+        result = supabase.table("chat_sessions") \
+            .select("id, title, stats, created_at, updated_at") \
+            .eq("user_id", user_id) \
+            .eq("status", "active") \
+            .order("updated_at", desc=True) \
+            .execute()
+
+        if not result.data:
+            return []
+
+        return [
+            ChatSession(
+                id=chat["id"],
+                title=chat["title"],
+                stats=ChatSessionStats(**(chat.get("stats") or {})),
+                created_at=chat["created_at"],
+                updated_at=chat["updated_at"],
+            )
+            for chat in result.data
+        ]
+    except Exception as e:
+        print(f"Failed to list chats: {e}")
+        return []
+
+
+@app.post("/chats", response_model=ChatSession)
+async def create_chat(
+    request: ChatSessionCreate = ChatSessionCreate(),
+    user_id: str = Depends(require_auth)
+):
+    """Create a new chat session."""
+    if not supabase:
+        raise HTTPException(status_code=500, detail="Database not configured")
+
+    try:
+        result = supabase.table("chat_sessions").insert({
+            "user_id": user_id,
+            "title": request.title,
+        }).execute()
+
+        chat = result.data[0]
+        return ChatSession(
+            id=chat["id"],
+            title=chat["title"],
+            stats=ChatSessionStats(**(chat.get("stats") or {})),
+            created_at=chat["created_at"],
+            updated_at=chat["updated_at"],
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.patch("/chats/{chat_id}", response_model=ChatSession)
+async def update_chat(
+    chat_id: str,
+    request: ChatSessionUpdate,
+    user_id: str = Depends(require_auth)
+):
+    """Update chat session title."""
+    if not supabase:
+        raise HTTPException(status_code=500, detail="Database not configured")
+
+    try:
+        result = supabase.table("chat_sessions") \
+            .update({"title": request.title, "updated_at": "now()"}) \
+            .eq("id", chat_id) \
+            .eq("user_id", user_id) \
+            .execute()
+
+        if not result.data:
+            raise HTTPException(status_code=404, detail="Chat not found")
+
+        chat = result.data[0]
+        return ChatSession(
+            id=chat["id"],
+            title=chat["title"],
+            stats=ChatSessionStats(**(chat.get("stats") or {})),
+            created_at=chat["created_at"],
+            updated_at=chat["updated_at"],
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/chats/{chat_id}")
+async def delete_chat(chat_id: str, user_id: str = Depends(require_auth)):
+    """Soft delete a chat session (keeps data for analytics, hides from UI)."""
+    if not supabase:
+        raise HTTPException(status_code=500, detail="Database not configured")
+
+    try:
+        # Soft delete: set status='deleted' instead of actual DELETE
+        # Data stays in Supabase for analytics bots
+        result = supabase.table("chat_sessions") \
+            .update({"status": "deleted", "updated_at": "now()"}) \
+            .eq("id", chat_id) \
+            .eq("user_id", user_id) \
+            .eq("status", "active") \
+            .execute()
+
+        if not result.data:
+            raise HTTPException(status_code=404, detail="Chat not found")
+
+        # Clear LangGraph checkpointer context for this chat
+        from agent.checkpointer import clear_thread_checkpoint
+        thread_id = f"{user_id}_{chat_id}"
+        clear_thread_checkpoint(thread_id)
+
+        return {"status": "ok", "deleted": chat_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/chats/{chat_id}/messages")
+async def get_chat_messages(
+    chat_id: str,
+    user_id: str = Depends(require_auth),
+    limit: int = 100
+):
+    """Get messages for a specific chat session with traces."""
+    if not supabase:
+        return []
+
+    try:
+        # Verify chat belongs to user and is active
+        chat_result = supabase.table("chat_sessions") \
+            .select("id") \
+            .eq("id", chat_id) \
+            .eq("user_id", user_id) \
+            .eq("status", "active") \
+            .execute()
+
+        if not chat_result.data:
+            raise HTTPException(status_code=404, detail="Chat not found")
+
+        # Get messages for this chat
+        result = supabase.table("chat_logs") \
+            .select("id, request_id, question, response, route, agents_used, validation_passed, input_tokens, output_tokens, thinking_tokens, cost_usd, created_at") \
+            .eq("chat_id", chat_id) \
+            .order("created_at") \
+            .limit(limit) \
+            .execute()
+
+        if not result.data:
+            return []
+
+        logs = result.data
+
+        # Get traces for all messages
+        request_ids = [log["request_id"] for log in logs if log.get("request_id")]
+
+        if request_ids:
+            traces_result = supabase.table("request_traces") \
+                .select("request_id, step_number, agent_name, input_data, output_data, duration_ms") \
+                .in_("request_id", request_ids) \
+                .order("step_number") \
+                .execute()
+
+            traces_by_request = {}
+            for trace in (traces_result.data or []):
+                req_id = trace["request_id"]
+                if req_id not in traces_by_request:
+                    traces_by_request[req_id] = []
+                traces_by_request[req_id].append(trace)
+
+            for log in logs:
+                req_id = log.get("request_id")
+                log["traces"] = traces_by_request.get(req_id, [])
+
+        return logs
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Failed to get chat messages: {e}")
+        return []
+
+
+def get_or_create_chat_session(user_id: str, chat_id: str | None) -> str:
+    """Get existing active chat session or create new one. Returns chat_id."""
+    if not supabase:
+        return chat_id or "default"
+
+    if chat_id:
+        # Verify chat exists, belongs to user, and is active
+        result = supabase.table("chat_sessions") \
+            .select("id") \
+            .eq("id", chat_id) \
+            .eq("user_id", user_id) \
+            .eq("status", "active") \
+            .execute()
+
+        if result.data:
+            # Update updated_at
+            supabase.table("chat_sessions") \
+                .update({"updated_at": "now()"}) \
+                .eq("id", chat_id) \
+                .execute()
+            return chat_id
+
+    # Create new chat session
+    result = supabase.table("chat_sessions").insert({
+        "user_id": user_id,
+        "title": None,  # Will be generated after 2-3 messages
+    }).execute()
+
+    return result.data[0]["id"]
+
+
+async def maybe_generate_chat_title(chat_id: str):
+    """Generate chat title if this is the 2nd or 3rd message and no title yet."""
+    if not supabase:
+        return
+
+    try:
+        # Check if title already exists
+        chat_result = supabase.table("chat_sessions") \
+            .select("title") \
+            .eq("id", chat_id) \
+            .execute()
+
+        if not chat_result.data or chat_result.data[0].get("title"):
+            return  # Already has title
+
+        # Count messages in this chat
+        count_result = supabase.table("chat_logs") \
+            .select("id", count="exact") \
+            .eq("chat_id", chat_id) \
+            .execute()
+
+        message_count = count_result.count or 0
+
+        # Generate title after 2-3 messages
+        if message_count < 2:
+            return
+
+        # Get first 3 messages for title generation
+        messages_result = supabase.table("chat_logs") \
+            .select("question, response") \
+            .eq("chat_id", chat_id) \
+            .order("created_at") \
+            .limit(3) \
+            .execute()
+
+        if not messages_result.data:
+            return
+
+        # Generate title using Gemini
+        from google import genai
+        client = genai.Client(api_key=config.GOOGLE_API_KEY)
+
+        messages_text = "\n".join([
+            f"User: {m['question']}\nAssistant: {m.get('response', '')[:200]}"
+            for m in messages_result.data
+        ])
+
+        response = client.models.generate_content(
+            model="gemini-2.0-flash-lite",  # Fast model for simple task
+            contents=f"""Generate a short title (3-5 words, max 40 chars) for this chat conversation.
+The title should capture the main topic. Reply with ONLY the title, no quotes or explanation.
+
+Conversation:
+{messages_text}""",
+        )
+
+        title = response.text.strip()[:40]
+
+        # Update chat session with title
+        supabase.table("chat_sessions") \
+            .update({"title": title}) \
+            .eq("id", chat_id) \
+            .execute()
+
+    except Exception as e:
+        print(f"Failed to generate chat title: {e}")
 
 
 def get_recent_chat_history(user_id: str, limit: int = config.CHAT_HISTORY_LIMIT) -> list[dict]:
@@ -163,11 +479,14 @@ async def chat_stream(request: ChatRequest, user_id: str = Depends(require_auth)
     - validation: validation result
     - suggestions: clarification options (quick-reply buttons)
     - usage: token usage
-    - done: completion
+    - done: completion (includes chat_id for frontend)
     """
     import asyncio
     import uuid
     from agent.graph import trading_graph
+
+    # Get or create chat session
+    chat_id = get_or_create_chat_session(user_id, request.chat_id)
 
     # NOTE: chat_history is NOT loaded for LLM context anymore!
     # LangGraph checkpointer handles message accumulation automatically by thread_id.
@@ -187,7 +506,7 @@ async def chat_stream(request: ChatRequest, user_id: str = Depends(require_auth)
             for event in trading_graph.stream_sse(
                 question=request.message,
                 user_id=user_id,
-                session_id=request.session_id or "default",
+                session_id=chat_id,  # Use chat_id as session_id for LangGraph checkpointer
                 # chat_history NOT passed - checkpointer manages history automatically
             ):
                 yield f"data: {json.dumps(clean_for_json(event), default=str)}\n\n"
@@ -241,7 +560,8 @@ async def chat_stream(request: ChatRequest, user_id: str = Depends(require_auth)
                     await log_completion(
                         request_id=request_id,
                         user_id=user_id,
-                        session_id=request.session_id or "default",
+                        chat_id=chat_id,
+                        session_id=chat_id,  # Keep for backward compatibility
                         question=request.message,
                         response=final_text[:10000],
                         route=route,
@@ -256,6 +576,12 @@ async def chat_stream(request: ChatRequest, user_id: str = Depends(require_auth)
                         model=config.GEMINI_MODEL,
                         provider="gemini"
                     )
+
+                    # Generate chat title after 2-3 messages
+                    await maybe_generate_chat_title(chat_id)
+
+                    # Include chat_id in done event for frontend
+                    yield f"data: {json.dumps({'type': 'chat_id', 'chat_id': chat_id})}\n\n"
 
         except Exception as e:
             print(f"[CHAT] Error: {e}")

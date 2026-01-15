@@ -3,6 +3,51 @@
 -- Generated: 2026-01-11
 
 --------------------------------------------------------------------------------
+-- CHAT_SESSIONS: Individual chat conversations
+--------------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS chat_sessions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
+
+    -- Chat metadata
+    title TEXT,                           -- Auto-generated after 2-3 messages
+    status TEXT DEFAULT 'active',         -- 'active' or 'deleted' (soft delete for analytics)
+
+    -- Aggregated stats (updated on each message)
+    -- {message_count, input_tokens, output_tokens, thinking_tokens, cost_usd}
+    stats JSONB DEFAULT '{"message_count": 0, "input_tokens": 0, "output_tokens": 0, "thinking_tokens": 0, "cost_usd": 0}'::jsonb,
+
+    -- Timestamps
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Indexes
+CREATE INDEX IF NOT EXISTS idx_chat_sessions_user_id ON chat_sessions(user_id);
+CREATE INDEX IF NOT EXISTS idx_chat_sessions_updated_at ON chat_sessions(updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_chat_sessions_status ON chat_sessions(status) WHERE status = 'active';
+
+-- Row Level Security
+ALTER TABLE chat_sessions ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can view own chat sessions" ON chat_sessions
+    FOR SELECT USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can insert own chat sessions" ON chat_sessions
+    FOR INSERT WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Users can update own chat sessions" ON chat_sessions
+    FOR UPDATE USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can delete own chat sessions" ON chat_sessions
+    FOR DELETE USING (auth.uid() = user_id);
+
+CREATE POLICY "Service role full access on sessions" ON chat_sessions
+    FOR ALL USING (auth.role() = 'service_role');
+
+
+--------------------------------------------------------------------------------
 -- CHAT_LOGS: Final results of each user request
 --------------------------------------------------------------------------------
 
@@ -10,7 +55,8 @@ CREATE TABLE IF NOT EXISTS chat_logs (
     id BIGSERIAL PRIMARY KEY,
     request_id UUID UNIQUE DEFAULT gen_random_uuid(),
     user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
-    session_id VARCHAR(100),              -- thread_id from LangGraph
+    chat_id UUID REFERENCES chat_sessions(id) ON DELETE CASCADE,  -- Link to chat session
+    session_id VARCHAR(100),              -- thread_id from LangGraph (deprecated, use chat_id)
 
     -- Request/Response
     question TEXT NOT NULL,
@@ -43,6 +89,7 @@ CREATE TABLE IF NOT EXISTS chat_logs (
 CREATE INDEX IF NOT EXISTS idx_chat_logs_user_id ON chat_logs(user_id);
 CREATE INDEX IF NOT EXISTS idx_chat_logs_created_at ON chat_logs(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_chat_logs_session ON chat_logs(session_id);
+CREATE INDEX IF NOT EXISTS idx_chat_logs_chat_id ON chat_logs(chat_id);
 CREATE INDEX IF NOT EXISTS idx_chat_logs_request_id ON chat_logs(request_id);
 CREATE INDEX IF NOT EXISTS idx_chat_logs_route ON chat_logs(route);
 CREATE INDEX IF NOT EXISTS idx_chat_logs_validation ON chat_logs(validation_passed)

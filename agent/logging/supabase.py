@@ -78,6 +78,7 @@ async def log_completion(
     session_id: str,
     question: str,
     response: str,
+    chat_id: str | None = None,
     route: str | None = None,
     agents_used: list[str] | None = None,
     validation_attempts: int = 1,
@@ -94,6 +95,7 @@ async def log_completion(
     Log completed request to chat_logs.
 
     Called when the entire request is finished.
+    Also updates chat_sessions stats if chat_id provided.
     """
     supabase = get_supabase()
     if not supabase:
@@ -107,6 +109,7 @@ async def log_completion(
         supabase.table("chat_logs").insert({
             "request_id": request_id,
             "user_id": user_id,
+            "chat_id": chat_id,
             "session_id": session_id,
             "question": question,
             "response": response,
@@ -122,8 +125,64 @@ async def log_completion(
             "model": model,
             "provider": provider,
         }).execute()
+
+        # Update chat_sessions stats if chat_id provided
+        if chat_id:
+            await update_chat_session_stats(
+                chat_id=chat_id,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                thinking_tokens=thinking_tokens,
+                cost_usd=cost_usd,
+            )
+
     except Exception as e:
         print(f"Failed to log completion: {e}")
+
+
+async def update_chat_session_stats(
+    chat_id: str,
+    input_tokens: int = 0,
+    output_tokens: int = 0,
+    thinking_tokens: int = 0,
+    cost_usd: float = 0.0,
+):
+    """Increment chat_sessions stats JSONB field."""
+    supabase = get_supabase()
+    if not supabase:
+        return
+
+    try:
+        # Use raw SQL to increment JSONB values atomically
+        supabase.rpc("increment_chat_stats", {
+            "p_chat_id": chat_id,
+            "p_input_tokens": input_tokens,
+            "p_output_tokens": output_tokens,
+            "p_thinking_tokens": thinking_tokens,
+            "p_cost_usd": cost_usd,
+        }).execute()
+    except Exception as e:
+        # Fallback: read-modify-write (less safe but works without RPC)
+        try:
+            result = supabase.table("chat_sessions") \
+                .select("stats") \
+                .eq("id", chat_id) \
+                .execute()
+
+            if result.data:
+                stats = result.data[0].get("stats") or {}
+                stats["message_count"] = (stats.get("message_count") or 0) + 1
+                stats["input_tokens"] = (stats.get("input_tokens") or 0) + input_tokens
+                stats["output_tokens"] = (stats.get("output_tokens") or 0) + output_tokens
+                stats["thinking_tokens"] = (stats.get("thinking_tokens") or 0) + thinking_tokens
+                stats["cost_usd"] = (stats.get("cost_usd") or 0) + cost_usd
+
+                supabase.table("chat_sessions") \
+                    .update({"stats": stats, "updated_at": "now()"}) \
+                    .eq("id", chat_id) \
+                    .execute()
+        except Exception as e2:
+            print(f"Failed to update chat stats (fallback): {e2}")
 
 
 def log_trace_step_sync(

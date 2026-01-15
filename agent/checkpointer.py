@@ -101,3 +101,39 @@ async def get_async_postgres_checkpointer() -> Optional[BaseCheckpointSaver]:
     except Exception as e:
         print(f"WARNING: Failed to create async Postgres checkpointer: {e}")
         return None
+
+
+def clear_thread_checkpoint(thread_id: str) -> bool:
+    """
+    Clear all checkpoints for a specific thread.
+
+    Used when soft-deleting a chat to clear LangGraph memory.
+
+    Args:
+        thread_id: The thread ID to clear (format: user_id_chat_id)
+
+    Returns:
+        True if cleared successfully, False otherwise
+    """
+    try:
+        from langgraph.checkpoint.sqlite import SqliteSaver
+        import sqlite3
+
+        db_path = Path(config.ROOT_DIR) / "data" / "checkpoints.db"
+        if not db_path.exists():
+            return True  # No database, nothing to clear
+
+        conn = sqlite3.connect(str(db_path))
+        cursor = conn.cursor()
+
+        # Delete from all checkpoint-related tables
+        cursor.execute("DELETE FROM checkpoints WHERE thread_id = ?", (thread_id,))
+        cursor.execute("DELETE FROM writes WHERE thread_id = ?", (thread_id,))
+
+        conn.commit()
+        conn.close()
+
+        return True
+    except Exception as e:
+        print(f"Failed to clear checkpoint for thread {thread_id}: {e}")
+        return False
