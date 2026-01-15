@@ -21,9 +21,10 @@ from google import genai
 from google.genai import types
 
 import config
-from agent.state import AgentState, Stats, UsageStats
+from agent.state import AgentState, Stats, UsageStats, get_current_question, get_chat_history
 from agent.prompts.analyst import get_analyst_prompt, get_analyst_prompt_streaming
 from agent.pricing import calculate_cost
+from langchain_core.messages import AIMessage
 
 # LangGraph streaming support
 try:
@@ -67,16 +68,18 @@ class Analyst:
         Falls back to batch JSON generation otherwise.
 
         Args:
-            state: Agent state with question, data, intent, and validation info.
+            state: Agent state with messages (MessagesState), data, intent.
 
         Returns:
-            Dict with response, stats, usage, agents_used, step_number.
+            Dict with response, stats, usage, agents_used, step_number, and messages.
         """
-        question = state.get("question", "")
+        # Get question and history from messages
+        question = get_current_question(state)
+        chat_history = get_chat_history(state)
+
         data = state.get("data") or {}
         intent = state.get("intent") or {}
         intent_type = intent.get("type", "data")
-        chat_history = state.get("chat_history") or []
 
         # Check if rewrite needed
         validation = state.get("validation") or {}
@@ -161,6 +164,8 @@ class Analyst:
             "agents_used": [self.name],
             "step_number": state.get("step_number", 0) + 1,
             "validation_attempts": state.get("validation_attempts", 0) + 1,
+            # Add AIMessage to messages for checkpointer accumulation
+            "messages": [AIMessage(content=full_text)],
         }
 
     def _generate_batch(self, prompt: str, state: AgentState) -> dict:
@@ -197,6 +202,8 @@ class Analyst:
             "agents_used": [self.name],
             "step_number": state.get("step_number", 0) + 1,
             "validation_attempts": state.get("validation_attempts", 0) + 1,
+            # Add AIMessage to messages for checkpointer accumulation
+            "messages": [AIMessage(content=response_text)],
         }
 
     def generate_stream(self, state: AgentState) -> Generator[str, None, dict]:

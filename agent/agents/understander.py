@@ -21,7 +21,7 @@ from google import genai
 from google.genai import types
 
 import config
-from agent.state import AgentState, Intent, UsageStats
+from agent.state import AgentState, Intent, UsageStats, get_current_question, get_chat_history
 from agent.pricing import calculate_cost
 # Default symbol when not specified
 DEFAULT_SYMBOL = "NQ"
@@ -82,13 +82,15 @@ class Understander:
         """Parse question and return structured Intent.
 
         Args:
-            state: Current agent state with question and chat_history.
+            state: Current agent state with messages (MessagesState).
 
         Returns:
             Dict with intent, usage stats, agents_used list, and step_number.
         """
-        question = state.get("question", "")
-        chat_history = list(state.get("chat_history", []))
+        # Get question from last HumanMessage in messages
+        question = get_current_question(state)
+        # Get chat history for context (all messages except current question)
+        chat_history = get_chat_history(state)
 
         print(f"[Understander] Question: {question[:50]}...")
 

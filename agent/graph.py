@@ -19,7 +19,8 @@ from typing import Literal
 from langgraph.graph import StateGraph, START, END
 from langgraph.types import Command
 
-from agent.state import AgentState, create_initial_state
+from agent.state import AgentState, create_initial_input, get_current_question
+from langchain_core.messages import AIMessage
 from agent.agents.understander import Understander, query_spec_to_builder
 from agent.agents.data_fetcher import DataFetcher
 from agent.agents.analyst import Analyst
@@ -131,6 +132,8 @@ def simple_respond(state: AgentState) -> dict:
     result = {
         "response": response_text,
         "agents_used": ["responder"],
+        # Add AIMessage to messages for checkpointer accumulation
+        "messages": [AIMessage(content=response_text)],
     }
 
     # Suggestions для clarification (кнопки в UI)
@@ -248,14 +251,18 @@ class TradingGraph:
         question: str,
         user_id: str,
         session_id: str = "default",
-        chat_history: list = None,
+        chat_history: list = None,  # DEPRECATED: ignored, checkpointer manages history
     ) -> AgentState:
-        """Синхронный запуск графа."""
-        initial_state = create_initial_state(
+        """Синхронный запуск графа.
+
+        Note: chat_history parameter is deprecated and ignored.
+        The checkpointer automatically restores previous messages by thread_id.
+        """
+        # Only pass the NEW message - checkpointer restores previous messages
+        initial_input = create_initial_input(
             question=question,
             user_id=user_id,
             session_id=session_id,
-            chat_history=chat_history,
         )
 
         config = {
@@ -264,14 +271,14 @@ class TradingGraph:
             }
         }
 
-        return self.app.invoke(initial_state, config)
+        return self.app.invoke(initial_input, config)
 
     def stream_sse(
         self,
         question: str,
         user_id: str,
         session_id: str = "default",
-        chat_history: list = None,
+        chat_history: list = None,  # DEPRECATED: ignored, checkpointer manages history
     ):
         """
         Streaming с SSE событиями для frontend.
@@ -282,17 +289,20 @@ class TradingGraph:
         - text_delta: текст ответа
         - usage: токены
         - done: завершение
+
+        Note: chat_history parameter is deprecated and ignored.
+        The checkpointer automatically restores previous messages by thread_id.
         """
         import time
 
         start_time = time.time()
         last_step_time = start_time
 
-        initial_state = create_initial_state(
+        # Only pass the NEW message - checkpointer restores previous messages
+        initial_input = create_initial_input(
             question=question,
             user_id=user_id,
             session_id=session_id,
-            chat_history=chat_history,
         )
 
         config = {
@@ -301,12 +311,12 @@ class TradingGraph:
             }
         }
 
+        # Track state for SSE events (not for LLM context!)
         accumulated_state = {
             "question": question,
-            "chat_history": chat_history,
         }
 
-        for event in self.app.stream(initial_state, config, stream_mode=["updates", "custom"]):
+        for event in self.app.stream(initial_input, config, stream_mode=["updates", "custom"]):
             stream_type, data = event
 
             # Custom events (text_delta) — пробрасываем напрямую
@@ -478,7 +488,7 @@ class TradingGraph:
         yield {
             "type": "done",
             "total_duration_ms": duration_ms,
-            "request_id": initial_state.get("request_id")
+            "request_id": initial_input.get("request_id")
         }
 
     def _get_agent_message(self, agent: str) -> str:

@@ -195,10 +195,10 @@ async def chat_stream(request: ChatRequest, user_id: str = Depends(require_auth)
     print(f"  Session: {request.session_id}")
     print(f"{'='*60}")
 
-    # Load recent chat history for context
-    chat_history = get_recent_chat_history(user_id)
-
-    print(f"[CHAT] Loaded {len(chat_history)} history messages for context")
+    # NOTE: chat_history is NOT loaded for LLM context anymore!
+    # LangGraph checkpointer handles message accumulation automatically by thread_id.
+    # Supabase is only used for UI history display and analytics.
+    print(f"[CHAT] Using LangGraph checkpointer for history (thread_id={user_id}_{request.session_id})")
 
     async def generate():
         final_text = ""
@@ -215,7 +215,7 @@ async def chat_stream(request: ChatRequest, user_id: str = Depends(require_auth)
                 question=request.message,
                 user_id=user_id,
                 session_id=request.session_id or "default",
-                chat_history=chat_history
+                # chat_history NOT passed - checkpointer manages history automatically
             ):
                 yield f"data: {json.dumps(clean_for_json(event), default=str)}\n\n"
                 await asyncio.sleep(0)  # Force flush

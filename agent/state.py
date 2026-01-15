@@ -3,16 +3,30 @@
 Defines all TypedDict types that flow through the agent pipeline:
 - Intent: Parsed user intent from Understander
 - Stats: Structured numbers from Analyst for validation
-- AgentState: Main state object passed between agents
+- TradingState: Main state object (extends MessagesState for native memory)
+
+Uses MessagesState from LangGraph for automatic message accumulation.
+The checkpointer handles message persistence - no need to load from Supabase.
 
 Example:
-    state = create_initial_state("What was NQ range today?", "user123")
-    result = graph.invoke(state)
+    # First message in session
+    result = graph.invoke(
+        {"messages": [HumanMessage(content="What was NQ range?")]},
+        {"configurable": {"thread_id": "user_123_session_456"}}
+    )
+    # Follow-up - checkpointer restores previous messages automatically
+    result = graph.invoke(
+        {"messages": [HumanMessage(content="Compare to yesterday")]},
+        {"configurable": {"thread_id": "user_123_session_456"}}
+    )
 """
 
 from typing import TypedDict, Literal, Annotated
 from uuid import uuid4
 import operator
+
+from langgraph.graph import MessagesState
+from langchain_core.messages import HumanMessage, AIMessage, AnyMessage
 
 
 def merge_lists(a: list, b: list) -> list:
@@ -145,9 +159,17 @@ class UsageStats(TypedDict, total=False):
     cost_usd: float
 
 
-class AgentState(TypedDict, total=False):
+class TradingState(MessagesState, total=False):
     """
     Main state object passed through the LangGraph.
+
+    Extends MessagesState which provides:
+    - messages: Annotated[list[AnyMessage], add_messages]
+
+    The add_messages reducer automatically:
+    - Accumulates messages across invocations
+    - Handles message ID tracking for updates
+    - Serializes/deserializes message formats
 
     Fields are optional (total=False) to allow incremental updates.
     """
@@ -156,9 +178,10 @@ class AgentState(TypedDict, total=False):
     user_id: str
     session_id: str  # thread_id for LangGraph
 
-    # Input
-    question: str
-    chat_history: list[dict]      # Previous messages for context
+    # NOTE: 'question' and 'chat_history' removed!
+    # Use messages[-1].content for current question
+    # Use messages[:-1] for chat history
+    # Checkpointer manages message persistence automatically
 
     # Understander output
     intent: Intent | None
@@ -197,19 +220,67 @@ class AgentState(TypedDict, total=False):
     error: str | None
 
 
+# Alias for backward compatibility during migration
+AgentState = TradingState
+
+
+def create_initial_input(
+    question: str,
+    user_id: str,
+    session_id: str = "default",
+) -> dict:
+    """
+    Create initial input for graph.invoke().
+
+    Only includes the NEW message - checkpointer will restore previous messages.
+
+    Args:
+        question: User's current question
+        user_id: User identifier
+        session_id: Session identifier (used in thread_id)
+
+    Returns:
+        Dict with messages and metadata for graph.invoke()
+    """
+    return {
+        "messages": [HumanMessage(content=question)],
+        "request_id": str(uuid4()),
+        "user_id": user_id,
+        "session_id": session_id,
+    }
+
+
 def create_initial_state(
     question: str,
     user_id: str,
     session_id: str = "default",
     chat_history: list[dict] | None = None
-) -> AgentState:
-    """Create initial state for a new request."""
-    return AgentState(
+) -> TradingState:
+    """
+    Create initial state for a new request.
+
+    DEPRECATED: Use create_initial_input() instead.
+    This function is kept for backward compatibility during migration.
+    """
+    # Convert chat_history to messages format
+    messages = []
+    if chat_history:
+        for msg in chat_history:
+            role = msg.get("role", "user")
+            content = msg.get("content", "")
+            if role == "user":
+                messages.append(HumanMessage(content=content))
+            else:
+                messages.append(AIMessage(content=content))
+
+    # Add current question
+    messages.append(HumanMessage(content=question))
+
+    return TradingState(
+        messages=messages,
         request_id=str(uuid4()),
         user_id=user_id,
         session_id=session_id,
-        question=question,
-        chat_history=chat_history or [],
         # Understander
         intent=None,
         # QueryBuilder
@@ -246,7 +317,46 @@ def create_initial_state(
 # Helper functions
 # =============================================================================
 
-def get_intent_type(state: AgentState) -> str:
+def get_current_question(state: TradingState) -> str:
+    """
+    Get current question from state messages.
+
+    The current question is the content of the last HumanMessage.
+    """
+    messages = state.get("messages", [])
+    for msg in reversed(messages):
+        if isinstance(msg, HumanMessage):
+            return msg.content
+        # Handle dict format (from serialization)
+        if isinstance(msg, dict) and msg.get("type") == "human":
+            return msg.get("content", "")
+    return ""
+
+
+def get_chat_history(state: TradingState) -> list[dict]:
+    """
+    Get chat history from state messages (excluding current question).
+
+    Returns list in old format for backward compatibility:
+    [{"role": "user", "content": "..."}, {"role": "assistant", "content": "..."}]
+    """
+    messages = state.get("messages", [])
+    history = []
+
+    # All messages except the last one (current question)
+    for msg in messages[:-1] if messages else []:
+        if isinstance(msg, HumanMessage):
+            history.append({"role": "user", "content": msg.content})
+        elif isinstance(msg, AIMessage):
+            history.append({"role": "assistant", "content": msg.content})
+        elif isinstance(msg, dict):
+            role = "user" if msg.get("type") == "human" else "assistant"
+            history.append({"role": role, "content": msg.get("content", "")})
+
+    return history
+
+
+def get_intent_type(state: TradingState) -> str:
     """Get intent type from state, with fallback."""
     intent = state.get("intent")
     if intent:
