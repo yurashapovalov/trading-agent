@@ -350,6 +350,7 @@ class TradingGraph:
                 if node_name == "understander":
                     intent = updates.get("intent") or {}
                     usage = updates.get("usage") or {}
+                    debug = updates.get("debug") or {}
                     query_spec = intent.get("query_spec", {})
 
                     yield {
@@ -369,6 +370,7 @@ class TradingGraph:
                         "output": {
                             "intent": intent,
                             "usage": usage,
+                            "debug": debug,  # Checkpointer debug info
                         }
                     }
                     accumulated_state["intent"] = intent

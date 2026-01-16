@@ -241,6 +241,17 @@ class Understander:
         question = get_current_question(state)
         chat_history = get_chat_history(state)
 
+        # Debug: log messages state for checkpointer debugging
+        messages = state.get("messages", [])
+        history_str = self._format_chat_history(chat_history)
+        debug_info = {
+            "messages_count": len(messages),
+            "chat_history_length": len(chat_history),
+            "chat_history_preview": history_str[:500] if history_str else "",
+            "has_history_context": bool(history_str),
+        }
+        print(f"[Understander DEBUG] messages={len(messages)}, history={len(chat_history)}, has_context={bool(history_str)}")
+
         intent = self._parse_with_rap(question, chat_history)
 
         return {
@@ -248,6 +259,7 @@ class Understander:
             "usage": self._last_usage,
             "agents_used": [self.name],
             "step_number": state.get("step_number", 0) + 1,
+            "debug": debug_info,  # Will be logged to request_traces
         }
 
     # =========================================================================
