@@ -36,7 +36,7 @@ export function SidebarContainer({
   onSettings,
   onSignOut,
 }: SidebarContainerProps) {
-  const { leftOpen, setLeftOpen, leftWidth, setLeftWidth, leftMinWidth, leftMaxWidth } = usePanels()
+  const { leftOpen, setLeftOpen, leftWidth, setLeftWidth, leftMinWidth, leftMaxWidth, isMobile } = usePanels()
 
   const { handleMouseDown } = usePixelResize({
     direction: "left",
@@ -49,10 +49,13 @@ export function SidebarContainer({
 
   if (!leftOpen) return null
 
+  // Mobile: 80vw width, no resize
+  const mobileWidth = typeof window !== "undefined" ? window.innerWidth * 0.8 : 300
+
   return (
     <Sidebar
-      width={leftWidth}
-      onResizeMouseDown={handleMouseDown}
+      width={isMobile ? mobileWidth : leftWidth}
+      onResizeMouseDown={isMobile ? undefined : handleMouseDown}
       chats={chats}
       currentChatId={currentChatId}
       onSelectChat={onSelectChat}

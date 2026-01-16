@@ -26,7 +26,7 @@ import type { ChatItem } from "@/types/chat"
 
 type SidebarProps = {
   width: number
-  onResizeMouseDown: (e: React.MouseEvent) => void
+  onResizeMouseDown?: (e: React.MouseEvent) => void
   // Data
   chats: ChatItem[]
   currentChatId: string | null
@@ -53,7 +53,7 @@ export function Sidebar({
 }: SidebarProps) {
   return (
     <div
-      className="relative flex h-full shrink-0 min-w-60 max-w-96 flex-col bg-[var(--bg-secondary)]"
+      className="relative flex h-full shrink-0 flex-col bg-sidebar md:min-w-60 md:max-w-96"
       style={{ width }}
     >
       {/* Header */}
@@ -139,11 +139,13 @@ export function Sidebar({
         </div>
       </div>
 
-      {/* Resize handle */}
-      <div
-        onMouseDown={onResizeMouseDown}
-        className="absolute top-0 right-0 h-full w-1 cursor-col-resize hover:bg-primary/20"
-      />
+      {/* Resize handle - hidden on mobile */}
+      {onResizeMouseDown && (
+        <div
+          onMouseDown={onResizeMouseDown}
+          className="absolute top-0 right-0 h-full w-1 cursor-col-resize hover:bg-primary/20"
+        />
+      )}
     </div>
   )
 }

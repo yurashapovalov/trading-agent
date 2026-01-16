@@ -8,7 +8,7 @@
  * Reads initial sizes from cookies for persistence.
  */
 
-import { createContext, useContext, useState, useMemo, type ReactNode } from "react"
+import { createContext, useContext, useState, useMemo, useEffect, type ReactNode } from "react"
 
 // Left panel constraints (pixels) — Tailwind: min-w-60, max-w-96
 const LEFT_MIN_WIDTH = 240
@@ -19,6 +19,10 @@ const LEFT_DEFAULT_WIDTH = 260
 const RIGHT_MIN_PERCENT = 30
 const RIGHT_MAX_PERCENT = 70
 const RIGHT_DEFAULT_PERCENT = 50
+
+// Breakpoints (matches Tailwind)
+const BREAKPOINT_MD = 768
+const BREAKPOINT_LG = 1024
 
 // Cookie names
 export const COOKIE_LEFT_WIDTH = "panel_left_width"
@@ -68,6 +72,9 @@ type PanelsContextType = {
   setRightWidthPercent: (percent: number) => void
   rightMinPercent: number
   rightMaxPercent: number
+
+  // Responsive
+  isMobile: boolean
 }
 
 const PanelsContext = createContext<PanelsContextType | null>(null)
@@ -95,6 +102,32 @@ export function PanelsProvider({
   const [rightOpen, setRightOpen] = useState(defaultRightOpen)
   const [leftWidth, setLeftWidth] = useState(getInitialLeftWidth)
   const [rightWidthPercent, setRightWidthPercent] = useState(getInitialRightPercent)
+  const [isMobile, setIsMobile] = useState(false)
+
+  // Responsive: auto-hide panels on smaller screens
+  useEffect(() => {
+    const handleResize = () => {
+      const width = window.innerWidth
+      const mobile = width < BREAKPOINT_MD
+
+      setIsMobile(mobile)
+
+      if (mobile) {
+        // Mobile: hide both panels
+        setLeftOpen(false)
+        setRightOpen(false)
+      } else if (width < BREAKPOINT_LG) {
+        // Tablet: hide right panel only
+        setRightOpen(false)
+      }
+    }
+
+    // Check on mount
+    handleResize()
+
+    window.addEventListener("resize", handleResize)
+    return () => window.removeEventListener("resize", handleResize)
+  }, [])
 
   const value = useMemo(
     () => ({
@@ -111,8 +144,10 @@ export function PanelsProvider({
       setRightWidthPercent,
       rightMinPercent: RIGHT_MIN_PERCENT,
       rightMaxPercent: RIGHT_MAX_PERCENT,
+
+      isMobile,
     }),
-    [leftOpen, leftWidth, rightOpen, rightWidthPercent]
+    [leftOpen, leftWidth, rightOpen, rightWidthPercent, isMobile]
   )
 
   return (
