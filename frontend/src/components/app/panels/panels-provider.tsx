@@ -98,7 +98,7 @@ type PanelsProviderProps = {
 export function PanelsProvider({
   children,
   defaultLeftOpen = true,
-  defaultRightOpen = true,
+  defaultRightOpen = false,
 }: PanelsProviderProps) {
   const [leftOpen, setLeftOpen] = useState(defaultLeftOpen)
   const [rightOpen, setRightOpen] = useState(defaultRightOpen)
