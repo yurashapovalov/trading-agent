@@ -22,6 +22,7 @@ export function ContextPanelContainer() {
     setRightWidthPercent,
     rightMinPercent,
     rightMaxPercent,
+    isMobile,
   } = usePanels()
 
   const { handleMouseDown } = usePercentResize({
@@ -37,9 +38,10 @@ export function ContextPanelContainer() {
 
   return (
     <ContextPanel
-      widthPercent={rightWidthPercent}
-      onResizeMouseDown={handleMouseDown}
+      widthPercent={isMobile ? 100 : rightWidthPercent}
+      onResizeMouseDown={isMobile ? undefined : handleMouseDown}
       onClose={() => setRightOpen(false)}
+      isMobile={isMobile}
     />
   )
 }

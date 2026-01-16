@@ -18,26 +18,30 @@ import {
 type ContextPanelProps = {
   /** Width in percent (0-100) */
   widthPercent: number
-  onResizeMouseDown: (e: React.MouseEvent) => void
+  onResizeMouseDown?: (e: React.MouseEvent) => void
   // Actions
   onClose: () => void
+  isMobile?: boolean
 }
 
 export function ContextPanel({
   widthPercent,
   onResizeMouseDown,
   onClose,
+  isMobile,
 }: ContextPanelProps) {
   return (
     <div
-      className="relative flex h-full shrink-0 min-w-[30%] max-w-[70%] flex-col"
+      className={`relative flex h-full shrink-0 flex-col ${isMobile ? '' : 'min-w-[30%] max-w-[70%]'}`}
       style={{ width: `${widthPercent}%`, backgroundColor: 'var(--bg-primary)' }}
     >
-      {/* Resize handle */}
-      <div
-        onMouseDown={onResizeMouseDown}
-        className="absolute top-0 left-0 h-full w-1 cursor-col-resize hover:bg-primary/20"
-      />
+      {/* Resize handle - hidden on mobile */}
+      {onResizeMouseDown && (
+        <div
+          onMouseDown={onResizeMouseDown}
+          className="absolute top-0 left-0 h-full w-1 cursor-col-resize hover:bg-primary/20"
+        />
+      )}
 
       {/* Header */}
       <PageHeader>
