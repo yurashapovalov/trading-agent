@@ -6,10 +6,12 @@
  * Handles:
  * - Resize behavior (usePanels + usePercentResize)
  * - Open/close state
+ * - Mobile: change body background when open
  *
  * Data comes from AppShell via props.
  */
 
+import { useEffect } from "react"
 import { usePanels, COOKIE_RIGHT_PERCENT } from "../panels-provider"
 import { usePercentResize } from "@/hooks/use-percent-resize"
 import { ContextPanel } from "./context-panel"
@@ -33,6 +35,16 @@ export function ContextPanelContainer() {
     onResize: setRightWidthPercent,
     cookieName: COOKIE_RIGHT_PERCENT,
   })
+
+  // Mobile: change body background when context panel is open
+  useEffect(() => {
+    if (rightOpen && isMobile) {
+      document.body.style.backgroundColor = "var(--bg-primary)"
+      return () => {
+        document.body.style.backgroundColor = ""
+      }
+    }
+  }, [rightOpen, isMobile])
 
   if (!rightOpen) return null
 

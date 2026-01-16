@@ -52,13 +52,21 @@ export function SidebarContainer({
   // Mobile: 80vw width, no resize
   const mobileWidth = typeof window !== "undefined" ? window.innerWidth * 0.8 : 300
 
+  // Mobile: close sidebar after selecting chat
+  const handleSelectChat = (id: string) => {
+    onSelectChat(id)
+    if (isMobile) {
+      setLeftOpen(false)
+    }
+  }
+
   return (
     <Sidebar
       width={isMobile ? mobileWidth : leftWidth}
       onResizeMouseDown={isMobile ? undefined : handleMouseDown}
       chats={chats}
       currentChatId={currentChatId}
-      onSelectChat={onSelectChat}
+      onSelectChat={handleSelectChat}
       onNewChat={onNewChat}
       onDeleteChat={onDeleteChat}
       onClose={() => setLeftOpen(false)}
