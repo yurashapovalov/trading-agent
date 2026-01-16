@@ -7,7 +7,7 @@
  * Container handles resize, AppShell provides data.
  */
 
-import { PanelRightClose, PinIcon } from "lucide-react"
+import { X, PinIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   PageHeader,
@@ -50,7 +50,7 @@ export function ContextPanel({
         </PageHeaderLeft>
         <PageHeaderRight>
           <Button variant="ghost" size="icon-sm" onClick={onClose}>
-            <PanelRightClose />
+            <X />
           </Button>
         </PageHeaderRight>
       </PageHeader>

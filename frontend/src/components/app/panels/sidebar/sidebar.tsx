@@ -14,7 +14,7 @@ import {
   PlusIcon,
   SettingsIcon,
   TrashIcon,
-  PanelLeftClose,
+  ChevronsLeft,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
@@ -66,7 +66,7 @@ export function Sidebar({
             <PlusIcon />
           </Button>
           <Button variant="ghost" size="icon-sm" onClick={onClose}>
-            <PanelLeftClose />
+            <ChevronsLeft />
           </Button>
         </PageHeaderRight>
       </PageHeader>
