@@ -128,7 +128,7 @@ export function ChatPanel({
   }
 
   return (
-    <div className="relative flex h-full flex-1 flex-col overflow-hidden bg-[var(--bg-secondary)]">
+    <div className="relative flex h-full w-full shrink-0 flex-col overflow-hidden bg-[var(--bg-secondary)] md:w-auto md:shrink md:flex-1">
       <PageHeader>
         <PageHeaderLeft>
           {!leftOpen && (

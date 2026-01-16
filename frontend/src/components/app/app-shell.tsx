@@ -94,7 +94,7 @@ function AppShellContent() {
   , [chats])
 
   return (
-    <div className="flex h-dvh w-full">
+    <div className="flex h-dvh w-full overflow-hidden">
       <SidebarContainer
         chats={sidebarChats}
         currentChatId={currentChatId}
