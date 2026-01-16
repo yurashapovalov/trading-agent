@@ -106,24 +106,38 @@ export function PanelsProvider({
 
   // Responsive: auto-hide panels on smaller screens
   useEffect(() => {
+    let wasMobile = window.innerWidth < BREAKPOINT_MD
+    let wasTablet = window.innerWidth < BREAKPOINT_LG
+
     const handleResize = () => {
       const width = window.innerWidth
       const mobile = width < BREAKPOINT_MD
+      const tablet = width < BREAKPOINT_LG
 
       setIsMobile(mobile)
 
-      if (mobile) {
-        // Mobile: hide both panels
+      // Only close panels on TRANSITION to smaller screen
+      if (mobile && !wasMobile) {
+        // Transitioning to mobile: hide both panels
         setLeftOpen(false)
         setRightOpen(false)
-      } else if (width < BREAKPOINT_LG) {
-        // Tablet: hide right panel only
+      } else if (tablet && !wasTablet && !mobile) {
+        // Transitioning to tablet (but not mobile): hide right panel only
         setRightOpen(false)
       }
+
+      wasMobile = mobile
+      wasTablet = tablet
     }
 
-    // Check on mount
-    handleResize()
+    // Initial state
+    setIsMobile(wasMobile)
+    if (wasMobile) {
+      setLeftOpen(false)
+      setRightOpen(false)
+    } else if (wasTablet) {
+      setRightOpen(false)
+    }
 
     window.addEventListener("resize", handleResize)
     return () => window.removeEventListener("resize", handleResize)
