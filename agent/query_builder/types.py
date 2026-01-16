@@ -601,14 +601,20 @@ class EventTimeSpec:
     """
     Параметры для операции EVENT_TIME.
 
+    Находит распределение времени события по дням (когда ОБЫЧНО происходит).
+
     Attributes:
         find: Что ищем внутри каждого дня.
               "high" — момент максимальной цены
               "low" — момент минимальной цены
-              "both" — и high и low (возвращает обе колонки)
+              "open" — момент открытия (первая минутка)
+              "close" — момент закрытия (последняя минутка)
+              "max_volume" — минута с максимальным объёмом
+              "both" — high и low
+              "all" — open + high + low + close + max_volume
     """
 
-    find: Literal["high", "low", "both"]
+    find: Literal["high", "low", "open", "close", "max_volume", "both", "all"]
 
 
 @dataclass
@@ -645,20 +651,25 @@ class FindExtremumSpec:
     """
     Параметры для операции FIND_EXTREMUM.
 
-    Находит точное время и значение high/low для конкретных дней.
+    Находит точное время и значение события для конкретных дней.
 
     Attributes:
         find: Что ищем.
               "high" — время и значение максимума
               "low" — время и значение минимума
-              "both" — и high и low
+              "open" — время и цена открытия (первая минутка)
+              "close" — время и цена закрытия (последняя минутка)
+              "max_volume" — минута с максимальным объёмом
+              "both" — high и low
+              "ohlc" — open + high + low + close
+              "all" — open + high + low + close + max_volume
 
     Example output:
         {"date": "2025-01-10", "high_time": "06:12:00", "high_value": 21543.25,
          "low_time": "10:15:00", "low_value": 21234.50}
     """
 
-    find: Literal["high", "low", "both"]
+    find: Literal["high", "low", "open", "close", "max_volume", "both", "ohlc", "all"]
 
 
 # =============================================================================

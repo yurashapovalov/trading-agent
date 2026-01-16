@@ -42,14 +42,14 @@ Types:
 - clarification: unclear or ambiguous request ("покажи данные", "high low")
 - data.simple: basic statistics for a period ("статистика за январь", "средняя волатильность 2024")
 - data.filter: find days matching condition ("дни когда упало > 2%", "дни с гэпом", "пятницы где low ниже close")
-- data.event_time: when does high/low USUALLY form - distribution ("когда обычно формируется high?")
-- data.find_extremum: when WAS high/low on specific date ("во сколько был high вчера?")
+- data.event_time: when does event USUALLY occur - distribution ("когда обычно формируется high?", "в какое время чаще low?")
+- data.find_extremum: when WAS event on specific date ("во сколько был high вчера?", "когда открылась сессия 20 ноября?", "во сколько закрылся рынок?")
 - data.top_n: top N days by metric ("топ 10 волатильных дней", "5 самых больших гэпов")
 - data.compare: compare sessions, periods, weekdays ("сравни RTH vs ETH", "понедельник vs пятница")
 
 Key distinction:
 - data.event_time = PATTERN over many days ("обычно", "как правило", "распределение")
-- data.find_extremum = EXACT time for specific date(s) ("вчера", "10 января", "на прошлой неделе")
+- data.find_extremum = EXACT time for specific date(s) ("вчера", "10 января", "во сколько открылась", "когда началась")
 
 Return JSON: {{"type": "<type>"}}
 
@@ -72,14 +72,14 @@ Types:
 - clarification: unclear or ambiguous request ("покажи данные", "high low")
 - data.simple: basic statistics for a period ("статистика за январь", "средняя волатильность 2024")
 - data.filter: find days matching condition ("дни когда упало > 2%", "дни с гэпом", "пятницы где low ниже close")
-- data.event_time: when does high/low USUALLY form - distribution ("когда обычно формируется high?")
-- data.find_extremum: when WAS high/low on specific date ("во сколько был high вчера?")
+- data.event_time: when does event USUALLY occur - distribution ("когда обычно формируется high?", "в какое время чаще low?")
+- data.find_extremum: when WAS event on specific date ("во сколько был high вчера?", "когда открылась сессия 20 ноября?", "во сколько закрылся рынок?")
 - data.top_n: top N days by metric ("топ 10 волатильных дней", "5 самых больших гэпов")
 - data.compare: compare sessions, periods, weekdays ("сравни RTH vs ETH", "понедельник vs пятница")
 
 Key distinction:
 - data.event_time = PATTERN over many days ("обычно", "как правило", "распределение")
-- data.find_extremum = EXACT time for specific date(s) ("вчера", "10 января", "на прошлой неделе")
+- data.find_extremum = EXACT time for specific date(s) ("вчера", "10 января", "во сколько открылась", "когда началась")
 
 Chat history:
 {chat_history}

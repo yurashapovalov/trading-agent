@@ -42,10 +42,18 @@ class FindExtremumOpBuilder(SpecialOpBuilder):
         extra_filters_sql: str = ""
     ) -> str:
         """
-        Строит запрос для поиска точного времени экстремумов.
+        Строит запрос для поиска точного времени событий.
 
         Returns:
-            SQL с колонками: date, high_time, high_value, low_time, low_value
+            SQL с колонками зависящими от find:
+            - high: date, high_time, high_value
+            - low: date, low_time, low_value
+            - open: date, open_time, open_value
+            - close: date, close_time, close_value
+            - max_volume: date, max_volume_time, max_volume_value
+            - both: high + low
+            - ohlc: open + high + low + close
+            - all: open + high + low + close + max_volume
 
         Raises:
             ValidationError: Если входные данные невалидны
@@ -59,8 +67,18 @@ class FindExtremumOpBuilder(SpecialOpBuilder):
             return self._build_high_query(symbol, period_start, period_end, extra_filters_sql)
         elif find == "low":
             return self._build_low_query(symbol, period_start, period_end, extra_filters_sql)
-        else:  # both
+        elif find == "open":
+            return self._build_open_query(symbol, period_start, period_end, extra_filters_sql)
+        elif find == "close":
+            return self._build_close_query(symbol, period_start, period_end, extra_filters_sql)
+        elif find == "max_volume":
+            return self._build_max_volume_query(symbol, period_start, period_end, extra_filters_sql)
+        elif find == "both":
             return self._build_both_query(symbol, period_start, period_end, extra_filters_sql)
+        elif find == "ohlc":
+            return self._build_ohlc_query(symbol, period_start, period_end, extra_filters_sql)
+        else:  # all
+            return self._build_all_query(symbol, period_start, period_end, extra_filters_sql)
 
     def _build_high_query(
         self,
@@ -184,4 +202,229 @@ SELECT
     low_time::time as low_time,
     low_value
 FROM daily_extremes
+ORDER BY date"""
+
+    def _build_open_query(
+        self,
+        symbol: str,
+        period_start: str,
+        period_end: str,
+        extra_filters_sql: str
+    ) -> str:
+        """Запрос для поиска времени OPEN (первая минутка)."""
+        safe_symbol = safe_sql_symbol(symbol)
+        safe_start = safe_sql_date(period_start)
+        safe_end = safe_sql_date(period_end)
+
+        return f"""WITH filtered_data AS (
+    SELECT
+        timestamp,
+        timestamp::date as date,
+        open
+    FROM {OHLCV_TABLE}
+    WHERE symbol = {safe_symbol}
+      AND timestamp >= {safe_start}
+      AND timestamp < {safe_end}
+      {extra_filters_sql}
+),
+daily_opens AS (
+    SELECT
+        date,
+        FIRST(timestamp ORDER BY timestamp ASC) as open_time,
+        FIRST(open ORDER BY timestamp ASC) as open_value
+    FROM filtered_data
+    GROUP BY date
+)
+SELECT
+    date,
+    open_time::time as open_time,
+    open_value
+FROM daily_opens
+ORDER BY date"""
+
+    def _build_close_query(
+        self,
+        symbol: str,
+        period_start: str,
+        period_end: str,
+        extra_filters_sql: str
+    ) -> str:
+        """Запрос для поиска времени CLOSE (последняя минутка)."""
+        safe_symbol = safe_sql_symbol(symbol)
+        safe_start = safe_sql_date(period_start)
+        safe_end = safe_sql_date(period_end)
+
+        return f"""WITH filtered_data AS (
+    SELECT
+        timestamp,
+        timestamp::date as date,
+        close
+    FROM {OHLCV_TABLE}
+    WHERE symbol = {safe_symbol}
+      AND timestamp >= {safe_start}
+      AND timestamp < {safe_end}
+      {extra_filters_sql}
+),
+daily_closes AS (
+    SELECT
+        date,
+        LAST(timestamp ORDER BY timestamp ASC) as close_time,
+        LAST(close ORDER BY timestamp ASC) as close_value
+    FROM filtered_data
+    GROUP BY date
+)
+SELECT
+    date,
+    close_time::time as close_time,
+    close_value
+FROM daily_closes
+ORDER BY date"""
+
+    def _build_max_volume_query(
+        self,
+        symbol: str,
+        period_start: str,
+        period_end: str,
+        extra_filters_sql: str
+    ) -> str:
+        """Запрос для поиска минуты с MAX VOLUME."""
+        safe_symbol = safe_sql_symbol(symbol)
+        safe_start = safe_sql_date(period_start)
+        safe_end = safe_sql_date(period_end)
+
+        return f"""WITH filtered_data AS (
+    SELECT
+        timestamp,
+        timestamp::date as date,
+        volume
+    FROM {OHLCV_TABLE}
+    WHERE symbol = {safe_symbol}
+      AND timestamp >= {safe_start}
+      AND timestamp < {safe_end}
+      {extra_filters_sql}
+),
+daily_max_volume AS (
+    SELECT
+        date,
+        FIRST(timestamp ORDER BY volume DESC, timestamp ASC) as max_volume_time,
+        MAX(volume) as max_volume_value
+    FROM filtered_data
+    GROUP BY date
+)
+SELECT
+    date,
+    max_volume_time::time as max_volume_time,
+    max_volume_value
+FROM daily_max_volume
+ORDER BY date"""
+
+    def _build_ohlc_query(
+        self,
+        symbol: str,
+        period_start: str,
+        period_end: str,
+        extra_filters_sql: str
+    ) -> str:
+        """Запрос для поиска OPEN, HIGH, LOW, CLOSE времени."""
+        safe_symbol = safe_sql_symbol(symbol)
+        safe_start = safe_sql_date(period_start)
+        safe_end = safe_sql_date(period_end)
+
+        return f"""WITH filtered_data AS (
+    SELECT
+        timestamp,
+        timestamp::date as date,
+        open,
+        high,
+        low,
+        close
+    FROM {OHLCV_TABLE}
+    WHERE symbol = {safe_symbol}
+      AND timestamp >= {safe_start}
+      AND timestamp < {safe_end}
+      {extra_filters_sql}
+),
+daily_ohlc AS (
+    SELECT
+        date,
+        FIRST(timestamp ORDER BY timestamp ASC) as open_time,
+        FIRST(open ORDER BY timestamp ASC) as open_value,
+        FIRST(timestamp ORDER BY high DESC, timestamp ASC) as high_time,
+        MAX(high) as high_value,
+        FIRST(timestamp ORDER BY low ASC, timestamp ASC) as low_time,
+        MIN(low) as low_value,
+        LAST(timestamp ORDER BY timestamp ASC) as close_time,
+        LAST(close ORDER BY timestamp ASC) as close_value
+    FROM filtered_data
+    GROUP BY date
+)
+SELECT
+    date,
+    open_time::time as open_time,
+    open_value,
+    high_time::time as high_time,
+    high_value,
+    low_time::time as low_time,
+    low_value,
+    close_time::time as close_time,
+    close_value
+FROM daily_ohlc
+ORDER BY date"""
+
+    def _build_all_query(
+        self,
+        symbol: str,
+        period_start: str,
+        period_end: str,
+        extra_filters_sql: str
+    ) -> str:
+        """Запрос для поиска всех событий: OPEN, HIGH, LOW, CLOSE, MAX_VOLUME."""
+        safe_symbol = safe_sql_symbol(symbol)
+        safe_start = safe_sql_date(period_start)
+        safe_end = safe_sql_date(period_end)
+
+        return f"""WITH filtered_data AS (
+    SELECT
+        timestamp,
+        timestamp::date as date,
+        open,
+        high,
+        low,
+        close,
+        volume
+    FROM {OHLCV_TABLE}
+    WHERE symbol = {safe_symbol}
+      AND timestamp >= {safe_start}
+      AND timestamp < {safe_end}
+      {extra_filters_sql}
+),
+daily_all AS (
+    SELECT
+        date,
+        FIRST(timestamp ORDER BY timestamp ASC) as open_time,
+        FIRST(open ORDER BY timestamp ASC) as open_value,
+        FIRST(timestamp ORDER BY high DESC, timestamp ASC) as high_time,
+        MAX(high) as high_value,
+        FIRST(timestamp ORDER BY low ASC, timestamp ASC) as low_time,
+        MIN(low) as low_value,
+        LAST(timestamp ORDER BY timestamp ASC) as close_time,
+        LAST(close ORDER BY timestamp ASC) as close_value,
+        FIRST(timestamp ORDER BY volume DESC, timestamp ASC) as max_volume_time,
+        MAX(volume) as max_volume_value
+    FROM filtered_data
+    GROUP BY date
+)
+SELECT
+    date,
+    open_time::time as open_time,
+    open_value,
+    high_time::time as high_time,
+    high_value,
+    low_time::time as low_time,
+    low_value,
+    close_time::time as close_time,
+    close_value,
+    max_volume_time::time as max_volume_time,
+    max_volume_value
+FROM daily_all
 ORDER BY date"""

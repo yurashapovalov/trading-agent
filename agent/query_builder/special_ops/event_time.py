@@ -61,7 +61,13 @@ class EventTimeOpBuilder(SpecialOpBuilder):
                 symbol, period_start, period_end,
                 interval, extra_filters_sql
             )
+        elif find_col == "all":
+            return self._build_all_query(
+                symbol, period_start, period_end,
+                interval, extra_filters_sql
+            )
         else:
+            # high, low, open, close, max_volume
             return self._build_single_query(
                 symbol, period_start, period_end,
                 interval, find_col, extra_filters_sql
@@ -76,32 +82,38 @@ class EventTimeOpBuilder(SpecialOpBuilder):
         find_col: str,
         extra_filters_sql: str
     ) -> str:
-        """Запрос для одного типа экстремума (high или low)."""
+        """Запрос для одного типа события (high, low, open, close, max_volume)."""
         # Валидация входных данных
         safe_symbol = safe_sql_symbol(symbol)
         safe_start = safe_sql_date(period_start)
         safe_end = safe_sql_date(period_end)
 
-        if find_col == "high":
-            order_clause = "high DESC, timestamp ASC"
-        else:
-            order_clause = "low ASC, timestamp ASC"
+        # Определяем ORDER BY и нужные колонки для поиска события
+        event_configs = {
+            "high": {"order": "high DESC, timestamp ASC", "columns": "high"},
+            "low": {"order": "low ASC, timestamp ASC", "columns": "low"},
+            "open": {"order": "timestamp ASC", "columns": "open"},
+            "close": {"order": "timestamp DESC", "columns": "close"},
+            "max_volume": {"order": "volume DESC, timestamp ASC", "columns": "volume"},
+        }
+        config = event_configs.get(find_col, {"order": "timestamp ASC", "columns": "open"})
+        order_clause = config["order"]
+        select_columns = config["columns"]
 
         return f"""WITH filtered_data AS (
     -- Минутные данные с фильтрами
     SELECT
         timestamp,
         timestamp::date as date,
-        high,
-        low
+        {select_columns}
     FROM {OHLCV_TABLE}
     WHERE symbol = {safe_symbol}
       AND timestamp >= {safe_start}
       AND timestamp < {safe_end}
       {extra_filters_sql}
 ),
-daily_extremes AS (
-    -- Для каждого дня находим момент экстремума
+daily_events AS (
+    -- Для каждого дня находим момент события
     SELECT
         date,
         FIRST(timestamp ORDER BY {order_clause}) as event_ts
@@ -113,7 +125,7 @@ distribution AS (
     SELECT
         STRFTIME(TIME_BUCKET(INTERVAL '{interval}', event_ts), '%H:%M') as time_bucket,
         COUNT(*) as frequency
-    FROM daily_extremes
+    FROM daily_events
     GROUP BY time_bucket
 )
 SELECT
@@ -189,6 +201,77 @@ SELECT
     ROUND(frequency * 100.0 / SUM(frequency) OVER (PARTITION BY event_type), 2) as percentage
 FROM distribution
 ORDER BY event_type DESC, time_bucket"""
+
+    def _build_all_query(
+        self,
+        symbol: str,
+        period_start: str,
+        period_end: str,
+        interval: str,
+        extra_filters_sql: str
+    ) -> str:
+        """UNION запрос для всех событий: open, high, low, close, max_volume."""
+        safe_symbol = safe_sql_symbol(symbol)
+        safe_start = safe_sql_date(period_start)
+        safe_end = safe_sql_date(period_end)
+
+        return f"""WITH filtered_data AS (
+    SELECT
+        timestamp,
+        timestamp::date as date,
+        open,
+        high,
+        low,
+        close,
+        volume
+    FROM {OHLCV_TABLE}
+    WHERE symbol = {safe_symbol}
+      AND timestamp >= {safe_start}
+      AND timestamp < {safe_end}
+      {extra_filters_sql}
+),
+daily_opens AS (
+    SELECT date, FIRST(timestamp ORDER BY timestamp ASC) as event_ts, 'open' as event_type
+    FROM filtered_data GROUP BY date
+),
+daily_highs AS (
+    SELECT date, FIRST(timestamp ORDER BY high DESC, timestamp ASC) as event_ts, 'high' as event_type
+    FROM filtered_data GROUP BY date
+),
+daily_lows AS (
+    SELECT date, FIRST(timestamp ORDER BY low ASC, timestamp ASC) as event_ts, 'low' as event_type
+    FROM filtered_data GROUP BY date
+),
+daily_closes AS (
+    SELECT date, LAST(timestamp ORDER BY timestamp ASC) as event_ts, 'close' as event_type
+    FROM filtered_data GROUP BY date
+),
+daily_max_volumes AS (
+    SELECT date, FIRST(timestamp ORDER BY volume DESC, timestamp ASC) as event_ts, 'max_volume' as event_type
+    FROM filtered_data GROUP BY date
+),
+all_events AS (
+    SELECT * FROM daily_opens
+    UNION ALL SELECT * FROM daily_highs
+    UNION ALL SELECT * FROM daily_lows
+    UNION ALL SELECT * FROM daily_closes
+    UNION ALL SELECT * FROM daily_max_volumes
+),
+distribution AS (
+    SELECT
+        event_type,
+        STRFTIME(TIME_BUCKET(INTERVAL '{interval}', event_ts), '%H:%M') as time_bucket,
+        COUNT(*) as frequency
+    FROM all_events
+    GROUP BY event_type, time_bucket
+)
+SELECT
+    event_type,
+    time_bucket,
+    frequency,
+    ROUND(frequency * 100.0 / SUM(frequency) OVER (PARTITION BY event_type), 2) as percentage
+FROM distribution
+ORDER BY event_type, time_bucket"""
 
 
 # Legacy wrapper
