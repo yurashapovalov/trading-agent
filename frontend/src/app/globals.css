@@ -242,6 +242,7 @@ body {
   height: 100dvh;
   overflow: hidden;
   overscroll-behavior: none;
+  
 }
 
 @layer base {
@@ -250,6 +251,7 @@ body {
   }
   body {
     @apply text-foreground;
+    background-color: var(--bg-secondary);
   }
   button,
   [role="button"],
