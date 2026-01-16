@@ -200,7 +200,7 @@ export function ChatPanel({
                 <Message
                   from={message.role}
                   key={message.request_id ?? `${message.role}-${index}`}
-                  className="max-w-full group"
+                  className="group"
                 >
                 <div>
                   {message.role === "assistant" && message.agent_steps && message.agent_steps.length > 0 && (
@@ -251,7 +251,7 @@ export function ChatPanel({
           })()}
 
           {currentSteps.length > 0 && (
-            <Message from="assistant" className="max-w-full">
+            <Message from="assistant" className="">
               <div>
                 <Processed steps={currentSteps} isLoading={true} />
               </div>
@@ -259,7 +259,7 @@ export function ChatPanel({
           )}
 
           {streamingText && (
-            <Message from="assistant" className="max-w-full">
+            <Message from="assistant" className="">
               <MessageContent>
                 <MessageResponse>{streamingText}</MessageResponse>
               </MessageContent>
@@ -267,7 +267,7 @@ export function ChatPanel({
           )}
 
           {isLoading && currentSteps.length === 0 && !streamingText && (
-            <Message from="assistant" className="max-w-full">
+            <Message from="assistant" className="">
               <div>
                 <Processed steps={[]} isLoading={true} />
               </div>
