@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useRef, useEffect, useCallback } from "react"
-import { useAuth } from "@/components/auth-provider"
+import { useAuth } from "@/providers"
 import type { ChatMessage, AgentStep, ToolUsage, Usage, SSEEvent } from "@/types/chat"
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
@@ -82,6 +82,7 @@ export function useChat({ chatId, onChatCreated, onTitleUpdated }: UseChatOption
   const { session } = useAuth()
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [isLoading, setIsLoading] = useState(false)
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false)
   const [currentSteps, setCurrentSteps] = useState<AgentStep[]>([])
   const [streamingText, setStreamingText] = useState("")
   const [suggestions, setSuggestions] = useState<string[]>(DEFAULT_SUGGESTIONS)
@@ -91,11 +92,17 @@ export function useChat({ chatId, onChatCreated, onTitleUpdated }: UseChatOption
   useEffect(() => {
     if (!session?.access_token) return
 
-    // Clear messages when switching chats
-    setMessages([])
+    // Reset state for new chat
     setSuggestions(DEFAULT_SUGGESTIONS)
 
-    if (!chatId) return
+    if (!chatId) {
+      setMessages([])
+      setIsLoadingHistory(false)
+      return
+    }
+
+    // Start loading immediately (don't clear messages yet to avoid flash)
+    setIsLoadingHistory(true)
 
     const loadChatMessages = async () => {
       try {
@@ -128,9 +135,15 @@ export function useChat({ chatId, onChatCreated, onTitleUpdated }: UseChatOption
             ])
             .flat()
           setMessages(loadedMessages)
+        } else {
+          // Failed to load - clear messages
+          setMessages([])
         }
       } catch (e) {
         console.error("Failed to load chat messages:", e)
+        setMessages([])
+      } finally {
+        setIsLoadingHistory(false)
       }
     }
 
@@ -384,6 +397,7 @@ export function useChat({ chatId, onChatCreated, onTitleUpdated }: UseChatOption
   return {
     messages,
     isLoading,
+    isLoadingHistory,
     currentSteps,
     streamingText,
     suggestions,

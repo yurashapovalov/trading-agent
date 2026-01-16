@@ -1,4 +1,9 @@
-// Chat message types
+// Chat types
+
+export type ChatItem = {
+  id: string
+  title: string
+}
 
 export type ToolUsage = {
   name: string

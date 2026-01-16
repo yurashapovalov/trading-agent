@@ -786,12 +786,12 @@ export const PromptInput = ({
         type="file"
       />
       <form
-        className={cn("w-full", className)}
+        className={cn("w-full rounded-md bg-[var(--bg-tertiary)] shadow-[var(--shadow-input)] focus-within:ring-0 focus-within:outline-none", className)}
         onSubmit={handleSubmit}
         ref={formRef}
         {...props}
       >
-        <InputGroup className="overflow-hidden">{children}</InputGroup>
+        <InputGroup className="overflow-hidden border-0 bg-transparent shadow-none !ring-0">{children}</InputGroup>
       </form>
     </>
   );
@@ -902,7 +902,7 @@ export const PromptInputTextarea = ({
 
   return (
     <InputGroupTextarea
-      className={cn("field-sizing-content max-h-48 min-h-16 text-base md:text-sm", className)}
+      className={cn("field-sizing-content max-h-48 min-h-12 text-base md:text-base focus-visible:ring-0 focus-visible:border-transparent", className)}
       name="message"
       onCompositionEnd={() => setIsComposing(false)}
       onCompositionStart={() => setIsComposing(true)}
