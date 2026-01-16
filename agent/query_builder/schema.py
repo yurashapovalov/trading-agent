@@ -182,6 +182,7 @@ def get_query_spec_schema() -> dict:
     Генерирует полную JSON Schema для query_spec.
 
     Автоматически включает:
+    - symbol: trading instrument (NQ, ES, CL)
     - source enum из Source
     - grouping enum из Grouping
     - special_op enum из SpecialOp
@@ -190,6 +191,11 @@ def get_query_spec_schema() -> dict:
     schema = {
         "type": "object",
         "properties": {
+            "symbol": {
+                "type": "string",
+                "enum": ["NQ", "ES", "CL"],
+                "description": "Trading instrument symbol"
+            },
             "source": {
                 "type": "string",
                 "enum": get_source_values()
@@ -223,10 +229,11 @@ def get_query_spec_schema() -> dict:
                         "type": "string",
                         "enum": [
                             "RTH", "ETH", "OVERNIGHT", "GLOBEX",
-                            "ASIAN", "EUROPEAN", "US",
-                            "PREMARKET", "POSTMARKET", "MORNING", "AFTERNOON", "LUNCH",
-                            "LONDON_OPEN", "NY_OPEN", "NY_CLOSE"
-                        ]
+                            "ASIAN", "EUROPEAN",
+                            "MORNING", "AFTERNOON",
+                            "RTH_OPEN", "RTH_CLOSE"
+                        ],
+                        "description": "Trading session filter"
                     },
                     "time_start": {
                         "type": "string",

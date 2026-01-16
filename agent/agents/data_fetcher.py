@@ -28,6 +28,22 @@ from agent.modules import sql
 # Maximum rows to send to Analyst (to reduce token usage)
 MAX_ROWS_FOR_ANALYST = 50
 
+# Priority columns for smart sorting (most interesting first)
+# Data will be sorted by the first column found in this list (DESC)
+SORT_PRIORITY = [
+    # Volatility/movement - most interesting for traders
+    "range", "change_pct", "gap_pct",
+    # Distance to extremes
+    "close_to_low", "close_to_high",
+    "open_to_high", "open_to_low",
+    # Candle structure
+    "body", "upper_wick", "lower_wick",
+    # Volume
+    "volume",
+    # Aggregations
+    "count", "pct", "frequency",
+]
+
 
 class DataFetcher:
     """Fetches trading data based on Intent from Understander.
@@ -134,12 +150,16 @@ class DataFetcher:
                         if special_op == "event_time":
                             granularity = "distribution"
 
+                # Smart sort by priority column
+                rows, sort_col = self._smart_sort(rows)
+
                 return {
                     "rows": rows,
                     "row_count": len(rows),
                     "granularity": granularity,
                     "columns": list(df.columns) if len(df) > 0 else [],
                     "source": source,
+                    "sorted_by": sort_col,
                 }
         except Exception as e:
             return {
@@ -173,6 +193,41 @@ class DataFetcher:
             "message": "No data needed for concept explanation",
         }
 
+    def _smart_sort(self, rows: list[dict]) -> tuple[list[dict], str | None]:
+        """Sort rows by the most interesting column (for better truncation).
+
+        Finds the first column from SORT_PRIORITY that exists in the data
+        and sorts by it descending. Falls back to date DESC if no priority
+        column found.
+
+        Args:
+            rows: List of row dicts from SQL result.
+
+        Returns:
+            Tuple of (sorted_rows, sort_column_name or None).
+        """
+        if not rows:
+            return rows, None
+
+        columns = set(rows[0].keys())
+
+        # Find first priority column that exists
+        sort_col = None
+        for col in SORT_PRIORITY:
+            if col in columns:
+                sort_col = col
+                break
+
+        # Sort by priority column DESC, or by date DESC as fallback
+        if sort_col:
+            rows = sorted(rows, key=lambda r: r.get(sort_col, 0) or 0, reverse=True)
+            return rows, sort_col
+        elif "date" in columns:
+            rows = sorted(rows, key=lambda r: r.get("date", ""), reverse=True)
+            return rows, "date"
+
+        return rows, None
+
     def _create_summary(self, full_data: dict[str, Any]) -> dict[str, Any]:
         """Create summary of data for Analyst (to reduce token usage).
 
@@ -193,13 +248,23 @@ class DataFetcher:
             return full_data
 
         # Create summary with truncated rows
+        sorted_by = full_data.get("sorted_by")
+
+        # Build descriptive note
+        if sorted_by and sorted_by != "date":
+            sort_note = f"Top {MAX_ROWS_FOR_ANALYST} by {sorted_by} (descending)"
+        elif sorted_by == "date":
+            sort_note = f"Most recent {MAX_ROWS_FOR_ANALYST}"
+        else:
+            sort_note = f"First {MAX_ROWS_FOR_ANALYST}"
+
         summary = {
             **full_data,
             "rows": rows[:MAX_ROWS_FOR_ANALYST],
             "row_count": row_count,  # Keep original count
             "truncated": True,
             "showing": MAX_ROWS_FOR_ANALYST,
-            "summary_note": f"Showing top {MAX_ROWS_FOR_ANALYST} of {row_count} rows. Full data available for download.",
+            "summary_note": f"{sort_note} of {row_count} total rows.",
         }
 
         # Add aggregate stats if data has numeric columns

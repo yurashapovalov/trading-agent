@@ -82,7 +82,9 @@ class QueryBuilder:
         if spec.special_op != SpecialOp.NONE:
             special_builder = SpecialOpRegistry.get(spec.special_op)
             if special_builder:
-                extra_filters = build_all_filters_sql(spec.filters, "timestamp::date")
+                extra_filters = build_all_filters_sql(
+                    spec.filters, "timestamp::date", symbol=spec.symbol
+                )
                 return special_builder.build_query(spec, extra_filters)
 
         # Стандартный запрос
@@ -139,10 +141,14 @@ class QueryBuilder:
 
         # Определяем какие фильтры передавать
         if spec.source == Source.MINUTES:
-            extra_sql = build_all_filters_sql(spec.filters, "timestamp::date")
+            extra_sql = build_all_filters_sql(
+                spec.filters, "timestamp::date", symbol=spec.symbol
+            )
         else:
-            # Для daily/daily_with_prev — только календарные фильтры
-            extra_sql = build_calendar_filters_sql(spec.filters, "date")
+            # Для daily/daily_with_prev — календарные + holiday фильтры
+            extra_sql = build_all_filters_sql(
+                spec.filters, "date", prefix_and=False, symbol=spec.symbol
+            )
 
         return source_builder.build_cte(spec.symbol, spec.filters, extra_sql)
 

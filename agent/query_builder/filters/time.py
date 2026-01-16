@@ -6,8 +6,9 @@ Time Filter Builder — фильтрация по времени суток.
 - Кастомные временные диапазоны (time_start, time_end)
 - Сессии пересекающие полночь (OVERNIGHT, ASIAN, GLOBEX)
 
-Все времена в ET (Eastern Time).
-Все значения валидируются для защиты от SQL injection.
+Session times are loaded from instrument config (instruments.py).
+All times in data timezone (ET for NQ/ES).
+All values validated for SQL injection protection.
 """
 
 from __future__ import annotations
@@ -17,16 +18,18 @@ if TYPE_CHECKING:
     from agent.query_builder.types import Filters
 
 from agent.query_builder.sql_utils import safe_sql_time
+from agent.query_builder.instruments import get_session_times
 
 
-def build_time_filter_sql(filters: "Filters") -> str:
+def build_time_filter_sql(filters: "Filters", symbol: str = "NQ") -> str:
     """
     Строит SQL условие для фильтра по времени суток.
 
-    Все входные данные валидируются для защиты от SQL injection.
+    Session times are loaded from instrument config based on symbol.
 
     Args:
         filters: Объект Filters с session или time_start/time_end
+        symbol: Instrument symbol (NQ, ES, CL) for session lookup
 
     Returns:
         SQL выражение (без AND в начале) или пустую строку
@@ -36,34 +39,49 @@ def build_time_filter_sql(filters: "Filters") -> str:
 
     Examples:
         >>> filters = Filters(..., session="RTH")
-        >>> build_time_filter_sql(filters)
-        "timestamp::time BETWEEN '09:30:00' AND '16:00:00'"
+        >>> build_time_filter_sql(filters, "NQ")
+        "timestamp::time BETWEEN '09:30:00' AND '17:00:00'"
 
         >>> filters = Filters(..., session="OVERNIGHT")
-        >>> build_time_filter_sql(filters)
+        >>> build_time_filter_sql(filters, "NQ")
         "(timestamp::time >= '18:00:00' OR timestamp::time < '09:30:00')"
     """
-    # ETH — особый случай (NOT BETWEEN)
-    if filters.session == "ETH":
-        return "timestamp::time NOT BETWEEN '09:30:00' AND '16:00:00'"
-
-    # Получаем временной диапазон из session или time_start/time_end
-    time_filter = filters.get_time_filter()
-    if not time_filter:
+    # Get time filter from session or custom time_start/time_end
+    if filters.session:
+        # Load session times from instrument config
+        session_times = get_session_times(symbol, filters.session)
+        if not session_times:
+            # Fallback: unknown session, return empty
+            return ""
+        start_time, end_time = session_times
+    elif filters.time_start and filters.time_end:
+        # Custom time range
+        start_time = filters.time_start
+        end_time = filters.time_end
+    else:
         return ""
 
-    start_time, end_time = time_filter
+    # Normalize to HH:MM:SS format
+    start_time = _normalize_time(start_time)
+    end_time = _normalize_time(end_time)
 
-    # Валидируем времена (session times из TRADING_SESSIONS уже безопасны,
-    # но кастомные time_start/time_end нужно проверить)
+    # Validate times for SQL injection protection
     safe_start = safe_sql_time(start_time)
     safe_end = safe_sql_time(end_time)
 
-    # Проверяем пересечение полночи (end < start означает что сессия идёт через полночь)
-    if filters.crosses_midnight():
-        # Сессия пересекает полночь: 18:00-03:00
+    # Check if session crosses midnight (end < start)
+    if end_time < start_time:
+        # Session crosses midnight: 18:00-03:00
         # SQL: (time >= '18:00:00' OR time < '03:00:00')
         return f"(timestamp::time >= {safe_start} OR timestamp::time < {safe_end})"
     else:
-        # Обычная сессия в рамках одного дня: 09:30-16:00
+        # Regular session within same day: 09:30-17:00
         return f"timestamp::time BETWEEN {safe_start} AND {safe_end}"
+
+
+def _normalize_time(time_str: str) -> str:
+    """Normalize time to HH:MM:SS format."""
+    parts = time_str.split(":")
+    if len(parts) == 2:
+        return f"{parts[0]}:{parts[1]}:00"
+    return time_str

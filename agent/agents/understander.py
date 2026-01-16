@@ -3,11 +3,18 @@
 Converts natural language questions into JSON query_spec that QueryBuilder
 transforms deterministically into SQL.
 
-Architecture:
-    Question → Understander → query_spec → QueryBuilder → SQL
+Architecture (RAP - Retrieval-Augmented Prompting):
+    Question → Classifier (lite model) → query_type
+            → Handler (main model) → query_spec → QueryBuilder → SQL
 
-The Understander uses LLM to classify intent and extract query parameters,
-but does NOT generate SQL directly. This ensures deterministic behavior.
+Instead of one 800-token monolithic prompt, we use:
+1. Classifier (~50 tokens) - determines query type
+2. Handler (~50-200 tokens) - specialized prompt for that type
+
+Benefits:
+- ~80% token savings on average
+- Better model focus (only relevant instructions)
+- Easier to maintain and test
 
 Example:
     understander = Understander()
@@ -23,10 +30,18 @@ from google.genai import types
 import config
 from agent.state import AgentState, Intent, UsageStats, get_current_question, get_chat_history
 from agent.pricing import calculate_cost
+
 # Default symbol when not specified
 DEFAULT_SYMBOL = "NQ"
 from agent.modules.sql import get_data_range
-from agent.prompts.understander import get_understander_prompt
+from agent.query_builder.holidays import get_holidays_for_year
+
+# RAP prompts (new modular approach)
+from agent.prompts.understander import (
+    get_classifier_prompt,
+    get_handler_prompt,
+    QueryType,
+)
 
 # Schema auto-generation (Single Source of Truth)
 from agent.query_builder.schema import (
@@ -48,14 +63,151 @@ RESPONSE_SCHEMA = get_response_schema()
 
 
 # =============================================================================
+# Holiday Check Helper
+# =============================================================================
+
+def check_dates_for_holidays(
+    dates: list[str],
+    symbol: str = "NQ",
+    time_filter: tuple[str, str] | None = None
+) -> dict | None:
+    """
+    Check if any requested dates fall on market holidays or early close.
+
+    Args:
+        dates: List of date strings in YYYY-MM-DD format
+        symbol: Trading instrument symbol
+        time_filter: Optional (start_time, end_time) to check early close conflicts
+
+    Returns:
+        None if no issues, or dict with:
+        - holiday_dates: list of dates that are full holidays
+        - early_close_dates: list of dates that are early close
+        - holiday_names: dict mapping date -> holiday name
+        - all_holidays: True if ALL dates are full holidays
+        - early_close_conflict: True if time_filter conflicts with early close
+    """
+    if not dates:
+        return None
+
+    # Get unique years from dates
+    years = set()
+    for d in dates:
+        try:
+            years.add(int(d[:4]))
+        except (ValueError, IndexError):
+            continue
+
+    # Collect holidays for these years
+    full_close_map = {}  # date -> name
+    early_close_map = {}  # date -> name
+
+    for year in years:
+        holidays = get_holidays_for_year(symbol, year)
+        for d in holidays.get("full_close", []):
+            full_close_map[d.isoformat()] = _get_holiday_name(d)
+        for d in holidays.get("early_close", []):
+            early_close_map[d.isoformat()] = _get_early_close_name(d)
+
+    # Check which requested dates are holidays
+    holiday_dates = []
+    early_close_dates = []
+    holiday_names = {}
+
+    for d in dates:
+        if d in full_close_map:
+            holiday_dates.append(d)
+            holiday_names[d] = full_close_map[d]
+        elif d in early_close_map:
+            early_close_dates.append(d)
+            holiday_names[d] = early_close_map[d] + " (early close)"
+
+    if not holiday_dates and not early_close_dates:
+        return None
+
+    # Check if time filter conflicts with early close (market closes at 13:00 on these days)
+    early_close_conflict = False
+    if time_filter and early_close_dates:
+        start_time, end_time = time_filter
+        # Early close is typically 13:00 ET
+        if end_time and end_time > "13:00:00":
+            early_close_conflict = True
+
+    return {
+        "holiday_dates": holiday_dates,
+        "early_close_dates": early_close_dates,
+        "holiday_names": holiday_names,
+        "all_holidays": len(holiday_dates) == len(dates) and len(dates) > 0,
+        "early_close_conflict": early_close_conflict,
+    }
+
+
+def _get_holiday_name(d) -> str:
+    """Get human-readable holiday name for a date."""
+    # Common US market holidays
+    month_day = (d.month, d.day)
+
+    # Fixed holidays (approximate - actual dates may vary)
+    if month_day == (1, 1):
+        return "New Year's Day"
+    if month_day == (7, 4):
+        return "Independence Day"
+    if month_day == (12, 25):
+        return "Christmas Day"
+
+    # Variable holidays (approximate by month)
+    if d.month == 1 and d.weekday() == 0 and 15 <= d.day <= 21:
+        return "Martin Luther King Jr. Day"
+    if d.month == 2 and d.weekday() == 0 and 15 <= d.day <= 21:
+        return "Presidents Day"
+    if d.month == 5 and d.weekday() == 0 and d.day >= 25:
+        return "Memorial Day"
+    if d.month == 6 and d.day == 19:
+        return "Juneteenth"
+    if d.month == 9 and d.weekday() == 0 and d.day <= 7:
+        return "Labor Day"
+    if d.month == 11 and d.weekday() == 3 and 22 <= d.day <= 28:
+        return "Thanksgiving"
+
+    # Good Friday (variable, usually March/April)
+    if d.month in (3, 4) and d.weekday() == 4:
+        return "Good Friday"
+
+    return "Market Holiday"
+
+
+def _get_early_close_name(d) -> str:
+    """Get human-readable name for early close days."""
+    month_day = (d.month, d.day)
+
+    # Common early close days
+    if month_day == (12, 24):
+        return "Christmas Eve"
+    if month_day == (7, 3):
+        return "Day before Independence Day"
+
+    # Day after Thanksgiving (Black Friday)
+    if d.month == 11 and d.weekday() == 4 and 23 <= d.day <= 29:
+        return "Black Friday"
+
+    return "Early Close Day"
+
+
+# =============================================================================
 # Understander Agent
 # =============================================================================
 
 class Understander:
     """Parses user questions into structured query_spec for QueryBuilder.
 
-    Uses Gemini LLM to understand user intent and extract query parameters.
-    Returns query_spec (JSON) that QueryBuilder converts to SQL deterministically.
+    Uses RAP (Retrieval-Augmented Prompting) architecture:
+    1. Classifier - determines query type (~50 tokens)
+    2. Handler - specialized prompt for that type (~50-200 tokens)
+
+    Benefits:
+    - ~80% token savings vs monolithic prompt
+    - Better model focus (only relevant instructions)
+    - Easier to maintain and test
 
     Attributes:
         name: Agent name for logging.
@@ -69,7 +221,6 @@ class Understander:
     def __init__(self):
         """Initialize Gemini client and usage tracking."""
         self.client = genai.Client(api_key=config.GOOGLE_API_KEY)
-        # Используем основную модель для лучшего понимания
         self.model = config.GEMINI_MODEL
         self._last_usage = UsageStats(
             input_tokens=0,
@@ -87,18 +238,10 @@ class Understander:
         Returns:
             Dict with intent, usage stats, agents_used list, and step_number.
         """
-        # Get question from last HumanMessage in messages
         question = get_current_question(state)
-        # Get chat history for context (all messages except current question)
         chat_history = get_chat_history(state)
 
-        # DEBUG: Check what messages we actually received
-        messages = state.get("messages", [])
-        print(f"[Understander] Total messages in state: {len(messages)}")
-        print(f"[Understander] Chat history items: {len(chat_history)}")
-
-        # Вызываем LLM
-        intent = self._parse_with_llm(question, chat_history)
+        intent = self._parse_with_rap(question, chat_history)
 
         return {
             "intent": intent,
@@ -122,62 +265,177 @@ class Understander:
             )
         return "Данные: NQ"
 
-    def _build_prompt(self, question: str, chat_history: list) -> str:
-        """Build complete prompt from template with context."""
-        # Форматируем историю чата
+    def _format_chat_history(self, chat_history: list) -> str:
+        """Format chat history for prompts."""
+        if not chat_history:
+            return ""
         history_str = ""
-        if chat_history:
-            for msg in chat_history[-config.CHAT_HISTORY_LIMIT:]:
-                role = "User" if msg.get("role") == "user" else "Assistant"
-                history_str += f"{role}: {msg.get('content', '')}\n"
+        for msg in chat_history[-config.CHAT_HISTORY_LIMIT:]:
+            role = "User" if msg.get("role") == "user" else "Assistant"
+            history_str += f"{role}: {msg.get('content', '')}\n"
+        return history_str
 
-        return get_understander_prompt(
-            capabilities="",  # All kubiks documented in prompt template
-            data_info=self._get_data_info(),
-            today=datetime.now().strftime("%Y-%m-%d"),
-            question=question,
-            chat_history=history_str,
+    # =========================================================================
+    # RAP Methods (New Architecture)
+    # =========================================================================
+
+    def _parse_with_rap(self, question: str, chat_history: list) -> Intent:
+        """Parse question using RAP architecture (Classifier + Handler).
+
+        Steps:
+        1. Classify question type (~50 tokens)
+        2. Load appropriate handler for that type
+        3. Generate response with handler prompt (~50-200 tokens)
+
+        Total: ~100-250 tokens instead of 800 tokens.
+        """
+        # Step 1: Classify
+        history_str = self._format_chat_history(chat_history)
+        query_type = self._classify(question, history_str)
+        print(f"[Understander RAP] Classified as: {query_type}")
+
+        # Step 2: Generate with handler
+        intent = self._generate_with_handler(question, query_type, history_str)
+
+        # Step 3: Check for holiday dates
+        intent = self._check_holiday_intent(intent)
+
+        return intent
+
+    def _classify(self, question: str, chat_history: str) -> str:
+        """Classify question type.
+
+        Returns query type string like "data.event_time" or "chitchat".
+        """
+        prompt = get_classifier_prompt(question, chat_history)
+
+        response = self.client.models.generate_content(
+            model=self.model,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                temperature=0,  # Deterministic classification
+                response_mime_type="application/json",
+            )
         )
 
-    def _parse_with_llm(self, question: str, chat_history: list) -> Intent:
-        """Call LLM and parse response into Intent."""
-        try:
-            prompt = self._build_prompt(question, chat_history)
+        # Track classifier usage
+        if response.usage_metadata:
+            input_tokens = response.usage_metadata.prompt_token_count or 0
+            output_tokens = response.usage_metadata.candidates_token_count or 0
+            cost = calculate_cost(input_tokens, output_tokens, 0)
+            self._classifier_usage = {
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "cost_usd": cost,
+            }
 
-            response = self.client.models.generate_content(
-                model=self.model,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    temperature=0.3,  # Низкая для детерминированности
-                    # thinking_config отключен для скорости
-                    # thinking_config=types.ThinkingConfig(include_thoughts=True),
-                    response_mime_type="application/json",
-                    response_schema=RESPONSE_SCHEMA,
-                )
+        data = json.loads(response.text)
+        return data.get("type", "data.simple")
+
+    def _generate_with_handler(self, question: str, query_type: str, chat_history: str) -> Intent:
+        """Generate response using appropriate handler prompt."""
+        # Build handler prompt
+        prompt = get_handler_prompt(
+            query_type=query_type,
+            question=question,
+            chat_history=chat_history,
+            data_info=self._get_data_info(),
+            today=datetime.now().strftime("%Y-%m-%d"),
+        )
+
+        response = self.client.models.generate_content(
+            model=self.model,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                temperature=0.3,
+                response_mime_type="application/json",
+                response_schema=RESPONSE_SCHEMA,
+            )
+        )
+
+        # Track handler usage + combine with classifier
+        if response.usage_metadata:
+            input_tokens = response.usage_metadata.prompt_token_count or 0
+            output_tokens = response.usage_metadata.candidates_token_count or 0
+            thinking_tokens = getattr(response.usage_metadata, 'thoughts_token_count', 0) or 0
+            cost = calculate_cost(input_tokens, output_tokens, thinking_tokens)
+
+            # Add classifier usage
+            classifier = getattr(self, '_classifier_usage', {})
+            self._last_usage = UsageStats(
+                input_tokens=input_tokens + classifier.get("input_tokens", 0),
+                output_tokens=output_tokens + classifier.get("output_tokens", 0),
+                thinking_tokens=thinking_tokens,
+                cost_usd=cost + classifier.get("cost_usd", 0.0)
             )
 
-            # Трекаем использование токенов
-            if response.usage_metadata:
-                input_tokens = response.usage_metadata.prompt_token_count or 0
-                output_tokens = response.usage_metadata.candidates_token_count or 0
-                thinking_tokens = getattr(
-                    response.usage_metadata, 'thoughts_token_count', 0
-                ) or 0
-                cost = calculate_cost(input_tokens, output_tokens, thinking_tokens)
-                self._last_usage = UsageStats(
-                    input_tokens=input_tokens,
-                    output_tokens=output_tokens,
-                    thinking_tokens=thinking_tokens,
-                    cost_usd=cost
-                )
+        data = json.loads(response.text)
+        return self._build_intent(data)
 
-            # Парсим JSON
-            data = json.loads(response.text)
-            return self._build_intent(data)
+    def _check_holiday_intent(self, intent: Intent) -> Intent:
+        """
+        Check if intent requests data for holiday or early close dates.
 
-        except Exception as e:
-            print(f"[Understander] Error: {e}")
-            return self._default_intent()
+        If user asks for specific dates that are market holidays,
+        adds holiday_info to intent for Analyst to explain.
+
+        Args:
+            intent: Original intent from LLM
+
+        Returns:
+            Modified intent with holiday_info if detected, original otherwise
+        """
+        if intent.get("type") != "data":
+            return intent
+
+        query_spec = intent.get("query_spec")
+        if not query_spec:
+            return intent
+
+        # Check specific_dates
+        filters = query_spec.get("filters", {})
+        specific_dates = filters.get("specific_dates")
+        if not specific_dates:
+            return intent
+
+        # Get time filter for early close check
+        time_filter = None
+        time_start = filters.get("time_start")
+        time_end = filters.get("time_end")
+        if time_start and time_end:
+            time_filter = (time_start, time_end)
+
+        symbol = query_spec.get("symbol", DEFAULT_SYMBOL)
+        holiday_check = check_dates_for_holidays(specific_dates, symbol, time_filter)
+
+        if not holiday_check:
+            return intent
+
+        # Build info strings for logging
+        all_dates = holiday_check.get("holiday_dates", []) + holiday_check.get("early_close_dates", [])
+        holiday_info_str = ", ".join(
+            f"{d} ({holiday_check['holiday_names'].get(d, 'holiday')})"
+            for d in all_dates
+        )
+
+        if holiday_check.get("all_holidays"):
+            print(f"[Understander] All dates are holidays: {holiday_info_str}")
+        elif holiday_check.get("early_close_conflict"):
+            print(f"[Understander] Early close conflict: {holiday_info_str}")
+        elif all_dates:
+            print(f"[Understander] Some dates are holidays/early close: {holiday_info_str}")
+
+        # Add holiday_info to intent for Analyst to use
+        intent["holiday_info"] = {
+            "dates": all_dates,
+            "names": holiday_check["holiday_names"],
+            "all_holidays": holiday_check.get("all_holidays", False),
+            "early_close_dates": holiday_check.get("early_close_dates", []),
+            "early_close_conflict": holiday_check.get("early_close_conflict", False),
+        }
+        # Could add a warning to intent here if needed
+
+        return intent
 
     def _build_intent(self, data: dict) -> Intent:
         """Build Intent object from parsed LLM response.
@@ -290,6 +548,16 @@ def query_spec_to_builder(query_spec: dict) -> "QuerySpec":
         MetricSpec,
         SpecialOp,
     )
+    from agent.query_builder.types import HolidayFilter
+
+    def _parse_holiday_filter(value: str) -> HolidayFilter:
+        """Parse holiday filter string to enum."""
+        mapping = {
+            "include": HolidayFilter.INCLUDE,
+            "exclude": HolidayFilter.EXCLUDE,
+            "only": HolidayFilter.ONLY,
+        }
+        return mapping.get(value, HolidayFilter.INCLUDE)
 
     # Source (auto-generated from Source enum)
     from agent.query_builder.schema import get_source_map
@@ -319,6 +587,9 @@ def query_spec_to_builder(query_spec: dict) -> "QuerySpec":
         time_end=filters_data.get("time_end"),
         # Условия
         conditions=conditions,
+        # Праздники (enum: include/exclude/only)
+        market_holidays=_parse_holiday_filter(filters_data.get("market_holidays", "include")),
+        early_close_days=_parse_holiday_filter(filters_data.get("early_close_days", "include")),
     )
 
     # Grouping (auto-generated from Grouping enum)
@@ -351,8 +622,11 @@ def query_spec_to_builder(query_spec: dict) -> "QuerySpec":
     top_n_spec = parsed_spec if special_op == SpecialOp.TOP_N else None
     find_extremum_spec = parsed_spec if special_op == SpecialOp.FIND_EXTREMUM else None
 
+    # Get symbol from query_spec or use default
+    symbol = query_spec.get("symbol", DEFAULT_SYMBOL).upper()
+
     return QuerySpec(
-        symbol="NQ",  # TODO: брать из query_spec когда добавим другие символы
+        symbol=symbol,
         source=source,
         filters=filters,
         grouping=grouping,

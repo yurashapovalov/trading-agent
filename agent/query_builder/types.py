@@ -143,6 +143,25 @@ SessionType = Literal[
 ]
 
 
+class HolidayFilter(Enum):
+    """
+    Режим фильтрации праздничных дней.
+
+    Используется для:
+    - market_holidays: дни полного закрытия (Christmas, New Year, etc.)
+    - early_close_days: дни раннего закрытия (Christmas Eve, Black Friday, etc.)
+    """
+
+    INCLUDE = "include"
+    """Включить эти дни в выборку (по умолчанию)."""
+
+    EXCLUDE = "exclude"
+    """Исключить эти дни из выборки."""
+
+    ONLY = "only"
+    """Показать ТОЛЬКО эти дни (для анализа праздничной торговли)."""
+
+
 @dataclass
 class Filters:
     """
@@ -165,6 +184,10 @@ class Filters:
         # === Условия по значениям ===
         conditions: Список условий фильтрации [{column, operator, value}]
 
+        # === Праздники ===
+        market_holidays: Режим для дней полного закрытия (include/exclude/only)
+        early_close_days: Режим для дней раннего закрытия (include/exclude/only)
+
     Example:
         # Январь 2024, только RTH сессия, дни с падением > 1%
         Filters(
@@ -174,12 +197,19 @@ class Filters:
             conditions=[Condition("change_pct", "<", -1.0)]
         )
 
-        # Вторники и пятницы за 2020, 2022, 2024 годы
+        # Статистика без праздников
+        Filters(
+            period_start="2024-01-01",
+            period_end="2025-01-01",
+            market_holidays=HolidayFilter.EXCLUDE,
+            early_close_days=HolidayFilter.EXCLUDE
+        )
+
+        # Только укороченные дни
         Filters(
             period_start="2020-01-01",
             period_end="2025-01-01",
-            years=[2020, 2022, 2024],
-            weekdays=["Tuesday", "Friday"]
+            early_close_days=HolidayFilter.ONLY
         )
     """
 
@@ -198,6 +228,13 @@ class Filters:
 
     # Условия по значениям
     conditions: list[Condition] = field(default_factory=list)
+
+    # Праздники
+    market_holidays: HolidayFilter = HolidayFilter.INCLUDE
+    """Режим для дней полного закрытия рынка (Christmas, New Year, etc.)"""
+
+    early_close_days: HolidayFilter = HolidayFilter.INCLUDE
+    """Режим для дней раннего закрытия (Christmas Eve, Black Friday, etc.)"""
 
     def get_time_filter(self) -> tuple[str, str] | None:
         """
@@ -381,6 +418,22 @@ class Metric(Enum):
 
     GAP_PCT = "gap_pct"
     """Гэп в процентах: (open - prev_close) / prev_close * 100"""
+
+    # === Computed columns (расстояния) ===
+    CLOSE_TO_LOW = "close_to_low"
+    """Расстояние от close до low: close - low"""
+
+    CLOSE_TO_HIGH = "close_to_high"
+    """Расстояние от close до high: high - close"""
+
+    OPEN_TO_HIGH = "open_to_high"
+    """Расстояние от open до high: high - open"""
+
+    OPEN_TO_LOW = "open_to_low"
+    """Расстояние от open до low: open - low"""
+
+    BODY = "body"
+    """Тело свечи: |close - open|"""
 
     # === Агрегатные функции ===
     COUNT = "count"

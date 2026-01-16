@@ -26,6 +26,7 @@ from agent.query_builder import (
     EventTimeSpec,
     TopNSpec,
 )
+from agent.query_builder.types import HolidayFilter
 
 
 def test_daily_simple():
@@ -383,7 +384,7 @@ def test_event_time_with_calendar_filters():
     print(sql)
 
     assert "DAYNAME(timestamp::date) IN ('Tuesday')" in sql
-    assert "BETWEEN '09:30:00' AND '16:00:00'" in sql
+    assert "BETWEEN '09:30:00' AND '17:00:00'" in sql  # RTH ends at 17:00 ET (16:00 CT)
 
 
 def test_event_time_both():
@@ -413,6 +414,188 @@ def test_event_time_both():
     assert "UNION ALL" in sql
 
 
+def test_holiday_filter_exclude_holidays():
+    """Тест: исключение праздников (дни полного закрытия)."""
+    spec = QuerySpec(
+        symbol="NQ",
+        source=Source.DAILY,
+        filters=Filters(
+            period_start="2024-01-01",
+            period_end="2024-12-31",
+            market_holidays=HolidayFilter.EXCLUDE,
+        ),
+        grouping=Grouping.TOTAL,
+        metrics=[
+            MetricSpec(Metric.AVG, "range", "avg_range"),
+            MetricSpec(Metric.COUNT, alias="trading_days"),
+        ],
+    )
+
+    builder = QueryBuilder()
+    sql = builder.build(spec)
+
+    print("\n=== test_holiday_filter_exclude_holidays ===")
+    print(sql)
+
+    # Должен исключить основные праздники 2024 года
+    assert "NOT IN" in sql
+    assert "2024-12-25" in sql  # Christmas
+    assert "2024-01-01" in sql  # New Year
+
+
+def test_holiday_filter_exclude_early_close():
+    """Тест: исключение дней раннего закрытия."""
+    spec = QuerySpec(
+        symbol="NQ",
+        source=Source.DAILY,
+        filters=Filters(
+            period_start="2024-01-01",
+            period_end="2024-12-31",
+            early_close_days=HolidayFilter.EXCLUDE,
+        ),
+        grouping=Grouping.TOTAL,
+        metrics=[
+            MetricSpec(Metric.AVG, "range", "avg_range"),
+            MetricSpec(Metric.COUNT, alias="trading_days"),
+        ],
+    )
+
+    builder = QueryBuilder()
+    sql = builder.build(spec)
+
+    print("\n=== test_holiday_filter_exclude_early_close ===")
+    print(sql)
+
+    # Должен исключить early close дни 2024 года
+    assert "NOT IN" in sql
+    assert "2024-12-24" in sql  # Christmas Eve
+    assert "2024-11-29" in sql  # Black Friday
+
+
+def test_holiday_filter_both():
+    """Тест: исключение и праздников и early close."""
+    spec = QuerySpec(
+        symbol="NQ",
+        source=Source.DAILY,
+        filters=Filters(
+            period_start="2024-01-01",
+            period_end="2024-12-31",
+            market_holidays=HolidayFilter.EXCLUDE,
+            early_close_days=HolidayFilter.EXCLUDE,
+        ),
+        grouping=Grouping.TOTAL,
+        metrics=[
+            MetricSpec(Metric.AVG, "range", "avg_range"),
+            MetricSpec(Metric.COUNT, alias="trading_days"),
+        ],
+    )
+
+    builder = QueryBuilder()
+    sql = builder.build(spec)
+
+    print("\n=== test_holiday_filter_both ===")
+    print(sql)
+
+    # Должен исключить и праздники и early close
+    assert "NOT IN" in sql
+    assert "2024-12-25" in sql  # Christmas (full close)
+    assert "2024-12-24" in sql  # Christmas Eve (early close)
+
+
+def test_holiday_filter_only_early_close():
+    """Тест: показать ТОЛЬКО дни раннего закрытия."""
+    spec = QuerySpec(
+        symbol="NQ",
+        source=Source.DAILY,
+        filters=Filters(
+            period_start="2024-01-01",
+            period_end="2024-12-31",
+            early_close_days=HolidayFilter.ONLY,
+        ),
+        grouping=Grouping.NONE,
+        metrics=[
+            MetricSpec(Metric.RANGE),
+            MetricSpec(Metric.VOLUME),
+        ],
+    )
+
+    builder = QueryBuilder()
+    sql = builder.build(spec)
+
+    print("\n=== test_holiday_filter_only_early_close ===")
+    print(sql)
+
+    # Должен показать ТОЛЬКО early close дни
+    assert "date IN (" in sql  # IN вместо NOT IN
+    assert "2024-12-24" in sql  # Christmas Eve
+    assert "2024-11-29" in sql  # Black Friday
+
+
+def test_computed_columns():
+    """Тест: вычисляемые колонки в daily CTE."""
+    spec = QuerySpec(
+        symbol="NQ",
+        source=Source.DAILY,
+        filters=Filters(
+            period_start="2024-01-01",
+            period_end="2024-12-31",
+        ),
+        grouping=Grouping.NONE,
+        metrics=[
+            MetricSpec(Metric.RANGE),
+            MetricSpec(Metric.CHANGE_PCT),
+        ],
+    )
+
+    builder = QueryBuilder()
+    sql = builder.build(spec)
+
+    print("\n=== test_computed_columns ===")
+    print(sql)
+
+    # Проверяем наличие вычисляемых колонок в daily_raw CTE
+    assert "as close_to_low" in sql
+    assert "as close_to_high" in sql
+    assert "as open_to_high" in sql
+    assert "as open_to_low" in sql
+    assert "as body" in sql
+    assert "as upper_wick" in sql
+    assert "as lower_wick" in sql
+
+
+def test_filter_by_close_to_low():
+    """Тест: фильтрация по close_to_low (пример запроса про пятницы)."""
+    spec = QuerySpec(
+        symbol="NQ",
+        source=Source.DAILY,
+        filters=Filters(
+            period_start="2020-01-01",
+            period_end="2025-01-01",
+            weekdays=["Friday"],
+            conditions=[
+                Condition("close_to_low", ">=", 200),
+            ],
+        ),
+        grouping=Grouping.NONE,
+        metrics=[
+            MetricSpec(Metric.OPEN),
+            MetricSpec(Metric.CLOSE),
+            MetricSpec(Metric.LOW),
+            MetricSpec(Metric.RANGE),
+        ],
+    )
+
+    builder = QueryBuilder()
+    sql = builder.build(spec)
+
+    print("\n=== test_filter_by_close_to_low ===")
+    print(sql)
+
+    # Проверяем условие фильтрации
+    assert "WHERE close_to_low >= 200" in sql
+    assert "DAYNAME(date) IN ('Friday')" in sql
+
+
 def run_all_tests():
     """Запускает все тесты."""
     tests = [
@@ -431,6 +614,14 @@ def run_all_tests():
         test_calendar_filter_combined,
         test_event_time_with_calendar_filters,
         test_event_time_both,
+        # Тесты для holiday filter
+        test_holiday_filter_exclude_holidays,
+        test_holiday_filter_exclude_early_close,
+        test_holiday_filter_both,
+        test_holiday_filter_only_early_close,
+        # Тесты для computed columns
+        test_computed_columns,
+        test_filter_by_close_to_low,
     ]
 
     passed = 0

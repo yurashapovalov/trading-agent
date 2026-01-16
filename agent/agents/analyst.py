@@ -80,6 +80,7 @@ class Analyst:
         data = state.get("data") or {}
         intent = state.get("intent") or {}
         intent_type = intent.get("type", "data")
+        holiday_info = intent.get("holiday_info")  # From Understander if dates are holidays
 
         # Check if rewrite needed
         validation = state.get("validation") or {}
@@ -103,6 +104,7 @@ class Analyst:
                 question=question,
                 data=data,
                 chat_history=chat_history,
+                holiday_info=holiday_info,
             )
             return self._generate_with_streaming(prompt, writer, state)
         else:
@@ -114,6 +116,7 @@ class Analyst:
                 previous_response=previous_response,
                 issues=issues,
                 chat_history=chat_history,
+                holiday_info=holiday_info,
             )
             return self._generate_batch(prompt, state)
 

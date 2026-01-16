@@ -23,6 +23,8 @@ You must respond in the same language as the user's question.
 5. Respond in the SAME LANGUAGE as the user's question
 6. When answering "which is best" or making recommendations, analyze ALL provided data - not just items mentioned in the question. If a better option exists in the data, mention it.
 7. If the analysis reveals non-obvious patterns or actionable observations, add 1-2 brief trading insights. Skip if the answer is straightforward.
+8. For volatility/range statistics over long periods, briefly note that holidays and early-close days are included and may affect the results. Mention user can request excluding them if needed.
+9. TRUNCATED DATA: If data has "truncated": true, you're seeing only a sample (check "showing" vs "row_count", "summary_note" explains sorting). You can only analyze visible rows. At the START say: "Показано X из Y строк. Полная таблица доступна в интерфейсе." At the END of your analysis add a disclaimer: "⚠️ Выводы основаны на выборке (топ-N). Для полной картины рекомендуется изучить все данные." Do NOT claim data is missing.
 </constraints>
 
 <output_format>
@@ -167,6 +169,7 @@ def get_analyst_prompt(
     issues: list = None,
     chat_history: list = None,
     search_condition: str = None,
+    holiday_info: dict = None,
 ) -> str:
     """
     Build complete prompt for Analyst.
@@ -179,6 +182,7 @@ def get_analyst_prompt(
         issues: Validation issues if rewriting
         chat_history: Previous messages for context
         search_condition: Natural language condition for filtering data
+        holiday_info: Info about holidays in requested dates (from Understander)
 
     Returns:
         Complete prompt string
@@ -192,6 +196,24 @@ def get_analyst_prompt(
         for msg in chat_history[-config.CHAT_HISTORY_LIMIT:]:
             role = "User" if msg.get("role") == "user" else "Assistant"
             history_str += f"{role}: {msg.get('content', '')}\n"
+
+    # Format holiday context if present
+    holiday_context = ""
+    if holiday_info:
+        holiday_names = holiday_info.get("names", {})
+        holiday_list = ", ".join(f"{d} ({holiday_names.get(d, 'holiday')})" for d in holiday_info.get("dates", []))
+
+        if holiday_info.get("all_holidays"):
+            holiday_context = f"\n\n<holiday_notice>\nIMPORTANT: All requested dates are market holidays: {holiday_list}. The market was closed on these days, so there is no trading data. Explain this to the user and suggest looking at adjacent trading days.\n</holiday_notice>"
+        elif holiday_info.get("early_close_conflict"):
+            early_close_dates = holiday_info.get("early_close_dates", [])
+            early_list = ", ".join(f"{d} ({holiday_names.get(d, 'early close')})" for d in early_close_dates)
+            holiday_context = f"\n\n<holiday_notice>\nIMPORTANT: Requested time conflicts with early close: {early_list}. On these days the market closed at 13:00 ET. Data after 13:00 will be missing. Explain this to the user.\n</holiday_notice>"
+        elif holiday_info.get("early_close_dates"):
+            early_list = ", ".join(f"{d} ({holiday_names.get(d, 'early close')})" for d in holiday_info.get("early_close_dates", []))
+            holiday_context = f"\n\n<holiday_notice>\nNote: Some requested dates are early close days: {early_list}. Market closed at 13:00 ET on these days, so afternoon data is limited.\n</holiday_notice>"
+        else:
+            holiday_context = f"\n\n<holiday_notice>\nNote: Some requested dates are market holidays: {holiday_list}. These days will have no data in the results.\n</holiday_notice>"
 
     # Rewrite case
     if previous_response and issues:
@@ -215,14 +237,14 @@ def get_analyst_prompt(
             data=json.dumps(data, indent=2, default=str),
             search_condition=search_condition,
             question=question,
-        )
+        ) + holiday_context
 
     # Data (default)
     return SYSTEM_PROMPT + "\n" + USER_PROMPT_DATA.format(
         chat_history=history_str,
         data=json.dumps(data, indent=2, default=str),
         question=question,
-    )
+    ) + holiday_context
 
 
 # =============================================================================
@@ -241,6 +263,8 @@ You must respond in the same language as the user's question.
 4. If data is insufficient, say so explicitly
 5. Respond in the SAME LANGUAGE as the user's question
 6. Write plain markdown text - do NOT use JSON format
+7. For volatility/range statistics over long periods, briefly note that holidays and early-close days are included and may affect the results. Mention user can request excluding them if needed.
+8. TRUNCATED DATA: If data has "truncated": true, you're seeing only a sample (check "showing" vs "row_count", "summary_note" explains sorting). You can only analyze visible rows. At the START say: "Показано X из Y строк. Полная таблица доступна в интерфейсе." At the END of your analysis add a disclaimer: "⚠️ Выводы основаны на выборке (топ-N). Для полной картины рекомендуется изучить все данные." Do NOT claim data is missing.
 </constraints>
 """
 
@@ -250,6 +274,7 @@ def get_analyst_prompt_streaming(
     data: dict,
     chat_history: list = None,
     search_condition: str = None,
+    holiday_info: dict = None,
 ) -> str:
     """
     Build prompt for streaming mode (plain markdown, no JSON).
@@ -267,6 +292,24 @@ def get_analyst_prompt_streaming(
             role = "User" if msg.get("role") == "user" else "Assistant"
             history_str += f"{role}: {msg.get('content', '')}\n"
 
+    # Format holiday context if present
+    holiday_context = ""
+    if holiday_info:
+        holiday_names = holiday_info.get("names", {})
+        holiday_list = ", ".join(f"{d} ({holiday_names.get(d, 'holiday')})" for d in holiday_info.get("dates", []))
+
+        if holiday_info.get("all_holidays"):
+            holiday_context = f"\n\n<holiday_notice>\nIMPORTANT: All requested dates are market holidays: {holiday_list}. The market was closed on these days, so there is no trading data. Explain this to the user and suggest looking at adjacent trading days.\n</holiday_notice>"
+        elif holiday_info.get("early_close_conflict"):
+            early_close_dates = holiday_info.get("early_close_dates", [])
+            early_list = ", ".join(f"{d} ({holiday_names.get(d, 'early close')})" for d in early_close_dates)
+            holiday_context = f"\n\n<holiday_notice>\nIMPORTANT: Requested time conflicts with early close: {early_list}. On these days the market closed at 13:00 ET. Data after 13:00 will be missing. Explain this to the user.\n</holiday_notice>"
+        elif holiday_info.get("early_close_dates"):
+            early_list = ", ".join(f"{d} ({holiday_names.get(d, 'early close')})" for d in holiday_info.get("early_close_dates", []))
+            holiday_context = f"\n\n<holiday_notice>\nNote: Some requested dates are early close days: {early_list}. Market closed at 13:00 ET on these days, so afternoon data is limited.\n</holiday_notice>"
+        else:
+            holiday_context = f"\n\n<holiday_notice>\nNote: Some requested dates are market holidays: {holiday_list}. These days will have no data in the results.\n</holiday_notice>"
+
     # Add search condition hint if present
     task_suffix = ""
     if search_condition:
@@ -278,4 +321,4 @@ def get_analyst_prompt_streaming(
         question=question,
     )
 
-    return prompt + task_suffix
+    return prompt + task_suffix + holiday_context
