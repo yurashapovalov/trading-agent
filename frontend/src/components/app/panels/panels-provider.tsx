@@ -75,6 +75,8 @@ type PanelsContextType = {
 
   // Responsive
   isMobile: boolean
+  // On mobile, hide main content when context panel is open
+  showMainContent: boolean
 }
 
 const PanelsContext = createContext<PanelsContextType | null>(null)
@@ -143,6 +145,9 @@ export function PanelsProvider({
     return () => window.removeEventListener("resize", handleResize)
   }, [])
 
+  // On mobile, hide main content (sidebar + chat) when context panel is open
+  const showMainContent = !(isMobile && rightOpen)
+
   const value = useMemo(
     () => ({
       leftOpen,
@@ -160,8 +165,9 @@ export function PanelsProvider({
       rightMaxPercent: RIGHT_MAX_PERCENT,
 
       isMobile,
+      showMainContent,
     }),
-    [leftOpen, leftWidth, rightOpen, rightWidthPercent, isMobile]
+    [leftOpen, leftWidth, rightOpen, rightWidthPercent, isMobile, showMainContent]
   )
 
   return (

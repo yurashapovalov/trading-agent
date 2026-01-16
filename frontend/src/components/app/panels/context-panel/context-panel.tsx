@@ -32,8 +32,8 @@ export function ContextPanel({
 }: ContextPanelProps) {
   return (
     <div
-      className={`relative flex h-full shrink-0 flex-col ${isMobile ? '' : 'min-w-[30%] max-w-[70%]'}`}
-      style={{ width: `${widthPercent}%`, backgroundColor: 'var(--bg-primary)' }}
+      className={`relative flex h-full shrink-0 flex-col ${isMobile ? 'w-screen' : 'min-w-[30%] max-w-[70%]'}`}
+      style={isMobile ? { backgroundColor: 'var(--bg-primary)' } : { width: `${widthPercent}%`, backgroundColor: 'var(--bg-primary)' }}
     >
       {/* Resize handle - hidden on mobile */}
       {onResizeMouseDown && (

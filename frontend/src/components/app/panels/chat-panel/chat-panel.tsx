@@ -1,16 +1,14 @@
 "use client"
 
 /**
- * ChatPanel — main chat area with assistant.
+ * ChatPanel — presentational component.
  *
- * Receives chat data via props from AppShell.
- * Uses usePanels() for panel toggle buttons (UI logic).
- * Uses flex-1 to fill remaining space between side panels.
+ * Receives all data and UI callbacks via props.
+ * No logic, no context access — just renders what it's given.
  */
 
 import { useState, useRef, useEffect } from "react"
 import { PanelLeft, PanelRight, ThumbsUpIcon, ThumbsDownIcon } from "lucide-react"
-import { usePanels } from "./panels-provider"
 import {
   PageHeader,
   PageHeaderLeft,
@@ -56,6 +54,7 @@ type FeedbackModal = {
 }
 
 type ChatPanelProps = {
+  // Data
   title?: string
   messages: ChatMessage[]
   isLoading: boolean
@@ -64,11 +63,18 @@ type ChatPanelProps = {
   streamingText: string
   suggestions: string[]
   inputText: string
+  // Data callbacks
   onInputChange: (text: string) => void
   onSubmit: () => void
   onStop: () => void
   onSuggestionClick: (suggestion: string) => void
   onFeedback: (requestId: string, type: "positive" | "negative", text: string) => void
+  // UI state
+  sidebarOpen: boolean
+  contextPanelOpen: boolean
+  // UI callbacks
+  onOpenSidebar: () => void
+  onOpenContextPanel: () => void
 }
 
 export function ChatPanel({
@@ -85,8 +91,11 @@ export function ChatPanel({
   onStop,
   onSuggestionClick,
   onFeedback,
+  sidebarOpen,
+  contextPanelOpen,
+  onOpenSidebar,
+  onOpenContextPanel,
 }: ChatPanelProps) {
-  const { leftOpen, setLeftOpen, rightOpen, setRightOpen } = usePanels()
   const [feedbackModal, setFeedbackModal] = useState<FeedbackModal>({
     open: false,
     requestId: "",
@@ -131,19 +140,19 @@ export function ChatPanel({
     <div className="relative flex h-full w-full shrink-0 flex-col overflow-hidden bg-[var(--bg-secondary)] md:w-auto md:shrink md:flex-1">
       <PageHeader>
         <PageHeaderLeft>
-          {!leftOpen && (
-            <Button variant="ghost" size="icon-sm" onClick={() => setLeftOpen(true)} aria-label="Open sidebar">
+          {!sidebarOpen && (
+            <Button variant="ghost" size="icon-sm" onClick={onOpenSidebar} aria-label="Open sidebar">
               <PanelLeft />
             </Button>
           )}
           <span className="text-sm font-medium">{title ?? "New Chat"}</span>
         </PageHeaderLeft>
         <PageHeaderRight>
-          {!rightOpen && (
+          {!contextPanelOpen && (
             <Button
               variant="ghost"
               size="icon-sm"
-              onClick={() => setRightOpen(true)}
+              onClick={onOpenContextPanel}
               aria-label="Open context panel"
             >
               <PanelRight />

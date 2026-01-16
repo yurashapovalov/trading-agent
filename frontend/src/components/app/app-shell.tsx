@@ -12,7 +12,7 @@ import { useChatsContext, useAuth } from "@/providers"
 import { useChat } from "@/hooks/useChat"
 import { PanelsProvider } from "@/components/app/panels/panels-provider"
 import { SidebarContainer } from "@/components/app/panels/sidebar/sidebar.container"
-import { ChatPanel } from "@/components/app/panels/chat-panel"
+import { ChatPanelContainer } from "@/components/app/panels/chat-panel/chat-panel.container"
 import { ContextPanelContainer } from "@/components/app/panels/context-panel/context-panel.container"
 
 export function AppShell() {
@@ -104,7 +104,7 @@ function AppShellContent() {
         onSettings={handleSettings}
         onSignOut={signOut}
       />
-      <ChatPanel
+      <ChatPanelContainer
         title={title}
         messages={messages}
         isLoading={isLoading}

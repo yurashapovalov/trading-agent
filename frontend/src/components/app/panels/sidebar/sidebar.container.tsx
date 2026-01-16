@@ -36,7 +36,7 @@ export function SidebarContainer({
   onSettings,
   onSignOut,
 }: SidebarContainerProps) {
-  const { leftOpen, setLeftOpen, leftWidth, setLeftWidth, leftMinWidth, leftMaxWidth, isMobile } = usePanels()
+  const { leftOpen, setLeftOpen, leftWidth, setLeftWidth, leftMinWidth, leftMaxWidth, isMobile, showMainContent } = usePanels()
 
   const { handleMouseDown } = usePixelResize({
     direction: "left",
@@ -47,7 +47,7 @@ export function SidebarContainer({
     cookieName: COOKIE_LEFT_WIDTH,
   })
 
-  if (!leftOpen) return null
+  if (!leftOpen || !showMainContent) return null
 
   // Mobile: 80vw width, no resize
   const mobileWidth = typeof window !== "undefined" ? window.innerWidth * 0.8 : 300
