@@ -115,7 +115,10 @@ export function Sidebar({
           <Button
             variant="ghost"
             className="justify-start gap-2 px-2"
-            onClick={() => document.documentElement.classList.toggle("dark")}
+            onClick={() => {
+              const isDark = document.documentElement.classList.toggle("dark")
+              localStorage.setItem("theme", isDark ? "dark" : "light")
+            }}
           >
             <MoonIcon className="size-4" />
             <span>Dark theme</span>

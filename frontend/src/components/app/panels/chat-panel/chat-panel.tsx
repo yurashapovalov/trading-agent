@@ -280,7 +280,7 @@ export function ChatPanel({
       {/* Input area - absolute positioned at bottom */}
       <div
         ref={inputContainerRef}
-        className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-[var(--bg-secondary)] via-[var(--bg-secondary)] to-transparent pt-2 pb-4 px-4"
+        className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-[var(--bg-secondary)] via-[var(--bg-secondary)] to-transparent pt-2 pb-8 md:pb-4 px-4"
       >
         <div className="mx-auto max-w-2xl">
           {/* Suggestions */}
