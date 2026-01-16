@@ -254,12 +254,14 @@ class Understander:
 
         intent = self._parse_with_rap(question, chat_history)
 
+        # Add debug info inside intent (so it passes through LangGraph state)
+        intent["_debug"] = debug_info
+
         return {
             "intent": intent,
             "usage": self._last_usage,
             "agents_used": [self.name],
             "step_number": state.get("step_number", 0) + 1,
-            "debug": debug_info,  # Will be logged to request_traces
         }
 
     # =========================================================================
