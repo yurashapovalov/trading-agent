@@ -791,7 +791,7 @@ export const PromptInput = ({
         ref={formRef}
         {...props}
       >
-        <InputGroup className="overflow-hidden border-0 bg-transparent shadow-none !ring-0">{children}</InputGroup>
+        <InputGroup className="overflow-hidden border-0 bg-transparent dark:bg-transparent shadow-none !ring-0">{children}</InputGroup>
       </form>
     </>
   );
