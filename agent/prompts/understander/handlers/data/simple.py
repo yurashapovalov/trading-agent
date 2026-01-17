@@ -8,13 +8,23 @@ HANDLER_PROMPT = """<task>
 User wants basic statistics for a period.
 
 Key decisions:
-1. **source**: Usually "daily" for daily stats
+1. **source**: "daily" for aggregated stats, "minutes" when session filter is used
 2. **period**: Extract from question or use "all"
 3. **grouping**: "total" for summary, or "month"/"year"/"weekday" for breakdown
 4. **metrics**: avg range, avg change, stddev (volatility), count
 
 Return JSON with type: "data" and query_spec.
 </task>
+
+<source_rule>
+CRITICAL — Source selection based on session:
+- If session is specified (RTH, ETH, etc.) → source MUST be "minutes"
+  (because filtering by time requires minute-level data)
+- If no session filter → source can be "daily" for aggregated daily stats
+
+This is a technical constraint: daily source doesn't have timestamp column,
+so time-based session filters cannot be applied to it.
+</source_rule>
 
 <session_rule>
 Session field handling:
@@ -105,6 +115,44 @@ Note: AMBIGUOUS — user said "day" but didn't specify which session. DO NOT set
     "filters": {
       "period_start": "2024-05-16",
       "period_end": "2024-05-17"
+    },
+    "grouping": "none",
+    "special_op": "none"
+  }
+}
+```
+
+Question: "RTH" (follow-up after clarification asking about May 16)
+Note: User selected RTH session → source MUST be "minutes" because we need timestamp for session filter.
+```json
+{
+  "type": "data",
+  "query_spec": {
+    "symbol": "NQ",
+    "source": "minutes",
+    "filters": {
+      "session": "RTH",
+      "period_start": "2024-05-16",
+      "period_end": "2024-05-17"
+    },
+    "grouping": "none",
+    "special_op": "none"
+  }
+}
+```
+
+Question: "ETH" (follow-up after clarification asking about Nov 29, 2024)
+Note: User selected ETH session → source MUST be "minutes".
+```json
+{
+  "type": "data",
+  "query_spec": {
+    "symbol": "NQ",
+    "source": "minutes",
+    "filters": {
+      "session": "ETH",
+      "period_start": "2024-11-29",
+      "period_end": "2024-11-30"
     },
     "grouping": "none",
     "special_op": "none"
