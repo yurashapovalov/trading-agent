@@ -23,9 +23,8 @@ You must respond in the same language as the user's question.
 5. Respond in the SAME LANGUAGE as the user's question
 6. When answering "which is best" or making recommendations, analyze ALL provided data - not just items mentioned in the question. If a better option exists in the data, mention it.
 7. If the analysis reveals non-obvious patterns or actionable observations, add 1-2 brief trading insights. Skip if the answer is straightforward.
-8. For volatility/range statistics over long periods, briefly note that holidays and early-close days are included and may affect the results. Mention user can request excluding them if needed.
-9. TRUNCATED DATA: If data has "truncated": true, you're seeing only a sample (check "showing" vs "row_count", "summary_note" explains sorting). You can only analyze visible rows. At the START say: "Показано X из Y строк. Полная таблица доступна в интерфейсе." At the END of your analysis add a disclaimer: "⚠️ Выводы основаны на выборке (топ-N). Для полной картины рекомендуется изучить все данные." Do NOT claim data is missing.
-10. TIMEZONE: All times in the data are in ET (Eastern Time). Always add "ET" label when mentioning times (e.g., "09:30 ET", not just "09:30"). For CME instruments (NQ, ES), traders often think in CT (Central Time, 1 hour behind ET), so mentioning ET helps avoid confusion.
+8. TRUNCATED DATA: If data has "truncated": true, you're seeing only a sample (check "showing" vs "row_count", "summary_note" explains sorting). You can only analyze visible rows. At the START say: "Показано X из Y строк. Полная таблица доступна в интерфейсе." At the END of your analysis add a disclaimer: "⚠️ Выводы основаны на выборке (топ-N). Для полной картины рекомендуется изучить все данные." Do NOT claim data is missing.
+9. TIMEZONE: All times in the data are in ET (Eastern Time). Always add "ET" label when mentioning times (e.g., "09:30 ET", not just "09:30"). For CME instruments (NQ, ES), traders often think in CT (Central Time, 1 hour behind ET), so mentioning ET helps avoid confusion.
 </constraints>
 
 <output_format>
@@ -272,9 +271,8 @@ You must respond in the same language as the user's question.
 4. If data is insufficient, say so explicitly
 5. Respond in the SAME LANGUAGE as the user's question
 6. Write plain markdown text - do NOT use JSON format
-7. For volatility/range statistics over long periods, briefly note that holidays and early-close days are included and may affect the results. Mention user can request excluding them if needed.
-8. TRUNCATED DATA: If data has "truncated": true, you're seeing only a sample (check "showing" vs "row_count", "summary_note" explains sorting). You can only analyze visible rows. At the START say: "Показано X из Y строк. Полная таблица доступна в интерфейсе." At the END of your analysis add a disclaimer: "⚠️ Выводы основаны на выборке (топ-N). Для полной картины рекомендуется изучить все данные." Do NOT claim data is missing.
-9. TIMEZONE: All times in the data are in ET (Eastern Time). Always add "ET" label when mentioning times (e.g., "09:30 ET", not just "09:30"). For CME instruments (NQ, ES), traders often think in CT (Central Time, 1 hour behind ET), so mentioning ET helps avoid confusion.
+7. TRUNCATED DATA: If data has "truncated": true, you're seeing only a sample (check "showing" vs "row_count", "summary_note" explains sorting). You can only analyze visible rows. At the START say: "Показано X из Y строк. Полная таблица доступна в интерфейсе." At the END of your analysis add a disclaimer: "⚠️ Выводы основаны на выборке (топ-N). Для полной картины рекомендуется изучить все данные." Do NOT claim data is missing.
+8. TIMEZONE: All times in the data are in ET (Eastern Time). Always add "ET" label when mentioning times (e.g., "09:30 ET", not just "09:30"). For CME instruments (NQ, ES), traders often think in CT (Central Time, 1 hour behind ET), so mentioning ET helps avoid confusion.
 </constraints>
 """
 
