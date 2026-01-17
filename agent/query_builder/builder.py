@@ -146,8 +146,10 @@ class QueryBuilder:
             )
         else:
             # Для daily/daily_with_prev — календарные + holiday фильтры
+            # skip_time_filter=True: session filter already applied in aggregation
             extra_sql = build_all_filters_sql(
-                spec.filters, "date", prefix_and=False, symbol=spec.symbol
+                spec.filters, "date", prefix_and=False, symbol=spec.symbol,
+                skip_time_filter=True,
             )
 
         return source_builder.build_cte(spec.symbol, spec.filters, extra_sql)

@@ -1,0 +1,454 @@
+{
+  "meta": {
+    "timestamp": "2026-01-17T15:46:37.104807",
+    "total_questions": 26,
+    "successful": 0,
+    "failed": 26,
+    "use_barb": true,
+    "analyst_fast_mode": true
+  },
+  "results": [
+    {
+      "original_question": "Statistics for Fridays 2020-2025 where close - low >= 200",
+      "rounds": 1,
+      "round_details": [
+        {
+          "round": 1,
+          "question": "Statistics for Fridays 2020-2025 where close - low >= 200",
+          "error": "No module named 'langgraph.checkpoint.sqlite'"
+        }
+      ],
+      "final_type": "error",
+      "final_result": null,
+      "success": false,
+      "error": "No module named 'langgraph.checkpoint.sqlite'",
+      "total_time_ms": 0,
+      "clarification_options": null
+    },
+    {
+      "original_question": "Fridays where price closed 200+ points above the low",
+      "rounds": 1,
+      "round_details": [
+        {
+          "round": 1,
+          "question": "Fridays where price closed 200+ points above the low",
+          "error": "No module named 'langgraph.checkpoint.sqlite'"
+        }
+      ],
+      "final_type": "error",
+      "final_result": null,
+      "success": false,
+      "error": "No module named 'langgraph.checkpoint.sqlite'",
+      "total_time_ms": 0,
+      "clarification_options": null
+    },
+    {
+      "original_question": "Statistics for 2024",
+      "rounds": 1,
+      "round_details": [
+        {
+          "round": 1,
+          "question": "Statistics for 2024",
+          "error": "No module named 'langgraph.checkpoint.sqlite'"
+        }
+      ],
+      "final_type": "error",
+      "final_result": null,
+      "success": false,
+      "error": "No module named 'langgraph.checkpoint.sqlite'",
+      "total_time_ms": 0,
+      "clarification_options": null
+    },
+    {
+      "original_question": "Average range by month for 2024",
+      "rounds": 1,
+      "round_details": [
+        {
+          "round": 1,
+          "question": "Average range by month for 2024",
+          "error": "No module named 'langgraph.checkpoint.sqlite'"
+        }
+      ],
+      "final_type": "error",
+      "final_result": null,
+      "success": false,
+      "error": "No module named 'langgraph.checkpoint.sqlite'",
+      "total_time_ms": 0,
+      "clarification_options": null
+    },
+    {
+      "original_question": "may 16 2024",
+      "rounds": 1,
+      "round_details": [
+        {
+          "round": 1,
+          "question": "may 16 2024",
+          "error": "No module named 'langgraph.checkpoint.sqlite'"
+        }
+      ],
+      "final_type": "error",
+      "final_result": null,
+      "success": false,
+      "error": "No module named 'langgraph.checkpoint.sqlite'",
+      "total_time_ms": 0,
+      "clarification_options": null
+    },
+    {
+      "original_question": "what was jan 10",
+      "rounds": 1,
+      "round_details": [
+        {
+          "round": 1,
+          "question": "what was jan 10",
+          "error": "No module named 'langgraph.checkpoint.sqlite'"
+        }
+      ],
+      "final_type": "error",
+      "final_result": null,
+      "success": false,
+      "error": "No module named 'langgraph.checkpoint.sqlite'",
+      "total_time_ms": 0,
+      "clarification_options": null
+    },
+    {
+      "original_question": "What happened on December 25 те2024?",
+      "rounds": 1,
+      "round_details": [
+        {
+          "round": 1,
+          "question": "What happened on December 25 те2024?",
+          "error": "No module named 'langgraph.checkpoint.sqlite'"
+        }
+      ],
+      "final_type": "error",
+      "final_result": null,
+      "success": false,
+      "error": "No module named 'langgraph.checkpoint.sqlite'",
+      "total_time_ms": 0,
+      "clarification_options": null
+    },
+    {
+      "original_question": "When was the market craziest in 2023?",
+      "rounds": 1,
+      "round_details": [
+        {
+          "round": 1,
+          "question": "When was the market craziest in 2023?",
+          "error": "No module named 'langgraph.checkpoint.sqlite'"
+        }
+      ],
+      "final_type": "error",
+      "final_result": null,
+      "success": false,
+      "error": "No module named 'langgraph.checkpoint.sqlite'",
+      "total_time_ms": 0,
+      "clarification_options": null
+    },
+    {
+      "original_question": "Find me days with huge moves last year",
+      "rounds": 1,
+      "round_details": [
+        {
+          "round": 1,
+          "question": "Find me days with huge moves last year",
+          "error": "No module named 'langgraph.checkpoint.sqlite'"
+        }
+      ],
+      "final_type": "error",
+      "final_result": null,
+      "success": false,
+      "error": "No module named 'langgraph.checkpoint.sqlite'",
+      "total_time_ms": 0,
+      "clarification_options": null
+    },
+    {
+      "original_question": "RTH vs ETH range",
+      "rounds": 1,
+      "round_details": [
+        {
+          "round": 1,
+          "question": "RTH vs ETH range",
+          "error": "No module named 'langgraph.checkpoint.sqlite'"
+        }
+      ],
+      "final_type": "error",
+      "final_result": null,
+      "success": false,
+      "error": "No module named 'langgraph.checkpoint.sqlite'",
+      "total_time_ms": 0,
+      "clarification_options": null
+    },
+    {
+      "original_question": "Compare Monday and Friday volatility",
+      "rounds": 1,
+      "round_details": [
+        {
+          "round": 1,
+          "question": "Compare Monday and Friday volatility",
+          "error": "No module named 'langgraph.checkpoint.sqlite'"
+        }
+      ],
+      "final_type": "error",
+      "final_result": null,
+      "success": false,
+      "error": "No module named 'langgraph.checkpoint.sqlite'",
+      "total_time_ms": 0,
+      "clarification_options": null
+    },
+    {
+      "original_question": "When is high usually formed?",
+      "rounds": 1,
+      "round_details": [
+        {
+          "round": 1,
+          "question": "When is high usually formed?",
+          "error": "No module named 'langgraph.checkpoint.sqlite'"
+        }
+      ],
+      "final_type": "error",
+      "final_result": null,
+      "success": false,
+      "error": "No module named 'langgraph.checkpoint.sqlite'",
+      "total_time_ms": 0,
+      "clarification_options": null
+    },
+    {
+      "original_question": "When is low usually formed?",
+      "rounds": 1,
+      "round_details": [
+        {
+          "round": 1,
+          "question": "When is low usually formed?",
+          "error": "No module named 'langgraph.checkpoint.sqlite'"
+        }
+      ],
+      "final_type": "error",
+      "final_result": null,
+      "success": false,
+      "error": "No module named 'langgraph.checkpoint.sqlite'",
+      "total_time_ms": 0,
+      "clarification_options": null
+    },
+    {
+      "original_question": "What is gap?",
+      "rounds": 1,
+      "round_details": [
+        {
+          "round": 1,
+          "question": "What is gap?",
+          "error": "No module named 'langgraph.checkpoint.sqlite'"
+        }
+      ],
+      "final_type": "error",
+      "final_result": null,
+      "success": false,
+      "error": "No module named 'langgraph.checkpoint.sqlite'",
+      "total_time_ms": 0,
+      "clarification_options": null
+    },
+    {
+      "original_question": "Explain RTH session",
+      "rounds": 1,
+      "round_details": [
+        {
+          "round": 1,
+          "question": "Explain RTH session",
+          "error": "No module named 'langgraph.checkpoint.sqlite'"
+        }
+      ],
+      "final_type": "error",
+      "final_result": null,
+      "success": false,
+      "error": "No module named 'langgraph.checkpoint.sqlite'",
+      "total_time_ms": 0,
+      "clarification_options": null
+    },
+    {
+      "original_question": "Hello",
+      "rounds": 1,
+      "round_details": [
+        {
+          "round": 1,
+          "question": "Hello",
+          "error": "No module named 'langgraph.checkpoint.sqlite'"
+        }
+      ],
+      "final_type": "error",
+      "final_result": null,
+      "success": false,
+      "error": "No module named 'langgraph.checkpoint.sqlite'",
+      "total_time_ms": 0,
+      "clarification_options": null
+    },
+    {
+      "original_question": "Hi there",
+      "rounds": 1,
+      "round_details": [
+        {
+          "round": 1,
+          "question": "Hi there",
+          "error": "No module named 'langgraph.checkpoint.sqlite'"
+        }
+      ],
+      "final_type": "error",
+      "final_result": null,
+      "success": false,
+      "error": "No module named 'langgraph.checkpoint.sqlite'",
+      "total_time_ms": 0,
+      "clarification_options": null
+    },
+    {
+      "original_question": "What happens the day after a gap up > 1%?",
+      "rounds": 1,
+      "round_details": [
+        {
+          "round": 1,
+          "question": "What happens the day after a gap up > 1%?",
+          "error": "No module named 'langgraph.checkpoint.sqlite'"
+        }
+      ],
+      "final_type": "error",
+      "final_result": null,
+      "success": false,
+      "error": "No module named 'langgraph.checkpoint.sqlite'",
+      "total_time_ms": 0,
+      "clarification_options": null
+    },
+    {
+      "original_question": "Win rate for gap down strategy",
+      "rounds": 1,
+      "round_details": [
+        {
+          "round": 1,
+          "question": "Win rate for gap down strategy",
+          "error": "No module named 'langgraph.checkpoint.sqlite'"
+        }
+      ],
+      "final_type": "error",
+      "final_result": null,
+      "success": false,
+      "error": "No module named 'langgraph.checkpoint.sqlite'",
+      "total_time_ms": 0,
+      "clarification_options": null
+    },
+    {
+      "original_question": "Days after 3+ days of growth in a row",
+      "rounds": 1,
+      "round_details": [
+        {
+          "round": 1,
+          "question": "Days after 3+ days of growth in a row",
+          "error": "No module named 'langgraph.checkpoint.sqlite'"
+        }
+      ],
+      "final_type": "error",
+      "final_result": null,
+      "success": false,
+      "error": "No module named 'langgraph.checkpoint.sqlite'",
+      "total_time_ms": 0,
+      "clarification_options": null
+    },
+    {
+      "original_question": "Статистика по пятницам 2020-2025 где close - low >= 200",
+      "rounds": 1,
+      "round_details": [
+        {
+          "round": 1,
+          "question": "Статистика по пятницам 2020-2025 где close - low >= 200",
+          "error": "No module named 'langgraph.checkpoint.sqlite'"
+        }
+      ],
+      "final_type": "error",
+      "final_result": null,
+      "success": false,
+      "error": "No module named 'langgraph.checkpoint.sqlite'",
+      "total_time_ms": 0,
+      "clarification_options": null
+    },
+    {
+      "original_question": "Что было 16 мая 2024?",
+      "rounds": 1,
+      "round_details": [
+        {
+          "round": 1,
+          "question": "Что было 16 мая 2024?",
+          "error": "No module named 'langgraph.checkpoint.sqlite'"
+        }
+      ],
+      "final_type": "error",
+      "final_result": null,
+      "success": false,
+      "error": "No module named 'langgraph.checkpoint.sqlite'",
+      "total_time_ms": 0,
+      "clarification_options": null
+    },
+    {
+      "original_question": "Топ 10 волатильных дней за 2024",
+      "rounds": 1,
+      "round_details": [
+        {
+          "round": 1,
+          "question": "Топ 10 волатильных дней за 2024",
+          "error": "No module named 'langgraph.checkpoint.sqlite'"
+        }
+      ],
+      "final_type": "error",
+      "final_result": null,
+      "success": false,
+      "error": "No module named 'langgraph.checkpoint.sqlite'",
+      "total_time_ms": 0,
+      "clarification_options": null
+    },
+    {
+      "original_question": "Сравни RTH и ETH по range",
+      "rounds": 1,
+      "round_details": [
+        {
+          "round": 1,
+          "question": "Сравни RTH и ETH по range",
+          "error": "No module named 'langgraph.checkpoint.sqlite'"
+        }
+      ],
+      "final_type": "error",
+      "final_result": null,
+      "success": false,
+      "error": "No module named 'langgraph.checkpoint.sqlite'",
+      "total_time_ms": 0,
+      "clarification_options": null
+    },
+    {
+      "original_question": "Привет",
+      "rounds": 1,
+      "round_details": [
+        {
+          "round": 1,
+          "question": "Привет",
+          "error": "No module named 'langgraph.checkpoint.sqlite'"
+        }
+      ],
+      "final_type": "error",
+      "final_result": null,
+      "success": false,
+      "error": "No module named 'langgraph.checkpoint.sqlite'",
+      "total_time_ms": 0,
+      "clarification_options": null
+    },
+    {
+      "original_question": "Что такое гэп?",
+      "rounds": 1,
+      "round_details": [
+        {
+          "round": 1,
+          "question": "Что такое гэп?",
+          "error": "No module named 'langgraph.checkpoint.sqlite'"
+        }
+      ],
+      "final_type": "error",
+      "final_result": null,
+      "success": false,
+      "error": "No module named 'langgraph.checkpoint.sqlite'",
+      "total_time_ms": 0,
+      "clarification_options": null
+    }
+  ]
+}

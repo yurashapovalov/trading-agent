@@ -14,7 +14,7 @@ from agent.query_builder.sql_utils import (
     safe_sql_symbol,
     safe_sql_date,
 )
-from agent.query_builder.instruments import get_instrument, get_trading_day_boundaries
+from agent.query_builder.instruments import get_instrument, get_trading_day_boundaries, get_session_times
 
 # Название таблицы с минутными данными (единая точка изменения)
 OHLCV_TABLE = "ohlcv_1min"
@@ -60,7 +60,12 @@ def get_trading_date_expression(symbol: str) -> str:
     END"""
 
 
-def build_daily_aggregation_sql(symbol: str, period_start: str, period_end: str) -> str:
+def build_daily_aggregation_sql(
+    symbol: str,
+    period_start: str,
+    period_end: str,
+    session: str | None = None,
+) -> str:
     """
     Строит SQL для агрегации минуток в дневные бары.
 
@@ -73,6 +78,10 @@ def build_daily_aggregation_sql(symbol: str, period_start: str, period_end: str)
         The WHERE clause uses trading day boundaries to include all bars
         that belong to the requested trading days.
 
+    Session Filter:
+        If session is provided (e.g., "RTH"), only bars within that session's
+        time range are included in the aggregation.
+
     Это базовый CTE который используется в:
     - daily.py (Source.DAILY)
     - daily_with_prev.py (Source.DAILY_WITH_PREV)
@@ -83,6 +92,7 @@ def build_daily_aggregation_sql(symbol: str, period_start: str, period_end: str)
         symbol: Торговый инструмент
         period_start: Начало периода (YYYY-MM-DD)
         period_end: Конец периода (YYYY-MM-DD)
+        session: Опционально — сессия для фильтрации (RTH, ETH, etc.)
 
     Returns:
         SQL для daily_raw CTE (без WITH, без запятой в конце)
@@ -118,6 +128,25 @@ def build_daily_aggregation_sql(symbol: str, period_start: str, period_end: str)
         timestamp_filter = f"""timestamp >= {safe_start}
       AND timestamp < {safe_end}"""
 
+    # Session time filter (e.g., RTH 09:30-17:00)
+    session_filter = ""
+    if session:
+        session_times = get_session_times(symbol, session)
+        if session_times:
+            time_start, time_end = session_times
+            # Normalize to HH:MM:SS
+            time_start = time_start if len(time_start.split(":")) == 3 else f"{time_start}:00"
+            time_end = time_end if len(time_end.split(":")) == 3 else f"{time_end}:00"
+
+            # Check if session crosses midnight (e.g., ETH 18:00-17:00)
+            if time_start > time_end:
+                # Session spans overnight — this is effectively the full trading day
+                # No time filter needed (all bars are included)
+                session_filter = ""
+            else:
+                # Normal session within same day (e.g., RTH 09:30-17:00)
+                session_filter = f"\n      AND timestamp::time BETWEEN '{time_start}' AND '{time_end}'"
+
     return f"""daily_raw AS (
     SELECT
         ({trading_date_expr})::date as date,
@@ -142,6 +171,6 @@ def build_daily_aggregation_sql(symbol: str, period_start: str, period_end: str)
         ROUND(LEAST(FIRST(open ORDER BY timestamp), LAST(close ORDER BY timestamp)) - MIN(low), 2) as lower_wick
     FROM {OHLCV_TABLE}
     WHERE symbol = {safe_symbol}
-      AND {timestamp_filter}
+      AND {timestamp_filter}{session_filter}
     GROUP BY ({trading_date_expr})::date
 )"""

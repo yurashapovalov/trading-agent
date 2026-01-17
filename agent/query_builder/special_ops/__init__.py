@@ -21,6 +21,7 @@ from .base import SpecialOpBuilder, SpecialOpRegistry
 from .event_time import EventTimeOpBuilder, build_event_time_query
 from .top_n import TopNOpBuilder, apply_top_n_to_spec
 from .find_extremum import FindExtremumOpBuilder
+from .compare import CompareOpBuilder
 
 __all__ = [
     # Base
@@ -30,6 +31,7 @@ __all__ = [
     "EventTimeOpBuilder",
     "TopNOpBuilder",
     "FindExtremumOpBuilder",
+    "CompareOpBuilder",
     # Functions
     "build_event_time_query",
     "apply_top_n_to_spec",

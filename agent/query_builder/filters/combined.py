@@ -24,7 +24,8 @@ def build_all_filters_sql(
     filters: "Filters",
     date_col: str = "timestamp::date",
     prefix_and: bool = True,
-    symbol: str = "NQ"
+    symbol: str = "NQ",
+    skip_time_filter: bool = False,
 ) -> str:
     """
     Строит все дополнительные фильтры (время + календарь + праздники).
@@ -34,6 +35,7 @@ def build_all_filters_sql(
         date_col: Имя колонки с датой для календарных фильтров
         prefix_and: Добавлять "AND " в начало результата
         symbol: Instrument symbol for session time lookup and holidays
+        skip_time_filter: If True, skip time/session filter (already applied in aggregation)
 
     Returns:
         SQL выражение с "AND " в начале (если prefix_and=True),
@@ -51,9 +53,11 @@ def build_all_filters_sql(
     parts = []
 
     # Время суток (сессии, кастомное время)
-    time_filter = build_time_filter_sql(filters, symbol)
-    if time_filter:
-        parts.append(time_filter)
+    # Skip for DAILY source — already applied in aggregation
+    if not skip_time_filter:
+        time_filter = build_time_filter_sql(filters, symbol)
+        if time_filter:
+            parts.append(time_filter)
 
     # Календарные фильтры (годы, месяцы, дни недели, даты)
     calendar_filter = build_calendar_filters_sql(filters, date_col)

@@ -34,9 +34,13 @@ class DailySourceBuilder(SourceBuilder):
         Note:
             extra_filters_sql здесь это calendar_filter (years, months, weekdays).
             Применяется как WHERE к daily CTE, не к сырым минуткам.
+
+        Session Filter:
+            If filters.session is set, only bars within that session are aggregated.
+            This allows getting daily OHLC for specific sessions (e.g., RTH only).
         """
         daily_raw = build_daily_aggregation_sql(
-            symbol, filters.period_start, filters.period_end
+            symbol, filters.period_start, filters.period_end, session=filters.session
         )
 
         # extra_filters_sql содержит календарные фильтры

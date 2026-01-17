@@ -19,7 +19,7 @@ from typing import Literal
 from langgraph.graph import StateGraph, START, END
 from langgraph.types import Command
 
-from agent.state import AgentState, create_initial_input, get_current_question
+from agent.state import AgentState, create_initial_input, get_current_question, get_chat_history
 from langchain_core.messages import AIMessage
 from agent.agents.understander import Understander, query_spec_to_builder
 from agent.agents.data_fetcher import DataFetcher
@@ -27,6 +27,7 @@ from agent.agents.analyst import Analyst
 from agent.agents.validator import Validator
 from agent.query_builder import QueryBuilder
 from agent.checkpointer import get_checkpointer
+import config
 
 
 # =============================================================================
@@ -38,6 +39,11 @@ query_builder = QueryBuilder()
 data_fetcher = DataFetcher()
 analyst = Analyst()
 validator = Validator()
+
+# Barb (new Parser+Composer flow)
+if config.USE_BARB:
+    from agent.barb import Barb
+    barb = Barb()
 
 
 # =============================================================================
@@ -69,20 +75,127 @@ def understand_question(state: AgentState) -> Command:
     return Command(update=result, goto=next_node)
 
 
+def ask_barb(state: AgentState) -> Command:
+    """
+    Barb node — new Parser+Composer flow.
+
+    Cleaner than Understander:
+    - Parser (LLM) extracts entities only
+    - Composer (code) makes all business decisions
+    - Returns typed QuerySpec directly (no dict conversion!)
+
+    Routing:
+    - query → query_builder (QuerySpec passed directly via query_spec_obj)
+    - clarification/greeting/concept/not_supported → responder
+    """
+    question = get_current_question(state)
+    chat_history = get_chat_history(state)
+    history_str = _format_chat_history(chat_history)
+
+    result = barb.ask(question, chat_history=history_str)
+
+    # Build update dict
+    update = {
+        "usage": {
+            "input_tokens": result.input_tokens,
+            "output_tokens": result.output_tokens,
+            "cost_usd": result.cost_usd,
+        },
+        "agents_used": ["barb"],
+        "step_number": state.get("step_number", 0) + 1,
+    }
+
+    # Common debug info
+    parser_output = result.parser_output
+
+    if result.type == "query":
+        # Pass QuerySpec directly — no dict conversion!
+        update["intent"] = {
+            "type": "data",
+            "summary": result.summary,
+            "parser_output": parser_output,
+            "holiday_info": result.holiday_info,  # Holiday info for Analyst
+        }
+        update["query_spec_obj"] = result.spec  # QuerySpec object directly
+        next_node = "query_builder"
+
+    elif result.type == "clarification":
+        update["intent"] = {
+            "type": "clarification",
+            "response_text": result.summary,
+            "suggestions": result.options or [],
+            "parser_output": parser_output,
+        }
+        next_node = "responder"
+
+    elif result.type == "concept":
+        update["intent"] = {
+            "type": "concept",
+            "response_text": result.summary,
+            "concept": result.concept,
+            "parser_output": parser_output,
+        }
+        next_node = "responder"
+
+    elif result.type == "greeting":
+        update["intent"] = {
+            "type": "chitchat",
+            "response_text": result.summary,
+            "parser_output": parser_output,
+        }
+        next_node = "responder"
+
+    elif result.type == "not_supported":
+        update["intent"] = {
+            "type": "out_of_scope",
+            "response_text": f"{result.summary}\n\n{result.reason}",
+            "parser_output": parser_output,
+        }
+        next_node = "responder"
+
+    else:
+        update["intent"] = {
+            "type": "chitchat",
+            "response_text": result.summary,
+            "parser_output": parser_output,
+        }
+        next_node = "responder"
+
+    return Command(update=update, goto=next_node)
+
+
+def _format_chat_history(chat_history: list) -> str:
+    """Format chat history for Barb."""
+    if not chat_history:
+        return ""
+    history_str = ""
+    for msg in chat_history[-config.CHAT_HISTORY_LIMIT:]:
+        role = "User" if msg.get("role") == "user" else "Assistant"
+        history_str += f"{role}: {msg.get('content', '')}\n"
+    return history_str
+
+
 def build_query(state: AgentState) -> dict:
     """
     QueryBuilder node — строит SQL из query_spec.
 
     Детерминированно, без LLM, всегда валидный SQL.
+
+    Supports two paths:
+    - Barb: query_spec_obj contains QuerySpec directly (no conversion)
+    - Understander: intent["query_spec"] contains dict (needs conversion)
     """
-    intent = state.get("intent") or {}
-    query_spec_dict = intent.get("query_spec", {})
-
     try:
-        # Конвертируем JSON в объект QuerySpec
-        query_spec = query_spec_to_builder(query_spec_dict)
+        # Path 1: Barb — QuerySpec passed directly (no conversion needed!)
+        query_spec = state.get("query_spec_obj")
 
-        # Строим SQL
+        # Path 2: Understander — need to convert dict to QuerySpec
+        if query_spec is None:
+            intent = state.get("intent") or {}
+            query_spec_dict = intent.get("query_spec", {})
+            query_spec = query_spec_to_builder(query_spec_dict)
+
+        # Build SQL
         sql = query_builder.build(query_spec)
 
         return {
@@ -172,18 +285,22 @@ def build_graph() -> StateGraph:
 
     graph = StateGraph(AgentState)
 
-    # Nodes
-    graph.add_node("understander", understand_question)
+    # Nodes — выбираем Barb или Understander по флагу
+    if config.USE_BARB:
+        graph.add_node("understander", ask_barb)  # Barb заменяет Understander
+    else:
+        graph.add_node("understander", understand_question)
+
     graph.add_node("responder", simple_respond)
     graph.add_node("query_builder", build_query)
     graph.add_node("data_fetcher", fetch_data)
     graph.add_node("analyst", analyze_data)
     graph.add_node("validator", validate_response)
 
-    # START → understander
+    # START → understander (или barb)
     graph.add_edge(START, "understander")
 
-    # understander использует Command API для routing
+    # understander/barb использует Command API для routing
 
     # responder → END
     graph.add_edge("responder", END)

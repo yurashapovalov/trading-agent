@@ -166,6 +166,9 @@ class TradingState(MessagesState, total=False):
     # Understander output
     intent: Intent | None
 
+    # Barb output (direct QuerySpec, avoids dict↔object conversion)
+    query_spec_obj: object | None  # QuerySpec from Barb (None for Understander path)
+
     # QueryBuilder output
     sql_query: str | None         # Generated SQL from QueryBuilder (deterministic)
 

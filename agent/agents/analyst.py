@@ -22,7 +22,7 @@ from google.genai import types
 
 import config
 from agent.state import AgentState, Stats, UsageStats, get_current_question, get_chat_history
-from agent.prompts.analyst import get_analyst_prompt, get_analyst_prompt_streaming
+from agent.prompts.analyst import get_analyst_prompt, get_analyst_prompt_streaming, get_analyst_prompt_fast
 from agent.pricing import calculate_cost
 from langchain_core.messages import AIMessage
 
@@ -90,6 +90,14 @@ class Analyst:
         if validation.get("status") == "rewrite":
             previous_response = state.get("response", "")
             issues = validation.get("issues", [])
+
+        # Fast mode - minimal prompt, plain text, no JSON overhead
+        if config.ANALYST_FAST_MODE:
+            prompt = get_analyst_prompt_fast(question=question, data=data)
+            # Debug: log prompt size
+            rows = data.get("rows", []) if isinstance(data, dict) else []
+            print(f"    [Analyst] rows={len(rows)}, prompt_len={len(prompt)}")
+            return self._generate_fast(prompt, state)
 
         # Try to get stream writer (only works inside LangGraph execution)
         writer = None
@@ -209,6 +217,35 @@ class Analyst:
             "step_number": state.get("step_number", 0) + 1,
             "validation_attempts": state.get("validation_attempts", 0) + 1,
             # Add AIMessage to messages for checkpointer accumulation
+            "messages": [AIMessage(content=response_text)],
+        }
+
+    def _generate_fast(self, prompt: str, state: AgentState) -> dict:
+        """Generate response in fast mode (plain text, no JSON overhead)."""
+        try:
+            response_obj = self.client.models.generate_content(
+                model=self.model,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    temperature=0.3,
+                    # No response_mime_type - plain text is faster
+                )
+            )
+
+            # Track usage
+            self._track_usage(response_obj)
+            response_text = response_obj.text
+
+        except Exception as e:
+            response_text = f"Error generating response: {e}"
+
+        return {
+            "response": response_text,
+            "stats": None,  # No stats in fast mode
+            "usage": self._last_usage,
+            "agents_used": [self.name],
+            "step_number": state.get("step_number", 0) + 1,
+            "validation_attempts": state.get("validation_attempts", 0) + 1,
             "messages": [AIMessage(content=response_text)],
         }
 

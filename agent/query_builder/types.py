@@ -732,11 +732,9 @@ class QuerySpec:
             if self.source != Source.MINUTES:
                 errors.append("FIND_EXTREMUM требует source=MINUTES")
 
-        # Session filter требует Source.MINUTES (daily has no timestamp column)
-        if self.filters.session and self.source != Source.MINUTES:
-            errors.append(
-                f"Session filter '{self.filters.session}' requires source=MINUTES "
-                "(daily source has no timestamp column for time filtering)"
-            )
+        # Session filter now supported in both:
+        # - MINUTES: time filter applied to raw bars
+        # - DAILY: time filter applied during aggregation (in build_daily_aggregation_sql)
+        # No validation needed — both sources handle session correctly.
 
         return errors

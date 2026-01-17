@@ -898,6 +898,7 @@ def query_spec_to_builder(query_spec: dict) -> "QuerySpec":
     event_time_spec = parsed_spec if special_op == SpecialOp.EVENT_TIME else None
     top_n_spec = parsed_spec if special_op == SpecialOp.TOP_N else None
     find_extremum_spec = parsed_spec if special_op == SpecialOp.FIND_EXTREMUM else None
+    compare_spec = parsed_spec if special_op == SpecialOp.COMPARE else None
 
     # Get symbol from query_spec or use default
     symbol = query_spec.get("symbol", DEFAULT_SYMBOL).upper()
@@ -912,4 +913,5 @@ def query_spec_to_builder(query_spec: dict) -> "QuerySpec":
         event_time_spec=event_time_spec,
         top_n_spec=top_n_spec,
         find_extremum_spec=find_extremum_spec,
+        compare_spec=compare_spec,
     )

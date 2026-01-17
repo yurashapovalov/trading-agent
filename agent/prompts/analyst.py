@@ -2,9 +2,27 @@
 Analyst prompts - structured following Gemini best practices.
 
 Analyst writes response AND extracts Stats for validation.
+Fast mode: plain markdown without JSON/stats for speed.
 """
 
 import config
+
+
+# =============================================================================
+# Fast Mode Prompts (plain markdown, no JSON overhead)
+# =============================================================================
+
+SYSTEM_PROMPT_FAST = """You are a trading data analyst. Analyze data and write clear responses.
+Respond in the same language as the question. Use markdown tables. Be concise.
+Times are in ET (Eastern Time)."""
+
+USER_PROMPT_FAST = """<data>
+{data}
+</data>
+
+Question: {question}
+
+Analyze and respond in plain markdown."""
 
 # =============================================================================
 # System Prompt
@@ -337,3 +355,22 @@ def get_analyst_prompt_streaming(
     )
 
     return prompt + task_suffix + assumptions_context + holiday_context
+
+
+# =============================================================================
+# Fast Mode Prompt (minimal, no JSON)
+# =============================================================================
+
+def get_analyst_prompt_fast(question: str, data: dict) -> str:
+    """
+    Build minimal prompt for fast mode.
+
+    No JSON, no stats, no chat history, no holidays - just data and question.
+    ~3x faster than full prompt.
+    """
+    import json as json_module
+
+    return SYSTEM_PROMPT_FAST + "\n" + USER_PROMPT_FAST.format(
+        data=json_module.dumps(data, indent=2, default=str),
+        question=question,
+    )
