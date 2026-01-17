@@ -26,6 +26,17 @@ This is a technical constraint: daily source doesn't have timestamp column,
 so time-based session filters cannot be applied to it.
 </source_rule>
 
+<grouping_rule>
+Grouping selection for session queries:
+- Single day + session (no explicit breakdown request) → grouping: "total"
+  (aggregates all session minutes into one summary row: open, high, low, close, range)
+- User explicitly asks "по часам" / "hourly" / "breakdown" → grouping: "hour"
+  (returns hourly bars within the session)
+
+Why: Raw minutes for a session = 400+ rows, not useful for "what happened" questions.
+Default to "total" for session summary, "hour" only when explicitly requested.
+</grouping_rule>
+
 <session_rule>
 Session field handling:
 - User explicitly says "RTH", "ETH", "OVERNIGHT" → use that session value
@@ -123,7 +134,7 @@ Note: AMBIGUOUS — user said "day" but didn't specify which session. DO NOT set
 ```
 
 Question: "RTH" (follow-up after clarification asking about May 16)
-Note: User selected RTH session → source MUST be "minutes" because we need timestamp for session filter.
+Note: source="minutes" for session filter, grouping="total" to aggregate into session summary.
 ```json
 {
   "type": "data",
@@ -135,14 +146,22 @@ Note: User selected RTH session → source MUST be "minutes" because we need tim
       "period_start": "2024-05-16",
       "period_end": "2024-05-17"
     },
-    "grouping": "none",
+    "grouping": "total",
+    "metrics": [
+      {"metric": "first", "column": "open", "alias": "open"},
+      {"metric": "max", "column": "high", "alias": "high"},
+      {"metric": "min", "column": "low", "alias": "low"},
+      {"metric": "last", "column": "close", "alias": "close"},
+      {"metric": "sum", "column": "volume", "alias": "volume"},
+      {"metric": "raw", "column": "max(high) - min(low)", "alias": "range"}
+    ],
     "special_op": "none"
   }
 }
 ```
 
 Question: "ETH" (follow-up after clarification asking about Nov 29, 2024)
-Note: User selected ETH session → source MUST be "minutes".
+Note: source="minutes" for session filter, grouping="total" for session summary.
 ```json
 {
   "type": "data",
@@ -154,7 +173,41 @@ Note: User selected ETH session → source MUST be "minutes".
       "period_start": "2024-11-29",
       "period_end": "2024-11-30"
     },
-    "grouping": "none",
+    "grouping": "total",
+    "metrics": [
+      {"metric": "first", "column": "open", "alias": "open"},
+      {"metric": "max", "column": "high", "alias": "high"},
+      {"metric": "min", "column": "low", "alias": "low"},
+      {"metric": "last", "column": "close", "alias": "close"},
+      {"metric": "sum", "column": "volume", "alias": "volume"},
+      {"metric": "raw", "column": "max(high) - min(low)", "alias": "range"}
+    ],
+    "special_op": "none"
+  }
+}
+```
+
+Question: "Show RTH hourly breakdown for May 16" (also: "покажи RTH по часам за 16 мая")
+Note: User explicitly asks for hourly → grouping="hour".
+```json
+{
+  "type": "data",
+  "query_spec": {
+    "symbol": "NQ",
+    "source": "minutes",
+    "filters": {
+      "session": "RTH",
+      "period_start": "2024-05-16",
+      "period_end": "2024-05-17"
+    },
+    "grouping": "hour",
+    "metrics": [
+      {"metric": "first", "column": "open", "alias": "open"},
+      {"metric": "max", "column": "high", "alias": "high"},
+      {"metric": "min", "column": "low", "alias": "low"},
+      {"metric": "last", "column": "close", "alias": "close"},
+      {"metric": "sum", "column": "volume", "alias": "volume"}
+    ],
     "special_op": "none"
   }
 }
