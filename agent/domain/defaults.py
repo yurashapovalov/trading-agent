@@ -322,8 +322,20 @@ def get_trading_day_options(symbol: str, date_str: str = "") -> list[str]:
         symbol: Instrument symbol
         date_str: Date in YYYY-MM-DD format (for holiday check)
     """
+    from datetime import datetime
     from agent.query_builder.instruments import get_session_times
     from agent.query_builder.holidays import get_day_type, get_close_time
+
+    # Check if it's a weekend
+    if date_str:
+        try:
+            dt = datetime.strptime(date_str, "%Y-%m-%d")
+            weekday = dt.weekday()  # 0=Monday, 5=Saturday, 6=Sunday
+            weekday_name = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"][weekday]
+            if weekday >= 5:  # Saturday or Sunday
+                return [f"Market closed on {date_str} ({weekday_name})"]
+        except ValueError:
+            pass
 
     # Check if it's a holiday
     if date_str:
