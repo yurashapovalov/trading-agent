@@ -22,12 +22,18 @@ Example:
     # result["intent"]["query_spec"] contains structured params for QueryBuilder
 """
 
+from __future__ import annotations
+
 import json
 from datetime import datetime
+from typing import TYPE_CHECKING
 from google import genai
 from google.genai import types
 
 import config
+
+if TYPE_CHECKING:
+    from agent.query_builder import QuerySpec
 from agent.state import AgentState, Intent, UsageStats, get_current_question, get_chat_history
 from agent.pricing import calculate_cost
 
@@ -35,6 +41,7 @@ from agent.pricing import calculate_cost
 DEFAULT_SYMBOL = "NQ"
 from agent.modules.sql import get_data_range
 from agent.query_builder.holidays import get_holidays_for_year
+from agent.domain import apply_defaults
 
 # RAP prompts (new modular approach)
 from agent.prompts.understander import (
@@ -311,7 +318,10 @@ class Understander:
         # Step 2: Generate with handler
         intent = self._generate_with_handler(question, query_type, history_str)
 
-        # Step 3: Check for holiday dates
+        # Step 3: Apply instrument-aware defaults
+        intent = self._apply_defaults(intent, question)
+
+        # Step 4: Check for holiday dates
         intent = self._check_holiday_intent(intent)
 
         return intent
@@ -390,8 +400,8 @@ class Understander:
         """
         Check if intent requests data for holiday or early close dates.
 
-        If user asks for specific dates that are market holidays,
-        adds holiday_info to intent for Analyst to explain.
+        Checks both specific_dates and period ranges.
+        Adds holiday_info to intent for Analyst to explain.
 
         Args:
             intent: Original intent from LLM
@@ -406,11 +416,8 @@ class Understander:
         if not query_spec:
             return intent
 
-        # Check specific_dates
         filters = query_spec.get("filters", {})
-        specific_dates = filters.get("specific_dates")
-        if not specific_dates:
-            return intent
+        symbol = query_spec.get("symbol", DEFAULT_SYMBOL)
 
         # Get time filter for early close check
         time_filter = None
@@ -419,25 +426,50 @@ class Understander:
         if time_start and time_end:
             time_filter = (time_start, time_end)
 
-        symbol = query_spec.get("symbol", DEFAULT_SYMBOL)
-        holiday_check = check_dates_for_holidays(specific_dates, symbol, time_filter)
+        holiday_check = None
+
+        # Check specific_dates first
+        specific_dates = filters.get("specific_dates")
+        if specific_dates:
+            holiday_check = check_dates_for_holidays(specific_dates, symbol, time_filter)
+
+        # Also check period range for holidays
+        period_start = filters.get("period_start")
+        period_end = filters.get("period_end")
+        if period_start and period_end and period_start != "all" and period_end != "all":
+            period_holidays = self._check_period_for_holidays(
+                symbol, period_start, period_end
+            )
+            if period_holidays:
+                if holiday_check:
+                    # Merge with specific_dates check
+                    holiday_check["holiday_dates"].extend(period_holidays.get("holiday_dates", []))
+                    holiday_check["early_close_dates"].extend(period_holidays.get("early_close_dates", []))
+                    holiday_check["holiday_names"].update(period_holidays.get("holiday_names", {}))
+                else:
+                    holiday_check = period_holidays
 
         if not holiday_check:
             return intent
 
         # Build info strings for logging
         all_dates = holiday_check.get("holiday_dates", []) + holiday_check.get("early_close_dates", [])
+        if not all_dates:
+            return intent
+
         holiday_info_str = ", ".join(
             f"{d} ({holiday_check['holiday_names'].get(d, 'holiday')})"
-            for d in all_dates
+            for d in all_dates[:5]  # Limit to 5 for logging
         )
+        if len(all_dates) > 5:
+            holiday_info_str += f" (+{len(all_dates) - 5} more)"
 
         if holiday_check.get("all_holidays"):
             print(f"[Understander] All dates are holidays: {holiday_info_str}")
         elif holiday_check.get("early_close_conflict"):
             print(f"[Understander] Early close conflict: {holiday_info_str}")
         elif all_dates:
-            print(f"[Understander] Some dates are holidays/early close: {holiday_info_str}")
+            print(f"[Understander] Period contains holidays: {holiday_info_str}")
 
         # Add holiday_info to intent for Analyst to use
         intent["holiday_info"] = {
@@ -446,10 +478,186 @@ class Understander:
             "all_holidays": holiday_check.get("all_holidays", False),
             "early_close_dates": holiday_check.get("early_close_dates", []),
             "early_close_conflict": holiday_check.get("early_close_conflict", False),
+            "count": len(all_dates),
         }
-        # Could add a warning to intent here if needed
 
         return intent
+
+    def _check_period_for_holidays(
+        self,
+        symbol: str,
+        period_start: str,
+        period_end: str,
+    ) -> dict | None:
+        """Check period range for holidays using holiday filter module."""
+        from agent.query_builder.filters.holiday import get_holiday_dates_for_period
+        from agent.query_builder.holidays import get_day_type
+        from datetime import date as dt_date
+
+        # Get all holiday dates in period
+        holiday_dates = get_holiday_dates_for_period(
+            symbol, period_start, period_end,
+            include_holidays=True, include_early_close=True
+        )
+
+        if not holiday_dates:
+            return None
+
+        # Filter to only dates within actual period
+        try:
+            start = dt_date.fromisoformat(period_start)
+            end = dt_date.fromisoformat(period_end)
+            holiday_dates = [d for d in holiday_dates if start <= d < end]
+        except (ValueError, TypeError):
+            pass
+
+        if not holiday_dates:
+            return None
+
+        # Categorize dates
+        full_close = []
+        early_close = []
+        names = {}
+
+        for d in holiday_dates:
+            day_type = get_day_type(symbol, d)
+            date_str = d.isoformat()
+            if day_type == "closed":
+                full_close.append(date_str)
+                names[date_str] = _get_holiday_name(d)
+            elif day_type == "early_close":
+                early_close.append(date_str)
+                names[date_str] = _get_early_close_name(d) + " (early close)"
+
+        if not full_close and not early_close:
+            return None
+
+        return {
+            "holiday_dates": full_close,
+            "early_close_dates": early_close,
+            "holiday_names": names,
+            "all_holidays": False,
+            "early_close_conflict": False,
+        }
+
+    def _apply_defaults(self, intent: Intent, question: str = "") -> Intent:
+        """
+        Apply instrument-aware defaults for "_default_" markers.
+
+        When LLM returns "_default_" for a field (user implied but didn't specify),
+        this method resolves it to actual value based on instrument config.
+
+        Args:
+            intent: Intent with potential "_default_" markers
+            question: Original user question (for language-aware clarification)
+
+        Returns:
+            Intent with resolved values and assumptions list
+        """
+        if intent.get("type") != "data":
+            return intent
+
+        query_spec = intent.get("query_spec", {})
+        symbol = query_spec.get("symbol", DEFAULT_SYMBOL)
+
+        # Apply defaults using domain logic
+        intent = apply_defaults(intent, symbol)
+
+        # Log assumptions
+        assumptions = intent.get("assumptions", [])
+        if assumptions:
+            assumptions_str = ", ".join(
+                f"{a['field']}={a['value']}" for a in assumptions
+            )
+            print(f"[Understander] Applied defaults: {assumptions_str}")
+
+        # Check if clarification is needed
+        needs_clarification = intent.get("needs_clarification")
+        if needs_clarification:
+            print(f"[Understander] Needs clarification: {needs_clarification}")
+            # Convert to clarification intent
+            intent = self._convert_to_clarification(intent, needs_clarification, question)
+
+        return intent
+
+    def _convert_to_clarification(
+        self, intent: Intent, needs: dict, question: str = ""
+    ) -> Intent:
+        """
+        Convert data intent to clarification when defaults couldn't be resolved.
+
+        Args:
+            intent: Original data intent
+            needs: Dict of fields needing clarification {field: [options]}
+            question: Original user question (for language detection)
+
+        Returns:
+            Clarification intent with question and suggestions
+        """
+        # Detect language from question (simple heuristic: Cyrillic = Russian)
+        is_russian = any("\u0400" <= c <= "\u04ff" for c in question)
+
+        # Extract date from intent for contextual message
+        query_spec = intent.get("query_spec", {})
+        filters = query_spec.get("filters", {})
+        specific_dates = filters.get("specific_dates", [])
+        # Try specific_dates first, then period_start for single-day queries
+        date_str = ""
+        if specific_dates:
+            date_str = specific_dates[0]
+        elif filters.get("period_start"):
+            date_str = filters.get("period_start")
+
+        # Build clarification question and suggestions
+        # Note: use "response_text" for responder compatibility
+        if "trading_day_or_session" in needs:
+            options = needs["trading_day_or_session"]
+
+            if is_russian:
+                if date_str:
+                    response = f"Уточните, что вы имеете в виду под датой {date_str}:"
+                else:
+                    response = "Уточните, что вы имеете в виду:"
+            else:
+                if date_str:
+                    response = f"Please clarify what you mean by '{date_str}':"
+                else:
+                    response = "Please clarify what you mean by this date:"
+
+            return {
+                "type": "clarification",
+                "response_text": response,
+                "suggestions": options[:4],
+                "original_intent": intent,
+            }
+
+        if "session" in needs:
+            sessions = needs["session"]
+            response = (
+                "Какую торговую сессию вы имеете в виду?"
+                if is_russian
+                else "Which trading session do you mean?"
+            )
+            return {
+                "type": "clarification",
+                "response_text": response,
+                "suggestions": sessions[:4],
+                "original_intent": intent,
+            }
+
+        # Generic fallback
+        fields = list(needs.keys())
+        response = (
+            f"Уточните: {', '.join(fields)}"
+            if is_russian
+            else f"Please clarify: {', '.join(fields)}"
+        )
+        return {
+            "type": "clarification",
+            "response_text": response,
+            "suggestions": [],
+            "original_intent": intent,
+        }
 
     def _build_intent(self, data: dict) -> Intent:
         """Build Intent object from parsed LLM response.
@@ -469,35 +677,23 @@ class Understander:
         }
 
         if intent_type == "data":
-            # Извлекаем query_spec
+            # Извлекаем query_spec (дефолты применяются позже в _apply_defaults)
             query_spec = data.get("query_spec", {})
-
-            # Получаем фильтры
-            filters = query_spec.get("filters", {})
-            period_start = filters.get("period_start")
-            period_end = filters.get("period_end")
-
-            # Дефолтный период: "all" или пустое значение → берём из БД
-            if not period_start or period_start == "all" or not period_end or period_end == "all":
-                period_start, period_end = self._full_data_range()
-                if "filters" not in query_spec:
-                    query_spec["filters"] = {}
-                query_spec["filters"]["period_start"] = period_start
-                query_spec["filters"]["period_end"] = period_end
-
-            # Добавляем query_spec в intent
             intent["query_spec"] = query_spec
 
             # Для совместимости добавляем period_start/end на верхний уровень
-            intent["period_start"] = period_start
-            intent["period_end"] = period_end
+            filters = query_spec.get("filters", {})
+            intent["period_start"] = filters.get("period_start")
+            intent["period_end"] = filters.get("period_end")
 
         elif intent_type == "concept":
             intent["concept"] = data.get("concept", "")
 
         elif intent_type == "clarification":
-            intent["response_text"] = data.get(
-                "clarification_question",
+            # Model may return either clarification_question or response_text
+            intent["response_text"] = (
+                data.get("clarification_question") or
+                data.get("response_text") or
                 "Уточните ваш запрос"
             )
 

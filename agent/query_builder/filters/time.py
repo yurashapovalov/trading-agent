@@ -2,11 +2,11 @@
 Time Filter Builder — фильтрация по времени суток.
 
 Поддерживает:
-- Торговые сессии (RTH, ETH, PREMARKET, etc.)
+- Торговые сессии (RTH, ETH, OVERNIGHT, etc.)
 - Кастомные временные диапазоны (time_start, time_end)
-- Сессии пересекающие полночь (OVERNIGHT, ASIAN, GLOBEX)
+- Сессии пересекающие полночь (OVERNIGHT, ASIAN, etc.)
 
-Session times are loaded from instrument config (instruments.py).
+Session times are loaded from instrument config (instruments.py) — Single Source of Truth.
 All times in data timezone (ET for NQ/ES).
 All values validated for SQL injection protection.
 """

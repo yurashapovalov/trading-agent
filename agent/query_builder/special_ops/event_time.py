@@ -6,6 +6,11 @@ Event Time Operation Builder — поиск времени события.
 - "Когда обычно бывает low?"
 - "Распределение high и low по времени"
 
+Trading Day vs Calendar Day:
+    For futures (NQ, ES), trading day != calendar day.
+    Example: Tuesday's trading day = Monday 18:00 ET → Tuesday 17:00 ET
+    When session is not specified, we use trading day boundaries.
+
 Все значения валидируются для защиты от SQL injection.
 """
 
@@ -16,8 +21,9 @@ if TYPE_CHECKING:
     from agent.query_builder.types import QuerySpec
 
 from agent.query_builder.types import SpecialOp
-from agent.query_builder.source.common import OHLCV_TABLE
+from agent.query_builder.source.common import OHLCV_TABLE, get_trading_date_expression
 from agent.query_builder.sql_utils import safe_sql_symbol, safe_sql_date
+from agent.query_builder.instruments import get_trading_day_boundaries
 from .base import SpecialOpBuilder, SpecialOpRegistry
 
 
@@ -27,10 +33,46 @@ class EventTimeOpBuilder(SpecialOpBuilder):
     Builder для SpecialOp.EVENT_TIME.
 
     Находит распределение времени формирования high/low по дням.
+    Uses trading day boundaries for futures (not calendar day).
     Все входные данные валидируются для защиты от SQL injection.
     """
 
     op_type = SpecialOp.EVENT_TIME
+
+    def _get_trading_day_filter(
+        self,
+        symbol: str,
+        period_start: str,
+        period_end: str,
+        session: str | None = None,
+        time_start: str | None = None
+    ) -> tuple[str, str]:
+        """
+        Get timestamp filter and date expression for trading day.
+
+        Returns:
+            (timestamp_filter, trading_date_expr)
+        """
+        safe_start = safe_sql_date(period_start)
+        safe_end = safe_sql_date(period_end)
+
+        trading_bounds = get_trading_day_boundaries(symbol)
+
+        if not session and not time_start and trading_bounds:
+            day_start, day_end = trading_bounds
+            day_start_time = day_start if len(day_start.split(":")) == 3 else f"{day_start}:00"
+            day_end_time = day_end if len(day_end.split(":")) == 3 else f"{day_end}:00"
+
+            # DuckDB: (date - interval)::date + time::time -> timestamp
+            timestamp_filter = f"""timestamp >= (({safe_start}::date - INTERVAL '1 day')::date + '{day_start_time}'::time)
+      AND timestamp < (({safe_end}::date - INTERVAL '1 day')::date + '{day_end_time}'::time)"""
+            trading_date_expr = get_trading_date_expression(symbol)
+        else:
+            timestamp_filter = f"""timestamp >= {safe_start}
+      AND timestamp < {safe_end}"""
+            trading_date_expr = "timestamp::date"
+
+        return timestamp_filter, trading_date_expr
 
     def build_query(
         self,
@@ -55,22 +97,24 @@ class EventTimeOpBuilder(SpecialOpBuilder):
         symbol = spec.symbol
         period_start = spec.filters.period_start
         period_end = spec.filters.period_end
+        session = spec.filters.session
+        time_start = spec.filters.time_start
 
         if find_col == "both":
             return self._build_both_query(
                 symbol, period_start, period_end,
-                interval, extra_filters_sql
+                session, time_start, interval, extra_filters_sql
             )
         elif find_col == "all":
             return self._build_all_query(
                 symbol, period_start, period_end,
-                interval, extra_filters_sql
+                session, time_start, interval, extra_filters_sql
             )
         else:
             # high, low, open, close, max_volume
             return self._build_single_query(
                 symbol, period_start, period_end,
-                interval, find_col, extra_filters_sql
+                session, time_start, interval, find_col, extra_filters_sql
             )
 
     def _build_single_query(
@@ -78,15 +122,17 @@ class EventTimeOpBuilder(SpecialOpBuilder):
         symbol: str,
         period_start: str,
         period_end: str,
+        session: str | None,
+        time_start: str | None,
         interval: str,
         find_col: str,
         extra_filters_sql: str
     ) -> str:
         """Запрос для одного типа события (high, low, open, close, max_volume)."""
-        # Валидация входных данных
         safe_symbol = safe_sql_symbol(symbol)
-        safe_start = safe_sql_date(period_start)
-        safe_end = safe_sql_date(period_end)
+        timestamp_filter, trading_date_expr = self._get_trading_day_filter(
+            symbol, period_start, period_end, session, time_start
+        )
 
         # Определяем ORDER BY и нужные колонки для поиска события
         event_configs = {
@@ -104,12 +150,11 @@ class EventTimeOpBuilder(SpecialOpBuilder):
     -- Минутные данные с фильтрами
     SELECT
         timestamp,
-        timestamp::date as date,
+        ({trading_date_expr})::date as date,
         {select_columns}
     FROM {OHLCV_TABLE}
     WHERE symbol = {safe_symbol}
-      AND timestamp >= {safe_start}
-      AND timestamp < {safe_end}
+      AND {timestamp_filter}
       {extra_filters_sql}
 ),
 daily_events AS (
@@ -140,26 +185,27 @@ ORDER BY time_bucket"""
         symbol: str,
         period_start: str,
         period_end: str,
+        session: str | None,
+        time_start: str | None,
         interval: str,
         extra_filters_sql: str
     ) -> str:
         """UNION запрос для high И low."""
-        # Валидация входных данных
         safe_symbol = safe_sql_symbol(symbol)
-        safe_start = safe_sql_date(period_start)
-        safe_end = safe_sql_date(period_end)
+        timestamp_filter, trading_date_expr = self._get_trading_day_filter(
+            symbol, period_start, period_end, session, time_start
+        )
 
         return f"""WITH filtered_data AS (
     -- Минутные данные с фильтрами
     SELECT
         timestamp,
-        timestamp::date as date,
+        ({trading_date_expr})::date as date,
         high,
         low
     FROM {OHLCV_TABLE}
     WHERE symbol = {safe_symbol}
-      AND timestamp >= {safe_start}
-      AND timestamp < {safe_end}
+      AND {timestamp_filter}
       {extra_filters_sql}
 ),
 daily_highs AS (
@@ -207,18 +253,21 @@ ORDER BY event_type DESC, time_bucket"""
         symbol: str,
         period_start: str,
         period_end: str,
+        session: str | None,
+        time_start: str | None,
         interval: str,
         extra_filters_sql: str
     ) -> str:
         """UNION запрос для всех событий: open, high, low, close, max_volume."""
         safe_symbol = safe_sql_symbol(symbol)
-        safe_start = safe_sql_date(period_start)
-        safe_end = safe_sql_date(period_end)
+        timestamp_filter, trading_date_expr = self._get_trading_day_filter(
+            symbol, period_start, period_end, session, time_start
+        )
 
         return f"""WITH filtered_data AS (
     SELECT
         timestamp,
-        timestamp::date as date,
+        ({trading_date_expr})::date as date,
         open,
         high,
         low,
@@ -226,8 +275,7 @@ ORDER BY event_type DESC, time_bucket"""
         volume
     FROM {OHLCV_TABLE}
     WHERE symbol = {safe_symbol}
-      AND timestamp >= {safe_start}
-      AND timestamp < {safe_end}
+      AND {timestamp_filter}
       {extra_filters_sql}
 ),
 daily_opens AS (

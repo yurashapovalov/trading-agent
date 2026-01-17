@@ -10,6 +10,11 @@ Find Extremum Operation Builder — поиск точного времени hig
 - EVENT_TIME: распределение по bucket'ам → frequency, percentage
 - FIND_EXTREMUM: точные значения → timestamp, value
 
+Trading Day vs Calendar Day:
+    For futures (NQ, ES), trading day != calendar day.
+    Example: Tuesday's trading day = Monday 18:00 ET → Tuesday 17:00 ET
+    When session is not specified, we use trading day boundaries.
+
 Все значения валидируются для защиты от SQL injection.
 """
 
@@ -20,8 +25,9 @@ if TYPE_CHECKING:
     from agent.query_builder.types import QuerySpec
 
 from agent.query_builder.types import SpecialOp
-from agent.query_builder.source.common import OHLCV_TABLE
+from agent.query_builder.source.common import OHLCV_TABLE, get_trading_date_expression
 from agent.query_builder.sql_utils import safe_sql_symbol, safe_sql_date
+from agent.query_builder.instruments import get_trading_day_boundaries
 from .base import SpecialOpBuilder, SpecialOpRegistry
 
 
@@ -31,10 +37,53 @@ class FindExtremumOpBuilder(SpecialOpBuilder):
     Builder для SpecialOp.FIND_EXTREMUM.
 
     Находит точное время и значение high/low для каждого дня в периоде.
+    Uses trading day boundaries for futures (not calendar day).
     Все входные данные валидируются для защиты от SQL injection.
     """
 
     op_type = SpecialOp.FIND_EXTREMUM
+
+    def _get_trading_day_filter(
+        self,
+        symbol: str,
+        period_start: str,
+        period_end: str,
+        session: str | None = None,
+        time_start: str | None = None
+    ) -> tuple[str, str]:
+        """
+        Get timestamp filter and date expression for trading day.
+
+        Returns:
+            (timestamp_filter, trading_date_expr)
+
+        For futures without session filter, uses trading day boundaries.
+        For instruments with session or custom time, uses calendar dates.
+        """
+        safe_start = safe_sql_date(period_start)
+        safe_end = safe_sql_date(period_end)
+
+        trading_bounds = get_trading_day_boundaries(symbol)
+
+        if not session and not time_start and trading_bounds:
+            # Use trading day boundaries
+            day_start, day_end = trading_bounds  # e.g., ("18:00", "17:00")
+
+            # Normalize times to HH:MM:SS
+            day_start_time = day_start if len(day_start.split(":")) == 3 else f"{day_start}:00"
+            day_end_time = day_end if len(day_end.split(":")) == 3 else f"{day_end}:00"
+
+            # DuckDB: (date - interval)::date + time::time -> timestamp
+            timestamp_filter = f"""timestamp >= (({safe_start}::date - INTERVAL '1 day')::date + '{day_start_time}'::time)
+      AND timestamp < (({safe_end}::date - INTERVAL '1 day')::date + '{day_end_time}'::time)"""
+            trading_date_expr = get_trading_date_expression(symbol)
+        else:
+            # Session specified - use calendar dates, time filtering done separately
+            timestamp_filter = f"""timestamp >= {safe_start}
+      AND timestamp < {safe_end}"""
+            trading_date_expr = "timestamp::date"
+
+        return timestamp_filter, trading_date_expr
 
     def build_query(
         self,
@@ -62,46 +111,49 @@ class FindExtremumOpBuilder(SpecialOpBuilder):
         symbol = spec.symbol
         period_start = spec.filters.period_start
         period_end = spec.filters.period_end
+        session = spec.filters.session
+        time_start = spec.filters.time_start
 
         if find == "high":
-            return self._build_high_query(symbol, period_start, period_end, extra_filters_sql)
+            return self._build_high_query(symbol, period_start, period_end, session, time_start, extra_filters_sql)
         elif find == "low":
-            return self._build_low_query(symbol, period_start, period_end, extra_filters_sql)
+            return self._build_low_query(symbol, period_start, period_end, session, time_start, extra_filters_sql)
         elif find == "open":
-            return self._build_open_query(symbol, period_start, period_end, extra_filters_sql)
+            return self._build_open_query(symbol, period_start, period_end, session, time_start, extra_filters_sql)
         elif find == "close":
-            return self._build_close_query(symbol, period_start, period_end, extra_filters_sql)
+            return self._build_close_query(symbol, period_start, period_end, session, time_start, extra_filters_sql)
         elif find == "max_volume":
-            return self._build_max_volume_query(symbol, period_start, period_end, extra_filters_sql)
+            return self._build_max_volume_query(symbol, period_start, period_end, session, time_start, extra_filters_sql)
         elif find == "both":
-            return self._build_both_query(symbol, period_start, period_end, extra_filters_sql)
+            return self._build_both_query(symbol, period_start, period_end, session, time_start, extra_filters_sql)
         elif find == "ohlc":
-            return self._build_ohlc_query(symbol, period_start, period_end, extra_filters_sql)
+            return self._build_ohlc_query(symbol, period_start, period_end, session, time_start, extra_filters_sql)
         else:  # all
-            return self._build_all_query(symbol, period_start, period_end, extra_filters_sql)
+            return self._build_all_query(symbol, period_start, period_end, session, time_start, extra_filters_sql)
 
     def _build_high_query(
         self,
         symbol: str,
         period_start: str,
         period_end: str,
+        session: str | None,
+        time_start: str | None,
         extra_filters_sql: str
     ) -> str:
         """Запрос для поиска только HIGH."""
-        # Валидация входных данных
         safe_symbol = safe_sql_symbol(symbol)
-        safe_start = safe_sql_date(period_start)
-        safe_end = safe_sql_date(period_end)
+        timestamp_filter, trading_date_expr = self._get_trading_day_filter(
+            symbol, period_start, period_end, session, time_start
+        )
 
         return f"""WITH filtered_data AS (
     SELECT
         timestamp,
-        timestamp::date as date,
+        ({trading_date_expr})::date as date,
         high
     FROM {OHLCV_TABLE}
     WHERE symbol = {safe_symbol}
-      AND timestamp >= {safe_start}
-      AND timestamp < {safe_end}
+      AND {timestamp_filter}
       {extra_filters_sql}
 ),
 daily_highs AS (
@@ -125,23 +177,24 @@ ORDER BY date"""
         symbol: str,
         period_start: str,
         period_end: str,
+        session: str | None,
+        time_start: str | None,
         extra_filters_sql: str
     ) -> str:
         """Запрос для поиска только LOW."""
-        # Валидация входных данных
         safe_symbol = safe_sql_symbol(symbol)
-        safe_start = safe_sql_date(period_start)
-        safe_end = safe_sql_date(period_end)
+        timestamp_filter, trading_date_expr = self._get_trading_day_filter(
+            symbol, period_start, period_end, session, time_start
+        )
 
         return f"""WITH filtered_data AS (
     SELECT
         timestamp,
-        timestamp::date as date,
+        ({trading_date_expr})::date as date,
         low
     FROM {OHLCV_TABLE}
     WHERE symbol = {safe_symbol}
-      AND timestamp >= {safe_start}
-      AND timestamp < {safe_end}
+      AND {timestamp_filter}
       {extra_filters_sql}
 ),
 daily_lows AS (
@@ -165,24 +218,25 @@ ORDER BY date"""
         symbol: str,
         period_start: str,
         period_end: str,
+        session: str | None,
+        time_start: str | None,
         extra_filters_sql: str
     ) -> str:
         """Запрос для поиска HIGH и LOW."""
-        # Валидация входных данных
         safe_symbol = safe_sql_symbol(symbol)
-        safe_start = safe_sql_date(period_start)
-        safe_end = safe_sql_date(period_end)
+        timestamp_filter, trading_date_expr = self._get_trading_day_filter(
+            symbol, period_start, period_end, session, time_start
+        )
 
         return f"""WITH filtered_data AS (
     SELECT
         timestamp,
-        timestamp::date as date,
+        ({trading_date_expr})::date as date,
         high,
         low
     FROM {OHLCV_TABLE}
     WHERE symbol = {safe_symbol}
-      AND timestamp >= {safe_start}
-      AND timestamp < {safe_end}
+      AND {timestamp_filter}
       {extra_filters_sql}
 ),
 daily_extremes AS (
@@ -209,22 +263,24 @@ ORDER BY date"""
         symbol: str,
         period_start: str,
         period_end: str,
+        session: str | None,
+        time_start: str | None,
         extra_filters_sql: str
     ) -> str:
         """Запрос для поиска времени OPEN (первая минутка)."""
         safe_symbol = safe_sql_symbol(symbol)
-        safe_start = safe_sql_date(period_start)
-        safe_end = safe_sql_date(period_end)
+        timestamp_filter, trading_date_expr = self._get_trading_day_filter(
+            symbol, period_start, period_end, session, time_start
+        )
 
         return f"""WITH filtered_data AS (
     SELECT
         timestamp,
-        timestamp::date as date,
+        ({trading_date_expr})::date as date,
         open
     FROM {OHLCV_TABLE}
     WHERE symbol = {safe_symbol}
-      AND timestamp >= {safe_start}
-      AND timestamp < {safe_end}
+      AND {timestamp_filter}
       {extra_filters_sql}
 ),
 daily_opens AS (
@@ -247,22 +303,24 @@ ORDER BY date"""
         symbol: str,
         period_start: str,
         period_end: str,
+        session: str | None,
+        time_start: str | None,
         extra_filters_sql: str
     ) -> str:
         """Запрос для поиска времени CLOSE (последняя минутка)."""
         safe_symbol = safe_sql_symbol(symbol)
-        safe_start = safe_sql_date(period_start)
-        safe_end = safe_sql_date(period_end)
+        timestamp_filter, trading_date_expr = self._get_trading_day_filter(
+            symbol, period_start, period_end, session, time_start
+        )
 
         return f"""WITH filtered_data AS (
     SELECT
         timestamp,
-        timestamp::date as date,
+        ({trading_date_expr})::date as date,
         close
     FROM {OHLCV_TABLE}
     WHERE symbol = {safe_symbol}
-      AND timestamp >= {safe_start}
-      AND timestamp < {safe_end}
+      AND {timestamp_filter}
       {extra_filters_sql}
 ),
 daily_closes AS (
@@ -285,22 +343,24 @@ ORDER BY date"""
         symbol: str,
         period_start: str,
         period_end: str,
+        session: str | None,
+        time_start: str | None,
         extra_filters_sql: str
     ) -> str:
         """Запрос для поиска минуты с MAX VOLUME."""
         safe_symbol = safe_sql_symbol(symbol)
-        safe_start = safe_sql_date(period_start)
-        safe_end = safe_sql_date(period_end)
+        timestamp_filter, trading_date_expr = self._get_trading_day_filter(
+            symbol, period_start, period_end, session, time_start
+        )
 
         return f"""WITH filtered_data AS (
     SELECT
         timestamp,
-        timestamp::date as date,
+        ({trading_date_expr})::date as date,
         volume
     FROM {OHLCV_TABLE}
     WHERE symbol = {safe_symbol}
-      AND timestamp >= {safe_start}
-      AND timestamp < {safe_end}
+      AND {timestamp_filter}
       {extra_filters_sql}
 ),
 daily_max_volume AS (
@@ -323,25 +383,27 @@ ORDER BY date"""
         symbol: str,
         period_start: str,
         period_end: str,
+        session: str | None,
+        time_start: str | None,
         extra_filters_sql: str
     ) -> str:
         """Запрос для поиска OPEN, HIGH, LOW, CLOSE времени."""
         safe_symbol = safe_sql_symbol(symbol)
-        safe_start = safe_sql_date(period_start)
-        safe_end = safe_sql_date(period_end)
+        timestamp_filter, trading_date_expr = self._get_trading_day_filter(
+            symbol, period_start, period_end, session, time_start
+        )
 
         return f"""WITH filtered_data AS (
     SELECT
         timestamp,
-        timestamp::date as date,
+        ({trading_date_expr})::date as date,
         open,
         high,
         low,
         close
     FROM {OHLCV_TABLE}
     WHERE symbol = {safe_symbol}
-      AND timestamp >= {safe_start}
-      AND timestamp < {safe_end}
+      AND {timestamp_filter}
       {extra_filters_sql}
 ),
 daily_ohlc AS (
@@ -376,17 +438,20 @@ ORDER BY date"""
         symbol: str,
         period_start: str,
         period_end: str,
+        session: str | None,
+        time_start: str | None,
         extra_filters_sql: str
     ) -> str:
         """Запрос для поиска всех событий: OPEN, HIGH, LOW, CLOSE, MAX_VOLUME."""
         safe_symbol = safe_sql_symbol(symbol)
-        safe_start = safe_sql_date(period_start)
-        safe_end = safe_sql_date(period_end)
+        timestamp_filter, trading_date_expr = self._get_trading_day_filter(
+            symbol, period_start, period_end, session, time_start
+        )
 
         return f"""WITH filtered_data AS (
     SELECT
         timestamp,
-        timestamp::date as date,
+        ({trading_date_expr})::date as date,
         open,
         high,
         low,
@@ -394,8 +459,7 @@ ORDER BY date"""
         volume
     FROM {OHLCV_TABLE}
     WHERE symbol = {safe_symbol}
-      AND timestamp >= {safe_start}
-      AND timestamp < {safe_end}
+      AND {timestamp_filter}
       {extra_filters_sql}
 ),
 daily_all AS (

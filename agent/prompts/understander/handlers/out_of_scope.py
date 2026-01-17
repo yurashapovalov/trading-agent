@@ -31,19 +31,19 @@ Return JSON:
 </task>"""
 
 EXAMPLES = """
-Question: "Покажи RSI для NQ"
+Question: "Show RSI for NQ"
 ```json
 {
   "type": "out_of_scope",
-  "response_text": "Технические индикаторы (RSI, MACD и др.) пока недоступны. Могу помочь с анализом OHLCV данных: статистика по периодам, время формирования high/low, анализ гэпов, сравнение сессий."
+  "response_text": "Technical indicators (RSI, MACD, etc.) are not available yet. I can help with OHLCV data analysis: statistics by period, time of high/low formation, gap analysis, session comparisons."
 }
 ```
 
-Question: "Какая будет цена завтра?"
+Question: "What will the price be tomorrow?"
 ```json
 {
   "type": "out_of_scope",
-  "response_text": "Прогнозы цен не делаю. Могу показать исторические данные: статистику, паттерны, распределения. Например, когда обычно формируется high дня или какая средняя волатильность по месяцам."
+  "response_text": "I don't make price predictions. I can show historical data: statistics, patterns, distributions. For example, when the daily high typically forms or average volatility by month."
 }
 ```
 """

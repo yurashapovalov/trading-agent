@@ -26,7 +26,7 @@ Return JSON:
 </task>"""
 
 EXAMPLES = """
-Question: "Что такое гэп?"
+Question: "What is a gap?"
 ```json
 {
   "type": "concept",
@@ -34,7 +34,7 @@ Question: "Что такое гэп?"
 }
 ```
 
-Question: "Что означает RTH?"
+Question: "What does RTH mean?"
 ```json
 {
   "type": "concept",
@@ -42,7 +42,7 @@ Question: "Что означает RTH?"
 }
 ```
 
-Question: "Что такое range?"
+Question: "What is range?"
 ```json
 {
   "type": "concept",

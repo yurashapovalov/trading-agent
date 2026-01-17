@@ -81,6 +81,7 @@ class Analyst:
         intent = state.get("intent") or {}
         intent_type = intent.get("type", "data")
         holiday_info = intent.get("holiday_info")  # From Understander if dates are holidays
+        assumptions = intent.get("assumptions")  # From Understander if defaults were used
 
         # Check if rewrite needed
         validation = state.get("validation") or {}
@@ -105,6 +106,7 @@ class Analyst:
                 data=data,
                 chat_history=chat_history,
                 holiday_info=holiday_info,
+                assumptions=assumptions,
             )
             return self._generate_with_streaming(prompt, writer, state)
         else:
@@ -117,6 +119,7 @@ class Analyst:
                 issues=issues,
                 chat_history=chat_history,
                 holiday_info=holiday_info,
+                assumptions=assumptions,
             )
             return self._generate_batch(prompt, state)
 

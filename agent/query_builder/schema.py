@@ -32,10 +32,10 @@ from .types import (
 
 
 # =============================================================================
-# Маппинг SpecialOp -> Spec класс
+# SpecialOp -> Spec class mapping
 # =============================================================================
 
-# Связь между SpecialOp и соответствующим Spec классом
+# Mapping between SpecialOp and corresponding Spec class
 SPECIAL_OP_SPECS = {
     SpecialOp.EVENT_TIME: EventTimeSpec,
     SpecialOp.TOP_N: TopNSpec,
@@ -45,41 +45,73 @@ SPECIAL_OP_SPECS = {
 
 
 # =============================================================================
-# Генерация enum значений
+# Enum value generation
 # =============================================================================
 
 def get_enum_values(enum_class: type[Enum]) -> list[str]:
-    """Получить список строковых значений из Enum."""
+    """Get list of string values from Enum."""
     return [e.value for e in enum_class]
 
 
 def get_source_values() -> list[str]:
-    """Получить список значений Source enum."""
+    """Get list of Source enum values."""
     return get_enum_values(Source)
 
 
 def get_grouping_values() -> list[str]:
-    """Получить список значений Grouping enum."""
+    """Get list of Grouping enum values."""
     return get_enum_values(Grouping)
 
 
 def get_special_op_values() -> list[str]:
-    """Получить список значений SpecialOp enum."""
+    """Get list of SpecialOp enum values."""
     return get_enum_values(SpecialOp)
 
 
 def get_metric_values() -> list[str]:
-    """Получить список значений Metric enum."""
+    """Get list of Metric enum values."""
     return get_enum_values(Metric)
 
 
+def get_symbol_values() -> list[str]:
+    """
+    Get list of available symbols from DB.
+
+    Single Source of Truth - actual data.
+    """
+    from agent.modules.sql import get_available_symbols
+
+    symbols = get_available_symbols()
+    return symbols if symbols else ["NQ"]  # Fallback to NQ
+
+
+def get_session_values() -> list[str]:
+    """
+    Get list of available sessions from instruments.py.
+
+    Collects unique sessions from all instruments.
+    Includes "_default_" marker for cases when user implies but doesn't specify.
+    Single Source of Truth - instruments.py.
+    """
+    from .instruments import INSTRUMENTS
+
+    sessions = set()
+    for instrument in INSTRUMENTS.values():
+        sessions.update(instrument.get("sessions", {}).keys())
+
+    # Sort for consistent ordering, add _default_ marker
+    result = sorted(sessions)
+    result.append("_default_")  # Marker: user implied but didn't specify which session
+    return result
+
+
 # =============================================================================
-# Маппинг string -> Enum
+# String -> Enum mapping
 # =============================================================================
 
 def get_special_op_map() -> dict[str, SpecialOp]:
     """
-    Автоматически генерирует маппинг строка -> SpecialOp.
+    Auto-generate string -> SpecialOp mapping.
 
     Returns:
         {"none": SpecialOp.NONE, "event_time": SpecialOp.EVENT_TIME, ...}
@@ -88,18 +120,18 @@ def get_special_op_map() -> dict[str, SpecialOp]:
 
 
 def get_source_map() -> dict[str, Source]:
-    """Автоматически генерирует маппинг строка -> Source."""
+    """Auto-generate string -> Source mapping."""
     return {s.value: s for s in Source}
 
 
 def get_grouping_map() -> dict[str, Grouping]:
-    """Автоматически генерирует маппинг строка -> Grouping."""
+    """Auto-generate string -> Grouping mapping."""
     return {g.value: g for g in Grouping}
 
 
 def get_metric_map() -> dict[str, Metric]:
     """
-    Автоматически генерирует маппинг строка -> Metric.
+    Auto-generate string -> Metric mapping.
 
     Returns:
         {"open": Metric.OPEN, "high": Metric.HIGH, "count": Metric.COUNT, ...}
@@ -108,11 +140,11 @@ def get_metric_map() -> dict[str, Metric]:
 
 
 # =============================================================================
-# Генерация JSON Schema из dataclass
+# JSON Schema generation from dataclass
 # =============================================================================
 
 def _python_type_to_json_schema(python_type) -> dict:
-    """Конвертирует Python тип в JSON Schema."""
+    """Convert Python type to JSON Schema."""
     origin = get_origin(python_type)
 
     # Literal["high", "low", "both"] -> {"type": "string", "enum": [...]}
@@ -133,7 +165,7 @@ def _python_type_to_json_schema(python_type) -> dict:
             "items": _python_type_to_json_schema(item_type)
         }
 
-    # Базовые типы
+    # Basic types
     if python_type is str:
         return {"type": "string"}
     elif python_type is int:
@@ -149,13 +181,13 @@ def _python_type_to_json_schema(python_type) -> dict:
 
 def generate_spec_schema(spec_class: type) -> dict:
     """
-    Генерирует JSON Schema из dataclass.
+    Generate JSON Schema from dataclass.
 
     Args:
-        spec_class: Dataclass (EventTimeSpec, TopNSpec, и т.д.)
+        spec_class: Dataclass (EventTimeSpec, TopNSpec, etc.)
 
     Returns:
-        JSON Schema для этого класса
+        JSON Schema for this class
     """
     if not is_dataclass(spec_class):
         raise ValueError(f"{spec_class} is not a dataclass")
@@ -174,26 +206,26 @@ def generate_spec_schema(spec_class: type) -> dict:
 
 
 # =============================================================================
-# Полная Query Spec Schema
+# Full Query Spec Schema
 # =============================================================================
 
 def get_query_spec_schema() -> dict:
     """
-    Генерирует полную JSON Schema для query_spec.
+    Generate full JSON Schema for query_spec.
 
-    Автоматически включает:
-    - symbol: trading instrument (NQ, ES, CL)
-    - source enum из Source
-    - grouping enum из Grouping
-    - special_op enum из SpecialOp
-    - *_spec schemas из соответствующих dataclass'ов
+    Automatically includes:
+    - symbol: trading instrument
+    - source enum from Source
+    - grouping enum from Grouping
+    - special_op enum from SpecialOp
+    - *_spec schemas from corresponding dataclasses
     """
     schema = {
         "type": "object",
         "properties": {
             "symbol": {
                 "type": "string",
-                "enum": ["NQ", "ES", "CL"],
+                "enum": get_symbol_values(),
                 "description": "Trading instrument symbol"
             },
             "source": {
@@ -208,40 +240,35 @@ def get_query_spec_schema() -> dict:
                     "specific_dates": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "Конкретные даты: ['2005-05-16', '2003-04-12']"
+                        "description": "Specific dates: ['2005-05-16', '2003-04-12']"
                     },
                     "years": {
                         "type": "array",
                         "items": {"type": "integer"},
-                        "description": "Конкретные годы: [2020, 2022, 2024]"
+                        "description": "Specific years: [2020, 2022, 2024]"
                     },
                     "months": {
                         "type": "array",
                         "items": {"type": "integer"},
-                        "description": "Месяцы (1-12): [1, 6] для января и июня"
+                        "description": "Months (1-12): [1, 6] for January and June"
                     },
                     "weekdays": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "Дни недели: ['Monday', 'Friday']"
+                        "description": "Weekdays: ['Monday', 'Friday']"
                     },
                     "session": {
                         "type": "string",
-                        "enum": [
-                            "RTH", "ETH", "OVERNIGHT", "GLOBEX",
-                            "ASIAN", "EUROPEAN",
-                            "MORNING", "AFTERNOON",
-                            "RTH_OPEN", "RTH_CLOSE"
-                        ],
-                        "description": "Trading session filter"
+                        "enum": get_session_values(),
+                        "description": "Trading session filter (from instruments.py)"
                     },
                     "time_start": {
                         "type": "string",
-                        "description": "Начало кастомного времени: '06:00:00'"
+                        "description": "Custom time start: '06:00:00'"
                     },
                     "time_end": {
                         "type": "string",
-                        "description": "Конец кастомного времени: '16:00:00'"
+                        "description": "Custom time end: '16:00:00'"
                     },
                     "conditions": {
                         "type": "array",
@@ -278,7 +305,7 @@ def get_query_spec_schema() -> dict:
         }
     }
 
-    # Добавляем spec schemas для каждого special_op
+    # Add spec schemas for each special_op
     for special_op, spec_class in SPECIAL_OP_SPECS.items():
         spec_name = f"{special_op.value}_spec"
         schema["properties"][spec_name] = generate_spec_schema(spec_class)
@@ -288,9 +315,9 @@ def get_query_spec_schema() -> dict:
 
 def get_response_schema() -> dict:
     """
-    Генерирует полную JSON Schema для ответа Understander.
+    Generate full JSON Schema for Understander response.
 
-    Включает query_spec и другие поля.
+    Includes query_spec and other fields.
     """
     return {
         "type": "object",
@@ -313,31 +340,31 @@ def get_response_schema() -> dict:
 
 
 # =============================================================================
-# Утилиты для парсинга spec
+# Spec parsing utilities
 # =============================================================================
 
 def get_spec_class_for_op(special_op: SpecialOp) -> type | None:
     """
-    Возвращает класс Spec для данного SpecialOp.
+    Return Spec class for given SpecialOp.
 
     Args:
         special_op: SpecialOp enum value
 
     Returns:
-        Класс (EventTimeSpec, TopNSpec, и т.д.) или None
+        Class (EventTimeSpec, TopNSpec, etc.) or None
     """
     return SPECIAL_OP_SPECS.get(special_op)
 
 
 def get_spec_field_name(special_op: SpecialOp) -> str | None:
     """
-    Возвращает имя поля в JSON для данного SpecialOp.
+    Return JSON field name for given SpecialOp.
 
     Args:
         special_op: SpecialOp enum value
 
     Returns:
-        Имя поля ("event_time_spec", "top_n_spec", и т.д.) или None
+        Field name ("event_time_spec", "top_n_spec", etc.) or None
     """
     if special_op in SPECIAL_OP_SPECS:
         return f"{special_op.value}_spec"
@@ -346,16 +373,16 @@ def get_spec_field_name(special_op: SpecialOp) -> str | None:
 
 def parse_spec(special_op: SpecialOp, query_spec: dict) -> object | None:
     """
-    Автоматически парсит spec из JSON для данного SpecialOp.
+    Auto-parse spec from JSON for given SpecialOp.
 
-    Использует dataclass introspection для извлечения полей и дефолтов.
+    Uses dataclass introspection to extract fields and defaults.
 
     Args:
         special_op: SpecialOp enum value
-        query_spec: JSON dict с query_spec от LLM
+        query_spec: JSON dict with query_spec from LLM
 
     Returns:
-        Объект spec (EventTimeSpec, TopNSpec, и т.д.) или None
+        Spec object (EventTimeSpec, TopNSpec, etc.) or None
 
     Example:
         >>> parse_spec(SpecialOp.EVENT_TIME, {"event_time_spec": {"find": "low"}})
@@ -368,7 +395,7 @@ def parse_spec(special_op: SpecialOp, query_spec: dict) -> object | None:
     spec_field_name = f"{special_op.value}_spec"
     spec_data = query_spec.get(spec_field_name, {})
 
-    # Получаем дефолты из dataclass
+    # Get defaults from dataclass
     type_hints = get_type_hints(spec_class)
     kwargs = {}
 
@@ -376,24 +403,24 @@ def parse_spec(special_op: SpecialOp, query_spec: dict) -> object | None:
         field_name = field.name
         field_type = type_hints.get(field_name, str)
 
-        # Получаем значение из JSON или используем дефолт
+        # Get value from JSON or use default
         if field_name in spec_data:
             kwargs[field_name] = spec_data[field_name]
         elif field.default is not field.default_factory:
-            # Есть явный дефолт
+            # Has explicit default
             if field.default is not dataclass_field_missing:
                 kwargs[field_name] = field.default
             elif field.default_factory is not dataclass_field_missing:
                 kwargs[field_name] = field.default_factory()
         else:
-            # Нет дефолта — используем разумное значение
+            # No default - use reasonable value
             kwargs[field_name] = _get_default_for_type(field_type)
 
     return spec_class(**kwargs)
 
 
 def _get_default_for_type(field_type) -> object:
-    """Возвращает дефолтное значение для типа."""
+    """Return default value for type."""
     origin = get_origin(field_type)
 
     if origin is Literal:
@@ -415,12 +442,12 @@ def _get_default_for_type(field_type) -> object:
     return None
 
 
-# Для проверки отсутствия дефолта
+# For checking missing default
 from dataclasses import MISSING as dataclass_field_missing
 
 
 # =============================================================================
-# Для отладки и тестирования
+# Debug and testing
 # =============================================================================
 
 if __name__ == "__main__":

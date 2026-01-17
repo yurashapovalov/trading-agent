@@ -25,6 +25,7 @@ You must respond in the same language as the user's question.
 7. If the analysis reveals non-obvious patterns or actionable observations, add 1-2 brief trading insights. Skip if the answer is straightforward.
 8. For volatility/range statistics over long periods, briefly note that holidays and early-close days are included and may affect the results. Mention user can request excluding them if needed.
 9. TRUNCATED DATA: If data has "truncated": true, you're seeing only a sample (check "showing" vs "row_count", "summary_note" explains sorting). You can only analyze visible rows. At the START say: "Показано X из Y строк. Полная таблица доступна в интерфейсе." At the END of your analysis add a disclaimer: "⚠️ Выводы основаны на выборке (топ-N). Для полной картины рекомендуется изучить все данные." Do NOT claim data is missing.
+10. TIMEZONE: All times in the data are in ET (Eastern Time). Always add "ET" label when mentioning times (e.g., "09:30 ET", not just "09:30"). For CME instruments (NQ, ES), traders often think in CT (Central Time, 1 hour behind ET), so mentioning ET helps avoid confusion.
 </constraints>
 
 <output_format>
@@ -170,6 +171,7 @@ def get_analyst_prompt(
     chat_history: list = None,
     search_condition: str = None,
     holiday_info: dict = None,
+    assumptions: list = None,
 ) -> str:
     """
     Build complete prompt for Analyst.
@@ -183,6 +185,7 @@ def get_analyst_prompt(
         chat_history: Previous messages for context
         search_condition: Natural language condition for filtering data
         holiday_info: Info about holidays in requested dates (from Understander)
+        assumptions: List of assumptions made by Understander (for transparency)
 
     Returns:
         Complete prompt string
@@ -196,6 +199,12 @@ def get_analyst_prompt(
         for msg in chat_history[-config.CHAT_HISTORY_LIMIT:]:
             role = "User" if msg.get("role") == "user" else "Assistant"
             history_str += f"{role}: {msg.get('content', '')}\n"
+
+    # Format assumptions context if present
+    assumptions_context = ""
+    if assumptions:
+        assumptions_list = "\n".join(f"- {a['display_ru']}" for a in assumptions)
+        assumptions_context = f"\n\n<assumptions>\nThe following defaults were used (user didn't specify explicitly):\n{assumptions_list}\n\nIMPORTANT: Mention these assumptions in your response so user knows what was used. Example: \"Данные по RTH сессии (09:30-17:00 ET). Если нужна другая сессия — уточните.\"\n</assumptions>"
 
     # Format holiday context if present
     holiday_context = ""
@@ -237,14 +246,14 @@ def get_analyst_prompt(
             data=json.dumps(data, indent=2, default=str),
             search_condition=search_condition,
             question=question,
-        ) + holiday_context
+        ) + assumptions_context + holiday_context
 
     # Data (default)
     return SYSTEM_PROMPT + "\n" + USER_PROMPT_DATA.format(
         chat_history=history_str,
         data=json.dumps(data, indent=2, default=str),
         question=question,
-    ) + holiday_context
+    ) + assumptions_context + holiday_context
 
 
 # =============================================================================
@@ -265,6 +274,7 @@ You must respond in the same language as the user's question.
 6. Write plain markdown text - do NOT use JSON format
 7. For volatility/range statistics over long periods, briefly note that holidays and early-close days are included and may affect the results. Mention user can request excluding them if needed.
 8. TRUNCATED DATA: If data has "truncated": true, you're seeing only a sample (check "showing" vs "row_count", "summary_note" explains sorting). You can only analyze visible rows. At the START say: "Показано X из Y строк. Полная таблица доступна в интерфейсе." At the END of your analysis add a disclaimer: "⚠️ Выводы основаны на выборке (топ-N). Для полной картины рекомендуется изучить все данные." Do NOT claim data is missing.
+9. TIMEZONE: All times in the data are in ET (Eastern Time). Always add "ET" label when mentioning times (e.g., "09:30 ET", not just "09:30"). For CME instruments (NQ, ES), traders often think in CT (Central Time, 1 hour behind ET), so mentioning ET helps avoid confusion.
 </constraints>
 """
 
@@ -275,6 +285,7 @@ def get_analyst_prompt_streaming(
     chat_history: list = None,
     search_condition: str = None,
     holiday_info: dict = None,
+    assumptions: list = None,
 ) -> str:
     """
     Build prompt for streaming mode (plain markdown, no JSON).
@@ -291,6 +302,12 @@ def get_analyst_prompt_streaming(
         for msg in chat_history[-config.CHAT_HISTORY_LIMIT:]:
             role = "User" if msg.get("role") == "user" else "Assistant"
             history_str += f"{role}: {msg.get('content', '')}\n"
+
+    # Format assumptions context if present
+    assumptions_context = ""
+    if assumptions:
+        assumptions_list = "\n".join(f"- {a['display_ru']}" for a in assumptions)
+        assumptions_context = f"\n\n<assumptions>\nThe following defaults were used (user didn't specify explicitly):\n{assumptions_list}\n\nIMPORTANT: Mention these assumptions in your response so user knows what was used. Example: \"Данные по RTH сессии (09:30-17:00 ET). Если нужна другая сессия — уточните.\"\n</assumptions>"
 
     # Format holiday context if present
     holiday_context = ""
@@ -321,4 +338,4 @@ def get_analyst_prompt_streaming(
         question=question,
     )
 
-    return prompt + task_suffix + holiday_context
+    return prompt + task_suffix + assumptions_context + holiday_context

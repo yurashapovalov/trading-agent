@@ -17,19 +17,19 @@ Return JSON:
 </task>"""
 
 EXAMPLES = """
-Question: "Привет!"
+Question: "Hello!"
 ```json
 {
   "type": "chitchat",
-  "response_text": "Привет! Готов помочь с анализом торговых данных. Что хочешь узнать?"
+  "response_text": "Hello! Ready to help with trading data analysis. What would you like to know?"
 }
 ```
 
-Question: "Спасибо за помощь"
+Question: "Thanks for the help"
 ```json
 {
   "type": "chitchat",
-  "response_text": "Пожалуйста! Обращайся, если будут ещё вопросы по данным."
+  "response_text": "You're welcome! Feel free to ask if you have more questions about the data."
 }
 ```
 """

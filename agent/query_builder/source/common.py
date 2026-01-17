@@ -14,7 +14,7 @@ from agent.query_builder.sql_utils import (
     safe_sql_symbol,
     safe_sql_date,
 )
-from agent.query_builder.instruments import get_instrument
+from agent.query_builder.instruments import get_instrument, get_trading_day_boundaries
 
 # Название таблицы с минутными данными (единая точка изменения)
 OHLCV_TABLE = "ohlcv_1min"
@@ -67,6 +67,12 @@ def build_daily_aggregation_sql(symbol: str, period_start: str, period_end: str)
     Uses trading_date (not calendar date) for futures instruments.
     This correctly groups bars that belong to the same trading session.
 
+    Trading Day Logic:
+        For futures: trading day D = (D-1) at trading_day_start → D at trading_day_end
+        Example: May 16 trading day = May 15 18:00 ET → May 16 17:00 ET
+        The WHERE clause uses trading day boundaries to include all bars
+        that belong to the requested trading days.
+
     Это базовый CTE который используется в:
     - daily.py (Source.DAILY)
     - daily_with_prev.py (Source.DAILY_WITH_PREV)
@@ -92,6 +98,26 @@ def build_daily_aggregation_sql(symbol: str, period_start: str, period_end: str)
     # Get trading date expression for this instrument
     trading_date_expr = get_trading_date_expression(symbol)
 
+    # Get trading day boundaries for timestamp filtering
+    trading_bounds = get_trading_day_boundaries(symbol)
+
+    if trading_bounds:
+        # Use trading day boundaries instead of calendar dates
+        day_start, day_end = trading_bounds  # e.g., ("18:00", "17:00")
+
+        # Normalize times to HH:MM:SS
+        day_start_time = day_start if len(day_start.split(":")) == 3 else f"{day_start}:00"
+        day_end_time = day_end if len(day_end.split(":")) == 3 else f"{day_end}:00"
+
+        # DuckDB: (date - interval)::date + time::time -> timestamp
+        # Cast back to date before adding time to avoid TIMESTAMP + TIME error
+        timestamp_filter = f"""timestamp >= (({safe_start}::date - INTERVAL '1 day')::date + '{day_start_time}'::time)
+      AND timestamp < (({safe_end}::date - INTERVAL '1 day')::date + '{day_end_time}'::time)"""
+    else:
+        # Fallback to calendar dates
+        timestamp_filter = f"""timestamp >= {safe_start}
+      AND timestamp < {safe_end}"""
+
     return f"""daily_raw AS (
     SELECT
         ({trading_date_expr})::date as date,
@@ -116,7 +142,6 @@ def build_daily_aggregation_sql(symbol: str, period_start: str, period_end: str)
         ROUND(LEAST(FIRST(open ORDER BY timestamp), LAST(close ORDER BY timestamp)) - MIN(low), 2) as lower_wick
     FROM {OHLCV_TABLE}
     WHERE symbol = {safe_symbol}
-      AND timestamp >= {safe_start}
-      AND timestamp < {safe_end}
+      AND {timestamp_filter}
     GROUP BY ({trading_date_expr})::date
 )"""

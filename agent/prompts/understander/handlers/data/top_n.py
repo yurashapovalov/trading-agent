@@ -17,15 +17,15 @@ Key decisions:
 4. **grouping**: "none" (return individual days)
 
 Common patterns:
-- "самые волатильные" → order_by: "range", direction: "DESC"
-- "самые большие падения" → order_by: "change_pct", direction: "ASC"
-- "самые большие гэпы вверх" → order_by: "gap_pct", direction: "DESC"
+- "most volatile" → order_by: "range", direction: "DESC"
+- "biggest drops" → order_by: "change_pct", direction: "ASC"
+- "biggest gap ups" → order_by: "gap_pct", direction: "DESC"
 
 Return JSON with type: "data" and query_spec.
 </task>"""
 
 EXAMPLES = """
-Question: "Топ 10 самых волатильных дней"
+Question: "Top 10 most volatile days"
 ```json
 {
   "type": "data",
@@ -48,7 +48,7 @@ Question: "Топ 10 самых волатильных дней"
 }
 ```
 
-Question: "5 самых больших падений за 2024"
+Question: "5 biggest drops in 2024"
 ```json
 {
   "type": "data",
@@ -72,7 +72,7 @@ Question: "5 самых больших падений за 2024"
 }
 ```
 
-Question: "Топ 10 гэпов вверх"
+Question: "Top 10 gap ups"
 ```json
 {
   "type": "data",

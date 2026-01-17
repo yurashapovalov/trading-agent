@@ -28,63 +28,78 @@ class QueryType(Enum):
     DATA_FIND_EXTREMUM = "data.find_extremum"
 
 
-CLASSIFIER_PROMPT = """Classify the trading data question into exactly one type.
-
-Domain: Trading futures data (NQ, ES, CL) with OHLCV bars.
-Available columns: open, high, low, close, volume, range, change_pct, gap_pct,
-close_to_low, close_to_high, open_to_high, open_to_low, body.
-Any question about filtering by these columns or their relationships = data.filter
-
-Types:
-- chitchat: greetings, thanks, small talk ("привет", "спасибо", "пока")
-- concept: asking what something means ("что такое гэп?", "что такое RTH?")
-- out_of_scope: technical indicators, backtesting, predictions ("покажи RSI", "какой будет цена завтра")
-- clarification: unclear or ambiguous request ("покажи данные", "high low")
-- data.simple: basic statistics for a period ("статистика за январь", "средняя волатильность 2024")
-- data.filter: find days matching condition ("дни когда упало > 2%", "дни с гэпом", "пятницы где low ниже close")
-- data.event_time: when does event USUALLY occur - distribution ("когда обычно формируется high?", "в какое время чаще low?")
-- data.find_extremum: when WAS event on specific date ("во сколько был high вчера?", "когда открылась сессия 20 ноября?", "во сколько закрылся рынок?")
-- data.top_n: top N days by metric ("топ 10 волатильных дней", "5 самых больших гэпов")
-- data.compare: compare sessions, periods, weekdays ("сравни RTH vs ETH", "понедельник vs пятница")
-
-Key distinction:
-- data.event_time = PATTERN over many days ("обычно", "как правило", "распределение")
-- data.find_extremum = EXACT time for specific date(s) ("вчера", "10 января", "во сколько открылась", "когда началась")
-
+CLASSIFIER_PROMPT = """<task>
+Classify the trading data question into exactly one type.
 Return JSON: {{"type": "<type>"}}
+</task>
+
+<domain>
+Trading futures data (NQ) with OHLCV minute bars.
+Columns: open, high, low, close, volume, range, change_pct, gap_pct,
+close_to_low, close_to_high, open_to_high, open_to_low, body.
+</domain>
+
+<types>
+| Type | Description | Examples |
+|------|-------------|----------|
+| chitchat | greetings, thanks, small talk | "hello", "thanks" |
+| concept | asking what term means | "what is a gap?", "what is RTH?" |
+| out_of_scope | indicators, predictions | "show RSI", "price tomorrow" |
+| clarification | unclear request | "show data", "high low" |
+| data.simple | basic statistics | "stats for January", "average volatility" |
+| data.filter | days matching condition | "days when dropped > 2%", "days with gap" |
+| data.event_time | PATTERN distribution | "when is high usually?", "what time is low typically?" |
+| data.find_extremum | EXACT time on date | "what time was high yesterday?", "when did session open?" |
+| data.top_n | top N by metric | "top 10 volatile days", "5 biggest gaps" |
+| data.compare | compare categories | "RTH vs ETH", "Monday vs Friday" |
+</types>
+
+<key_distinction>
+event_time vs find_extremum:
+- event_time = PATTERN ("usually", "typically", "distribution")
+- find_extremum = EXACT time ("yesterday", "Jan 10", "when did session open")
+</key_distinction>
 
 Question: {question}
 """
 
 
-CLASSIFIER_PROMPT_WITH_HISTORY = """Classify the trading data question into exactly one type.
-Consider the chat history for context.
-
-Domain: Trading futures data (NQ, ES, CL) with OHLCV bars.
-Available columns: open, high, low, close, volume, range, change_pct, gap_pct,
-close_to_low, close_to_high, open_to_high, open_to_low, body.
-Any question about filtering by these columns or their relationships = data.filter
-
-Types:
-- chitchat: greetings, thanks, small talk ("привет", "спасибо", "пока")
-- concept: asking what something means ("что такое гэп?", "что такое RTH?")
-- out_of_scope: technical indicators, backtesting, predictions ("покажи RSI", "какой будет цена завтра")
-- clarification: unclear or ambiguous request ("покажи данные", "high low")
-- data.simple: basic statistics for a period ("статистика за январь", "средняя волатильность 2024")
-- data.filter: find days matching condition ("дни когда упало > 2%", "дни с гэпом", "пятницы где low ниже close")
-- data.event_time: when does event USUALLY occur - distribution ("когда обычно формируется high?", "в какое время чаще low?")
-- data.find_extremum: when WAS event on specific date ("во сколько был high вчера?", "когда открылась сессия 20 ноября?", "во сколько закрылся рынок?")
-- data.top_n: top N days by metric ("топ 10 волатильных дней", "5 самых больших гэпов")
-- data.compare: compare sessions, periods, weekdays ("сравни RTH vs ETH", "понедельник vs пятница")
-
-Key distinction:
-- data.event_time = PATTERN over many days ("обычно", "как правило", "распределение")
-- data.find_extremum = EXACT time for specific date(s) ("вчера", "10 января", "во сколько открылась", "когда началась")
-
-Chat history:
-{chat_history}
-
+CLASSIFIER_PROMPT_WITH_HISTORY = """<task>
+Classify the trading data question into exactly one type.
+Consider chat history for context (follow-up questions).
 Return JSON: {{"type": "<type>"}}
+</task>
+
+<domain>
+Trading futures data (NQ) with OHLCV minute bars.
+Columns: open, high, low, close, volume, range, change_pct, gap_pct,
+close_to_low, close_to_high, open_to_high, open_to_low, body.
+</domain>
+
+<types>
+| Type | Description | Examples |
+|------|-------------|----------|
+| chitchat | greetings, thanks, small talk | "hello", "thanks" |
+| concept | asking what term means | "what is a gap?", "what is RTH?" |
+| out_of_scope | indicators, predictions | "show RSI", "price tomorrow" |
+| clarification | unclear request | "show data", "high low" |
+| data.simple | basic statistics | "stats for January", "average volatility" |
+| data.filter | days matching condition | "days when dropped > 2%", "days with gap" |
+| data.event_time | PATTERN distribution | "when is high usually?", "what time is low typically?" |
+| data.find_extremum | EXACT time on date | "what time was high yesterday?", "when did session open?" |
+| data.top_n | top N by metric | "top 10 volatile days", "5 biggest gaps" |
+| data.compare | compare categories | "RTH vs ETH", "Monday vs Friday" |
+</types>
+
+<key_distinction>
+event_time vs find_extremum:
+- event_time = PATTERN ("usually", "typically", "distribution")
+- find_extremum = EXACT time ("yesterday", "Jan 10", "when did session open")
+</key_distinction>
+
+<chat_history>
+{chat_history}
+</chat_history>
 
 Question: {question}
 """

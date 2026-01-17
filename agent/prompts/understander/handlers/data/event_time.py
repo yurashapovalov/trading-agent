@@ -9,9 +9,9 @@ HANDLER_PROMPT = """<task>
 User wants to know WHEN events typically occur — distribution over many days.
 
 This is about PATTERNS, not specific dates:
-- "когда обычно формируется high?" → distribution
-- "в какое время чаще всего low?" → distribution
-- "когда обычно открывается рынок?" → distribution of open times
+- "when does high usually form?" → distribution
+- "what time is low most often?" → distribution
+- "when does market usually open?" → distribution of open times
 
 Key decisions:
 1. **source**: Always "minutes" (need intraday data)
@@ -27,16 +27,24 @@ Key decisions:
 4. **grouping**: Time bucket for distribution
    - "1min" — most precise (default)
    - "5min", "15min", "30min", "hour" — if user asks for coarser
-5. **session**: If user specifies (RTH, ETH, etc.)
 
 CRITICAL: This returns FREQUENCY DISTRIBUTION, not exact timestamps.
 Result: time_bucket → how many days had event in that bucket.
 
 Return JSON with type: "data" and query_spec.
-</task>"""
+</task>
+
+<session_rule>
+IMPORTANT — Session field handling (see <markers> for details):
+- User explicitly says "RTH", "ETH", "OVERNIGHT" → session: "RTH" (or that name)
+- User says "session" without naming which one → session: "_default_"
+- User doesn't mention session at all → session: null
+
+DO NOT invent session names! Only use: RTH, ETH, OVERNIGHT, ASIAN, EUROPEAN, MORNING, AFTERNOON, or "_default_".
+</session_rule>"""
 
 EXAMPLES = """
-Question: "Когда обычно формируется high на RTH?"
+Question: "When does high usually form on RTH?"
 ```json
 {
   "type": "data",
@@ -56,7 +64,7 @@ Question: "Когда обычно формируется high на RTH?"
 }
 ```
 
-Question: "Распределение времени формирования high и low"
+Question: "Distribution of high and low formation times"
 ```json
 {
   "type": "data",
@@ -75,7 +83,7 @@ Question: "Распределение времени формирования hi
 }
 ```
 
-Question: "Когда формируется low по вторникам на RTH?"
+Question: "When does low form on Tuesdays during RTH?"
 ```json
 {
   "type": "data",
@@ -96,7 +104,7 @@ Question: "Когда формируется low по вторникам на RT
 }
 ```
 
-Question: "В какое время чаще формируется high? Покажи по 15-минуткам"
+Question: "What time does high usually form? Show in 15-min buckets"
 ```json
 {
   "type": "data",

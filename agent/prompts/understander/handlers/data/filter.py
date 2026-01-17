@@ -15,12 +15,12 @@ Key decisions:
    - months: [1, 6] — month numbers
    - years: [2020, 2024] — year numbers
 3. **conditions**: Extract the condition from question
-   - "упал больше 2%" → {"column": "change_pct", "operator": "<", "value": -2.0}
-   - "вырос больше 1%" → {"column": "change_pct", "operator": ">", "value": 1.0}
-   - "гэп вверх больше 0.5%" → {"column": "gap_pct", "operator": ">", "value": 0.5}
-   - "range больше 200" → {"column": "range", "operator": ">", "value": 200}
-   - "low ниже close на 200" → {"column": "close_to_low", "operator": ">=", "value": 200}
-   - "high выше close на 100" → {"column": "close_to_high", "operator": ">=", "value": 100}
+   - "dropped more than 2%" → {"column": "change_pct", "operator": "<", "value": -2.0}
+   - "gained more than 1%" → {"column": "change_pct", "operator": ">", "value": 1.0}
+   - "gap up more than 0.5%" → {"column": "gap_pct", "operator": ">", "value": 0.5}
+   - "range greater than 200" → {"column": "range", "operator": ">", "value": 200}
+   - "low below close by 200" → {"column": "close_to_low", "operator": ">=", "value": 200}
+   - "high above close by 100" → {"column": "close_to_high", "operator": ">=", "value": 100}
 4. **grouping**: "none" (return individual days)
 5. **metrics**: Include relevant columns
 
@@ -33,7 +33,7 @@ Return JSON with type: "data" and query_spec.
 </task>"""
 
 EXAMPLES = """
-Question: "Найди дни когда NQ упал больше 2%"
+Question: "Find days when NQ dropped more than 2%"
 ```json
 {
   "type": "data",
@@ -60,7 +60,7 @@ Question: "Найди дни когда NQ упал больше 2%"
 }
 ```
 
-Question: "Дни с гэпом вверх больше 1%"
+Question: "Days with gap up more than 1%"
 ```json
 {
   "type": "data",
@@ -85,8 +85,8 @@ Question: "Дни с гэпом вверх больше 1%"
 }
 ```
 
-Question: "Волатильные дни с range больше 300 пунктов за 2024"
-Note: "за 2024" means include all of 2024, so period_end = 2025-01-01 (first day AFTER 2024)
+Question: "Volatile days with range over 300 points in 2024"
+Note: "in 2024" means include all of 2024, so period_end = 2025-01-01 (first day AFTER 2024)
 ```json
 {
   "type": "data",
@@ -111,7 +111,7 @@ Note: "за 2024" means include all of 2024, so period_end = 2025-01-01 (first d
 }
 ```
 
-Question: "Пятницы за 2020-2025 у которых low был ниже close на 200 и более пунктов"
+Question: "Fridays in 2020-2025 where low was below close by 200 or more points"
 Note: "2020-2025" means include all of 2025, so period_end = 2026-01-01 (first day AFTER the range)
 ```json
 {

@@ -108,39 +108,15 @@ class Condition:
 # TRADING SESSIONS — торговые сессии
 # =============================================================================
 
-# Все временные интервалы в ET (Eastern Time)
-TRADING_SESSIONS = {
-    # Основные сессии
-    "RTH": ("09:30:00", "16:00:00"),       # Regular Trading Hours (основная)
-    "ETH": None,                            # Extended = всё кроме RTH (NOT BETWEEN)
-    "OVERNIGHT": ("18:00:00", "09:30:00"),  # Ночная сессия (crosses midnight)
-    "GLOBEX": ("18:00:00", "17:00:00"),     # Полная сессия CME Globex (почти 24ч)
+# Session times are defined per-instrument in instruments.py (Single Source of Truth)
+# This file only defines the type alias for type checking.
+#
+# To get session times, use:
+#   from agent.query_builder.instruments import get_session_times
+#   times = get_session_times("NQ", "RTH")  # → ("09:30", "17:00")
 
-    # Региональные сессии
-    "ASIAN": ("18:00:00", "03:00:00"),      # Азиатская сессия
-    "EUROPEAN": ("03:00:00", "09:30:00"),   # Европейская/Лондон сессия
-    "US": ("09:30:00", "16:00:00"),         # US сессия (= RTH)
-
-    # Части дня
-    "PREMARKET": ("04:00:00", "09:30:00"),  # Пре-маркет
-    "POSTMARKET": ("16:00:00", "20:00:00"), # Пост-маркет / after-hours
-    "MORNING": ("09:30:00", "12:00:00"),    # Утренняя сессия RTH
-    "AFTERNOON": ("12:00:00", "16:00:00"),  # Дневная сессия RTH
-    "LUNCH": ("12:00:00", "14:00:00"),      # Обеденное время (низкая активность)
-
-    # Открытия рынков (первый час)
-    "LONDON_OPEN": ("03:00:00", "04:00:00"),  # Открытие Лондона
-    "NY_OPEN": ("09:30:00", "10:30:00"),      # Открытие Нью-Йорка (первый час)
-    "NY_CLOSE": ("15:00:00", "16:00:00"),     # Закрытие Нью-Йорка (последний час)
-}
-
-# Type для session field
-SessionType = Literal[
-    "RTH", "ETH", "OVERNIGHT", "GLOBEX",
-    "ASIAN", "EUROPEAN", "US",
-    "PREMARKET", "POSTMARKET", "MORNING", "AFTERNOON", "LUNCH",
-    "LONDON_OPEN", "NY_OPEN", "NY_CLOSE",
-]
+# Type alias - actual valid sessions are defined in instruments.py per symbol
+SessionType = str  # Session name like "RTH", "ETH", "OVERNIGHT"
 
 
 class HolidayFilter(Enum):
@@ -236,31 +212,8 @@ class Filters:
     early_close_days: HolidayFilter = HolidayFilter.INCLUDE
     """Режим для дней раннего закрытия (Christmas Eve, Black Friday, etc.)"""
 
-    def get_time_filter(self) -> tuple[str, str] | None:
-        """
-        Возвращает временной фильтр (start, end) или None.
-
-        Приоритет: session > time_start/time_end
-
-        Note: Для сессий пересекающих полночь (OVERNIGHT, ASIAN, GLOBEX)
-              end_time < start_time — QueryBuilder должен обрабатывать это
-              через OR условие.
-        """
-        if self.session:
-            return TRADING_SESSIONS.get(self.session)
-
-        if self.time_start and self.time_end:
-            return (self.time_start, self.time_end)
-
-        return None
-
-    def crosses_midnight(self) -> bool:
-        """Проверяет, пересекает ли сессия полночь."""
-        time_filter = self.get_time_filter()
-        if not time_filter:
-            return False
-        start, end = time_filter
-        return end < start  # 18:00 - 03:00 → True
+    # Note: Session time resolution is done in query_builder/filters/time.py
+    # using instruments.py as the single source of truth for session times.
 
 
 # =============================================================================

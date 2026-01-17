@@ -26,7 +26,7 @@ Return JSON with type: "data" and query_spec.
 </task>"""
 
 EXAMPLES = """
-Question: "Сравни волатильность RTH и ETH"
+Question: "Compare volatility of RTH and ETH"
 ```json
 {
   "type": "data",
@@ -48,7 +48,7 @@ Question: "Сравни волатильность RTH и ETH"
 }
 ```
 
-Question: "Сравни волатильность по дням недели"
+Question: "Compare volatility by day of week"
 ```json
 {
   "type": "data",
@@ -71,7 +71,7 @@ Question: "Сравни волатильность по дням недели"
 }
 ```
 
-Question: "Сравни 2023 и 2024 по волатильности"
+Question: "Compare 2023 and 2024 by volatility"
 ```json
 {
   "type": "data",
@@ -94,7 +94,7 @@ Question: "Сравни 2023 и 2024 по волатильности"
 }
 ```
 
-Question: "Понедельник vs Пятница — где больше волатильность?"
+Question: "Monday vs Friday — which has more volatility?"
 ```json
 {
   "type": "data",

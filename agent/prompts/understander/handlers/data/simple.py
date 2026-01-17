@@ -14,10 +14,20 @@ Key decisions:
 4. **metrics**: avg range, avg change, stddev (volatility), count
 
 Return JSON with type: "data" and query_spec.
-</task>"""
+</task>
+
+<session_rule>
+Session field handling:
+- User explicitly says "RTH", "ETH", "OVERNIGHT" → use that session value
+- User says "session" without naming which one → session: "_default_"
+- User asks about "day/день" without specifying session → DO NOT set session (leave it null/omit)
+
+CRITICAL — Ambiguous "day" references:
+When user asks about a specific DATE with words like "day", "throughout the day", "за день", "в течении дня" — this is AMBIGUOUS. DO NOT guess RTH or ETH. Simply omit session field and the system will ask for clarification with accurate times.
+</session_rule>"""
 
 EXAMPLES = """
-Question: "Покажи статистику NQ за январь 2024"
+Question: "Show NQ statistics for January 2024"
 ```json
 {
   "type": "data",
@@ -40,7 +50,7 @@ Question: "Покажи статистику NQ за январь 2024"
 }
 ```
 
-Question: "Волатильность по месяцам за 2024"
+Question: "Volatility by month for 2024"
 ```json
 {
   "type": "data",
@@ -62,7 +72,7 @@ Question: "Волатильность по месяцам за 2024"
 }
 ```
 
-Question: "Средняя волатильность NQ"
+Question: "Average volatility of NQ"
 ```json
 {
   "type": "data",
@@ -79,6 +89,24 @@ Question: "Средняя волатильность NQ"
       {"metric": "stddev", "column": "change_pct", "alias": "volatility"},
       {"metric": "count", "alias": "trading_days"}
     ],
+    "special_op": "none"
+  }
+}
+```
+
+Question: "What happened May 16 throughout the day?" (also: "что было 16 мая в течении дня")
+Note: AMBIGUOUS — user said "day" but didn't specify which session. DO NOT set session, system will clarify.
+```json
+{
+  "type": "data",
+  "query_spec": {
+    "symbol": "NQ",
+    "source": "daily",
+    "filters": {
+      "period_start": "2024-05-16",
+      "period_end": "2024-05-17"
+    },
+    "grouping": "none",
     "special_op": "none"
   }
 }
