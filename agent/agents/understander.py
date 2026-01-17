@@ -613,6 +613,10 @@ class Understander:
         if "trading_day_or_session" in needs:
             options = needs["trading_day_or_session"]
 
+            # Check if market is closed (weekend/holiday) — return direct response, no options
+            if options and options[0].startswith("Market closed"):
+                return self._build_market_closed_response(date_str, is_russian)
+
             if is_russian:
                 if date_str:
                     response = f"Уточните, что вы имеете в виду под датой {date_str}:"
@@ -657,6 +661,69 @@ class Understander:
             "response_text": response,
             "suggestions": [],
             "original_intent": intent,
+        }
+
+    def _build_market_closed_response(self, date_str: str, is_russian: bool) -> Intent:
+        """
+        Build response for market closed days (weekends/holidays).
+
+        Returns a direct response without suggestions - just explains market
+        was closed and suggests adjacent trading days.
+        """
+        from datetime import datetime, timedelta
+
+        # Find adjacent trading days
+        prev_day = ""
+        next_day = ""
+
+        if date_str:
+            try:
+                dt = datetime.strptime(date_str, "%Y-%m-%d")
+                weekday = dt.weekday()
+                weekday_names_ru = ["понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье"]
+                weekday_names_en = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+
+                # Find previous trading day (go back until weekday < 5)
+                prev_dt = dt - timedelta(days=1)
+                while prev_dt.weekday() >= 5:
+                    prev_dt -= timedelta(days=1)
+                prev_day = prev_dt.strftime("%Y-%m-%d")
+                prev_weekday = weekday_names_ru[prev_dt.weekday()] if is_russian else weekday_names_en[prev_dt.weekday()]
+
+                # Find next trading day (go forward until weekday < 5)
+                next_dt = dt + timedelta(days=1)
+                while next_dt.weekday() >= 5:
+                    next_dt += timedelta(days=1)
+                next_day = next_dt.strftime("%Y-%m-%d")
+                next_weekday = weekday_names_ru[next_dt.weekday()] if is_russian else weekday_names_en[next_dt.weekday()]
+
+                day_name = weekday_names_ru[weekday] if is_russian else weekday_names_en[weekday]
+
+                if is_russian:
+                    response = (
+                        f"Рынок был закрыт {date_str} ({day_name}). "
+                        f"Ближайшие торговые дни: {prev_day} ({prev_weekday}) или {next_day} ({next_weekday})."
+                    )
+                else:
+                    response = (
+                        f"Market was closed on {date_str} ({day_name}). "
+                        f"Nearest trading days: {prev_day} ({prev_weekday}) or {next_day} ({next_weekday})."
+                    )
+            except ValueError:
+                response = (
+                    "Рынок был закрыт в этот день." if is_russian
+                    else "Market was closed on this day."
+                )
+        else:
+            response = (
+                "Рынок был закрыт в этот день." if is_russian
+                else "Market was closed on this day."
+            )
+
+        return {
+            "type": "clarification",  # Goes through responder, no data fetch
+            "response_text": response,
+            "suggestions": [],  # No options - just informational response
         }
 
     def _build_intent(self, data: dict) -> Intent:
