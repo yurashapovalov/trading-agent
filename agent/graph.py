@@ -403,6 +403,13 @@ class TradingGraph:
             "cost_usd": 0.0,
         }
 
+        # Сразу отправить step_start для barb — моментальный фидбек
+        yield {
+            "type": "step_start",
+            "agent": "barb",
+            "message": self._get_agent_message("barb")
+        }
+
         for event in self.app.stream(initial_input, config, stream_mode=["updates", "custom"]):
             stream_type, data = event
 
@@ -417,12 +424,13 @@ class TradingGraph:
                 step_duration_ms = int((current_time - last_step_time) * 1000)
                 last_step_time = current_time
 
-                # step_start
-                yield {
-                    "type": "step_start",
-                    "agent": node_name,
-                    "message": self._get_agent_message(node_name)
-                }
+                # step_start (skip barb — already sent before stream)
+                if node_name != "barb":
+                    yield {
+                        "type": "step_start",
+                        "agent": node_name,
+                        "message": self._get_agent_message(node_name)
+                    }
 
                 # Handle by node type
                 if node_name == "barb":
