@@ -4,5 +4,6 @@ from agent.agents.barb import Barb
 from agent.agents.data_fetcher import DataFetcher
 from agent.agents.analyst import Analyst
 from agent.agents.validator import Validator
+from agent.agents.responder import Responder
 
-__all__ = ["Barb", "DataFetcher", "Analyst", "Validator"]
+__all__ = ["Barb", "DataFetcher", "Analyst", "Validator", "Responder"]

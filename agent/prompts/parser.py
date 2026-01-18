@@ -64,9 +64,7 @@ Extract facts from user's question. Do NOT make decisions — just extract.
     "group_by": "month" | "weekday" | "hour" or null
   },
 
-  "unclear": ["what needs clarification"],
-
-  "summary": "Human-readable description of the request in user's language"
+  "unclear": ["what needs clarification"]
 }
 </output_schema>
 
@@ -100,16 +98,6 @@ Extract facts from user's question. Do NOT make decisions — just extract.
    - Date without year → ["year"] (need to know which year)
    - Specific date WITH year but without session → ["session"] (need to know RTH/ETH/full day)
    - Do NOT mark subjective terms (huge, volatile, crazy, etc.) as unclear — interpret as top_n instead
-
-6. Summary — conversational confirmation:
-   - Write in the SAME language as user's question
-   - Start with "Got it!" / "Understood!" style prefix
-   - Describe what you will show/do
-   - Be concise but human
-   - Examples:
-     - "Got it! I'll show statistics for Fridays 2020-2025 where close - low >= 200."
-     - "Understood! Looking for the top 10 most volatile days in 2024."
-     - "I see you want to compare RTH vs ETH range. Let me pull that data."
 </rules>
 
 <critical>
@@ -117,9 +105,6 @@ Extract facts from user's question. Do NOT make decisions — just extract.
 - Keep conditions as readable text
 - Session null if not explicitly named (even if user says "day")
 - Weekdays always in English
-- IMPORTANT: "summary" MUST be in the SAME language as user's question!
-  If user writes in Russian → summary in Russian
-  If user writes in English → summary in English
 - CONTEXT FROM HISTORY: If current question is short (1-3 words like "RTH", "ETH", "2024")
   and chat history contains a previous question with date/period,
   COMBINE them: use info from history + clarification from current answer.
@@ -137,8 +122,7 @@ Q: "Statistics for Fridays 2020-2025 where close - low >= 200"
   "period": {"raw": "2020-2025", "start": "2020-01-01", "end": "2025-12-31"},
   "filters": {"weekdays": ["Friday"], "conditions": ["close - low >= 200"]},
   "modifiers": {},
-  "unclear": [],
-  "summary": "Got it! I'll show statistics for Fridays 2020-2025 where close - low >= 200."
+  "unclear": []
 }
 ```
 
@@ -149,8 +133,7 @@ Q: "What happened on May 16, 2024?"
   "period": {"raw": "May 16, 2024", "dates": ["2024-05-16"]},
   "filters": {},
   "modifiers": {},
-  "unclear": ["session"],
-  "summary": "Looking at May 16, 2024. Which session do you want — RTH or full day?"
+  "unclear": ["session"]
 }
 ```
 
@@ -161,8 +144,7 @@ Q: "What happened May 16?"
   "period": {"raw": "May 16"},
   "filters": {},
   "modifiers": {},
-  "unclear": ["year"],
-  "summary": "Which year do you mean — or should I show all May 16ths?"
+  "unclear": ["year"]
 }
 ```
 
@@ -173,8 +155,7 @@ Q: "When is high usually formed?"
   "period": {},
   "filters": {},
   "modifiers": {},
-  "unclear": [],
-  "summary": "Got it! I'll analyze when the daily high is typically formed."
+  "unclear": []
 }
 ```
 
@@ -185,8 +166,7 @@ Q: "Top 10 volatile days in 2024"
   "period": {"raw": "2024", "start": "2024-01-01", "end": "2024-12-31"},
   "filters": {},
   "modifiers": {"top_n": 10},
-  "unclear": [],
-  "summary": "Understood! Finding the top 10 most volatile days in 2024."
+  "unclear": []
 }
 ```
 
@@ -197,8 +177,7 @@ Q: "Find me days with huge moves last year"
   "period": {"raw": "last year", "start": "2025-01-01", "end": "2025-12-31"},
   "filters": {},
   "modifiers": {"top_n": 10},
-  "unclear": [],
-  "summary": "Got it! Finding days with the biggest moves last year."
+  "unclear": []
 }
 ```
 
@@ -209,8 +188,7 @@ Q: "RTH vs ETH range"
   "period": {},
   "filters": {},
   "modifiers": {"compare": ["RTH", "ETH"]},
-  "unclear": [],
-  "summary": "Got it! Comparing RTH vs ETH range across all available data."
+  "unclear": []
 }
 ```
 
@@ -221,8 +199,7 @@ Q: "Show me OPEX days for 2024"
   "period": {"raw": "2024", "start": "2024-01-01", "end": "2024-12-31"},
   "filters": {"event_filter": "opex"},
   "modifiers": {},
-  "unclear": [],
-  "summary": "Got it! Showing all options expiration days in 2024."
+  "unclear": []
 }
 ```
 
@@ -233,8 +210,7 @@ Q: "NFP statistics for 2023-2024"
   "period": {"raw": "2023-2024", "start": "2023-01-01", "end": "2024-12-31"},
   "filters": {"event_filter": "nfp"},
   "modifiers": {},
-  "unclear": [],
-  "summary": "Understood! I'll show statistics for Non-Farm Payroll days 2023-2024."
+  "unclear": []
 }
 ```
 
@@ -245,8 +221,7 @@ Q: "Статистика по дням экспирации"
   "period": {},
   "filters": {"event_filter": "opex"},
   "modifiers": {},
-  "unclear": [],
-  "summary": "Понял! Покажу статистику по дням экспирации опционов."
+  "unclear": []
 }
 ```
 
@@ -257,8 +232,7 @@ Q: "Volatility by month for 2024"
   "period": {"raw": "2024", "start": "2024-01-01", "end": "2024-12-31"},
   "filters": {},
   "modifiers": {"group_by": "month"},
-  "unclear": [],
-  "summary": "Understood! I'll break down volatility by month for 2024."
+  "unclear": []
 }
 ```
 
@@ -269,8 +243,7 @@ Q: "What is gap?"
   "period": null,
   "filters": null,
   "modifiers": null,
-  "unclear": [],
-  "summary": "I'll explain what a gap is in trading."
+  "unclear": []
 }
 ```
 
@@ -281,8 +254,7 @@ Q: "Hello"
   "period": null,
   "filters": null,
   "modifiers": null,
-  "unclear": [],
-  "summary": "Hello! How can I help you with trading data today?"
+  "unclear": []
 }
 ```
 
@@ -294,8 +266,7 @@ Q: "2024"
   "period": {"raw": "jan 10 2024", "dates": ["2024-01-10"]},
   "filters": {},
   "modifiers": {},
-  "unclear": ["session"],
-  "summary": "Looking at January 10, 2024. Which session — RTH or full day?"
+  "unclear": ["session"]
 }
 ```
 
@@ -307,8 +278,7 @@ Q: "RTH"
   "period": {"raw": "January 10, 2024", "dates": ["2024-01-10"]},
   "filters": {"session": "RTH"},
   "modifiers": {},
-  "unclear": [],
-  "summary": "Got it! Showing RTH data for January 10, 2024."
+  "unclear": []
 }
 ```
 
@@ -320,8 +290,7 @@ Q: "Calendar day"
   "period": {"raw": "May 16, 2024", "dates": ["2024-05-16"]},
   "filters": {"time_start": "00:00", "time_end": "23:59"},
   "modifiers": {},
-  "unclear": [],
-  "summary": "Got it! Showing full calendar day data for May 16, 2024."
+  "unclear": []
 }
 ```
 </examples>"""

@@ -178,6 +178,10 @@ class TradingState(MessagesState, total=False):
     full_data: dict               # Full data for UI (all rows, download)
     missing_capabilities: list[str]  # Features we don't support yet
 
+    # Responder output
+    data_title: str | None        # Title for data card (from Responder)
+    offer_analysis: bool          # Flag to show Analyze button (from offer_analysis node)
+
     # Analyst output
     response: str
     stats: Stats | None           # Structured stats for validation

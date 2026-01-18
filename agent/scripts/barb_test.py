@@ -28,6 +28,7 @@ from agent.state import create_initial_input
 from agent.agents.barb import Barb
 from agent.query_builder import QueryBuilder
 from agent.agents.data_fetcher import DataFetcher
+from agent.agents.responder import Responder
 
 
 # =============================================================================
@@ -120,14 +121,15 @@ def run_fast_question(
     barb: Barb,
     query_builder: QueryBuilder,
     data_fetcher: DataFetcher,
+    responder: Responder,
     question: str,
     max_rounds: int = 3,
     force_clarification_choice: str | None = None,
 ) -> dict:
     """
-    Run question through Barb → QueryBuilder → DataFetcher (skip Analyst).
+    Run question through Barb → Responder → QueryBuilder → DataFetcher (skip Analyst).
 
-    Faster for testing — validates parsing and data fetching without LLM analysis.
+    Faster for testing — validates parsing, responder preview, and data fetching.
     """
     start_time = datetime.now()
     chat_history = ""
@@ -155,10 +157,28 @@ def run_fast_question(
             # Handle different result types
             if barb_result.type == "clarification":
                 options = barb_result.options or []
+
+                # Build state for Responder
+                responder_state = {
+                    "messages": [{"role": "user", "content": current_question}],
+                    "intent": {
+                        "type": "clarification",
+                        "field": barb_result.field,
+                        "suggestions": options,
+                        "parser_output": barb_result.parser_output,
+                        "symbol": "NQ",
+                    },
+                }
+
+                # Call Responder for natural clarification text
+                responder_result = responder(responder_state)
+                responder_response = responder_result.get("response", barb_result.summary)
+
                 round_data["clarification"] = {
-                    "text": barb_result.summary,
+                    "text": responder_response,
                     "suggestions": options,
                 }
+                round_data["responder_response"] = responder_response
 
                 # Store options from first clarification
                 if round_num == 0 and options:
@@ -171,16 +191,16 @@ def run_fast_question(
                     else:
                         selected = get_clarification_response(options)
                     round_data["selected"] = selected
-                    chat_history = f"User: {current_question}\nAssistant: {barb_result.summary}"
+                    chat_history = f"User: {current_question}\nAssistant: {responder_response}"
                     clarification_state = barb_result.state  # Preserve state for next round
                     current_question = selected
                     rounds.append(round_data)
                     continue
-                elif "year" in barb_result.summary.lower() or "год" in barb_result.summary.lower():
+                elif "year" in responder_response.lower() or "год" in responder_response.lower():
                     # Year clarification without buttons — simulate typing year
                     selected = "2024"
                     round_data["selected"] = selected
-                    chat_history = f"User: {current_question}\nAssistant: {barb_result.summary}"
+                    chat_history = f"User: {current_question}\nAssistant: {responder_response}"
                     clarification_state = barb_result.state  # Preserve state for next round
                     current_question = selected
                     rounds.append(round_data)
@@ -191,27 +211,69 @@ def run_fast_question(
                     break
 
             elif barb_result.type in ("greeting", "concept", "not_supported"):
-                # Non-data types — success, no data fetch needed
+                # Non-data types — call Responder for natural response
+                intent_type = {"greeting": "chitchat", "concept": "concept", "not_supported": "out_of_scope"}[barb_result.type]
+
+                # Build state for Responder
+                responder_state = {
+                    "messages": [{"role": "user", "content": current_question}],
+                    "intent": {
+                        "type": intent_type,
+                        "parser_output": barb_result.parser_output,
+                        "symbol": "NQ",
+                        "concept": barb_result.concept if barb_result.type == "concept" else None,
+                        "response_text": barb_result.reason if barb_result.type == "not_supported" else None,
+                    },
+                }
+
+                # Call Responder
+                responder_result = responder(responder_state)
+                responder_response = responder_result.get("response", "")
+
+                round_data["responder_response"] = responder_response
                 rounds.append(round_data)
+
                 return {
                     "original_question": question,
                     "rounds": len(rounds),
                     "round_details": rounds,
-                    "final_type": {"greeting": "chitchat", "concept": "concept", "not_supported": "out_of_scope"}[barb_result.type],
+                    "final_type": intent_type,
                     "success": True,
                     "error": None,
                     "total_time_ms": int((datetime.now() - start_time).total_seconds() * 1000),
-                    "summary": barb_result.summary,
+                    "responder_response": responder_response,
                     "parser_output": barb_result.parser_output,
                     "clarification_options": clarification_options,
                 }
 
             elif barb_result.type == "query":
-                # Data query — build SQL and fetch data
+                # Data query — call Responder for preview, then build SQL and fetch data
                 spec = barb_result.spec
-                sql = query_builder.build(spec)
 
-                # Fetch data using DataFetcher
+                # Build state for Responder (before data fetch)
+                responder_state = {
+                    "messages": [{"role": "user", "content": current_question}],
+                    "intent": {
+                        "type": "data",
+                        "parser_output": barb_result.parser_output,
+                        "symbol": spec.symbol if spec else "NQ",
+                        "holiday_info": barb_result.holiday_info,
+                        "event_info": barb_result.event_info,
+                        "query_spec": {
+                            "special_op": spec.special_op.value if spec else None,
+                            "source": spec.source.value if spec else None,
+                            "grouping": spec.grouping.value if spec else None,
+                        },
+                    },
+                }
+
+                # Call Responder for preview and title
+                responder_result = responder(responder_state)
+                responder_response = responder_result.get("response", "")
+                data_title = responder_result.get("data_title")
+
+                # Build SQL and fetch data
+                sql = query_builder.build(spec)
                 state = {
                     "sql_query": sql,
                     "intent": {"query_spec": {}},
@@ -221,6 +283,8 @@ def run_fast_question(
 
                 round_data["intent_type"] = "data"
                 round_data["sql_preview"] = sql[:100] if sql else None
+                round_data["responder_response"] = responder_response
+                round_data["data_title"] = data_title
                 rounds.append(round_data)
 
                 total_time = int((datetime.now() - start_time).total_seconds() * 1000)
@@ -237,6 +301,8 @@ def run_fast_question(
                     "columns": data.get("columns", []),
                     "sql_query": sql,
                     "parser_output": barb_result.parser_output,
+                    "responder_response": responder_response,
+                    "data_title": data_title,
                     "clarification_options": clarification_options,
                 }
 
@@ -291,11 +357,13 @@ def run_barb_test(
         barb = Barb()
         query_builder = QueryBuilder()
         data_fetcher = DataFetcher()
+        responder = Responder()
         graph = None
     else:
         barb = None
         query_builder = None
         data_fetcher = None
+        responder = None
         graph = TradingGraph()
 
     results = []
@@ -307,7 +375,7 @@ def run_barb_test(
 
         if fast_mode:
             result = run_fast_question(
-                barb, query_builder, data_fetcher,
+                barb, query_builder, data_fetcher, responder,
                 question,
                 max_rounds=max_clarification_rounds,
             )
@@ -325,7 +393,15 @@ def run_barb_test(
         # Summary
         status = "✓" if result["success"] else "✗"
         rows_info = f", rows={result.get('row_count', '?')}" if result.get("row_count") else ""
-        print(f"    {status} {result['final_type']} | {result['total_time_ms']}ms{rows_info}")
+        title_info = f", title=\"{result.get('data_title')}\"" if result.get("data_title") else ""
+        print(f"    {status} {result['final_type']} | {result['total_time_ms']}ms{rows_info}{title_info}")
+
+        # Show Responder preview (first 80 chars)
+        responder_response = result.get("responder_response", "")
+        if responder_response:
+            preview = responder_response[:80].replace("\n", " ")
+            print(f"    Responder: {preview}...")
+
         if result.get("error"):
             print(f"    Error: {result['error']}")
 
@@ -337,7 +413,7 @@ def run_barb_test(
             for opt_idx, option in enumerate(options[1:], 2):  # Skip first (already tested)
                 if fast_mode:
                     opt_result = run_fast_question(
-                        barb, query_builder, data_fetcher,
+                        barb, query_builder, data_fetcher, responder,
                         question,
                         max_rounds=max_clarification_rounds,
                         force_clarification_choice=option,
@@ -465,9 +541,10 @@ def run_single_question(
             final_result = {
                 "intent": intent,
                 "response": result.get("response", ""),
-                "data": result.get("data"),
+                "data": result.get("full_data") or result.get("data"),  # Prefer full_data
                 "sql_query": result.get("sql_query"),
                 "usage": result.get("usage"),
+                "data_title": result.get("data_title"),  # From responder node
             }
 
             # Check if we got actual data response

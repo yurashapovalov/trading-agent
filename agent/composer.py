@@ -97,6 +97,9 @@ def compose(parsed: ParsedQuery, symbol: str = "NQ") -> ComposerResult:
 
     if parsed.what.startswith("explain"):
         concept = parsed.what.replace("explain ", "").replace("explain", "").strip()
+        # If concept is generic "session" and filters has specific session, use that
+        if concept == "session" and parsed.filters and parsed.filters.session:
+            concept = f"{parsed.filters.session} session"
         return ConceptResult(type="concept", summary=parsed.summary, concept=concept or "trading")
 
     if parsed.unclear:
