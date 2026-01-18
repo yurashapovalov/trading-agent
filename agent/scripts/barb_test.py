@@ -60,6 +60,10 @@ TEST_QUESTIONS = [
     "When is high usually formed?",
     "When is low usually formed?",
 
+    # === Hourly grouping (requires MINUTES source) ===
+    "Volatility by hour",
+    "Какая волатильность по часам?",
+
     # === Concept ===
     "What is gap?",
     "Explain RTH session",

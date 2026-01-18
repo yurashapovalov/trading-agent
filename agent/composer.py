@@ -159,10 +159,12 @@ def _build_query(parsed: ParsedQuery, symbol: str) -> ComposerResult:
     specific_dates = period.dates if period else None
     needs_prev_day = _needs_prev_day(parsed.what, filters_raw)
 
-    source = _determine_source(special_op, session, specific_dates, needs_prev_day)
+    # Determine grouping FIRST — it affects source selection
+    grouping = _determine_grouping(parsed.what, modifiers, period, session)
+
+    source = _determine_source(special_op, session, specific_dates, needs_prev_day, grouping)
 
     filters = _build_filters(period, filters_raw, symbol)
-    grouping = _determine_grouping(parsed.what, modifiers, period, session)
     metrics = _determine_metrics(parsed.what, modifiers)
 
     spec = QuerySpec(
@@ -270,25 +272,28 @@ def _determine_source(
     session: str | None,
     specific_dates: list[str] | None,
     needs_prev_day: bool,
+    grouping: Grouping = Grouping.NONE,
 ) -> Source:
     """
     Determine data source based on query characteristics.
 
     Decision Table:
-    ┌─────────────────┬─────────┬────────────────┬───────────────┬─────────────────────┐
-    │ special_op      │ session │ specific_dates │ needs_prev    │ Source              │
-    ├─────────────────┼─────────┼────────────────┼───────────────┼─────────────────────┤
-    │ EVENT_TIME      │ any     │ any            │ any           │ MINUTES             │
-    │ FIND_EXTREMUM   │ any     │ any            │ any           │ (handled separately)│
-    │ any             │ yes     │ yes            │ any           │ DAILY               │
-    │ TOP_N           │ yes     │ no             │ any           │ DAILY               │
-    │ any             │ yes     │ no             │ any           │ MINUTES             │
-    │ any             │ no      │ any            │ yes           │ DAILY_WITH_PREV     │
-    │ any             │ no      │ any            │ no            │ DAILY               │
-    └─────────────────┴─────────┴────────────────┴───────────────┴─────────────────────┘
+    ┌─────────────────┬───────────────┬─────────┬────────────────┬───────────────┬─────────────────────┐
+    │ special_op      │ grouping      │ session │ specific_dates │ needs_prev    │ Source              │
+    ├─────────────────┼───────────────┼─────────┼────────────────┼───────────────┼─────────────────────┤
+    │ EVENT_TIME      │ any           │ any     │ any            │ any           │ MINUTES             │
+    │ FIND_EXTREMUM   │ any           │ any     │ any            │ any           │ (handled separately)│
+    │ any             │ time-based    │ any     │ any            │ any           │ MINUTES             │
+    │ any             │ other         │ yes     │ yes            │ any           │ DAILY               │
+    │ TOP_N           │ other         │ yes     │ no             │ any           │ DAILY               │
+    │ any             │ other         │ yes     │ no             │ any           │ MINUTES             │
+    │ any             │ other         │ no      │ any            │ yes           │ DAILY_WITH_PREV     │
+    │ any             │ other         │ no      │ any            │ no            │ DAILY               │
+    └─────────────────┴───────────────┴─────────┴────────────────┴───────────────┴─────────────────────┘
 
     Why each rule:
     - EVENT_TIME → MINUTES: Need minute-level timestamps for time bucket analysis
+    - time-based grouping → MINUTES: HOUR/MINUTE_* grouping needs timestamp column
     - session + specific_dates → DAILY: Single day with session = aggregate in CTE
     - session + TOP_N → DAILY: TOP_N ranks daily bars, session filter in aggregation
     - session (no specific) → MINUTES: Multi-day range with session needs minute filtering
@@ -297,6 +302,10 @@ def _determine_source(
     """
     # EVENT_TIME always needs minute data for time bucket analysis
     if special_op == SpecialOp.EVENT_TIME:
+        return Source.MINUTES
+
+    # Time-based grouping (HOUR, MINUTE_*) needs minute data with timestamp
+    if grouping.is_time_based():
         return Source.MINUTES
 
     # With session filter:

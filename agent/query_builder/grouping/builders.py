@@ -131,8 +131,10 @@ def get_grouping_expression(grouping: Grouping, symbol: str = "NQ") -> str:
         return "session"
 
     elif grouping.is_time_based():
+        # Cast to time to group by time-of-day across all days
+        # Without ::time, it groups by full timestamp (each day separately)
         interval = grouping.get_interval()
-        return f"TIME_BUCKET(INTERVAL '{interval}', timestamp)"
+        return f"TIME_BUCKET(INTERVAL '{interval}', timestamp)::time"
 
     # Явная ошибка для неизвестных значений
     # (NONE и TOTAL обрабатываются в builder.py до вызова этой функции)

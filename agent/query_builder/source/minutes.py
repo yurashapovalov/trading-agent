@@ -76,7 +76,8 @@ class MinutesSourceBuilder(SourceBuilder):
         low,
         close,
         volume,
-        high - low as range
+        high - low as range,
+        ROUND((close - open) / NULLIF(open, 0) * 100, 4) as change_pct
     FROM {OHLCV_TABLE}
     WHERE symbol = {safe_symbol}
       AND {timestamp_filter}

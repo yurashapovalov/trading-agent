@@ -709,4 +709,8 @@ class QuerySpec(BaseModel):
         if self.special_op == SpecialOp.FIND_EXTREMUM and self.source != Source.MINUTES:
             errors.append("FIND_EXTREMUM requires source=MINUTES")
 
+        # Time-based grouping requires minute data with timestamp column
+        if self.grouping.is_time_based() and self.source != Source.MINUTES:
+            errors.append(f"Time-based grouping ({self.grouping.value}) requires source=MINUTES")
+
         return errors
