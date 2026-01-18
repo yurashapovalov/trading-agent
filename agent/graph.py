@@ -428,6 +428,7 @@ class TradingGraph:
                 if node_name == "barb":
                     intent = updates.get("intent") or {}
                     usage = updates.get("usage") or {}
+                    summary = intent.get("summary", "")
 
                     yield {
                         "type": "step_end",
@@ -439,6 +440,7 @@ class TradingGraph:
                         "result": {
                             "type": intent.get("type"),
                             "symbol": "NQ",
+                            "summary": summary,
                         },
                         "output": {
                             "intent": intent,
@@ -446,6 +448,14 @@ class TradingGraph:
                         }
                     }
                     accumulated_state["intent"] = intent
+
+                    # Моментально показать что поняли (для data queries)
+                    if summary and intent.get("type") == "data":
+                        yield {
+                            "type": "text_delta",
+                            "agent": "barb",
+                            "content": summary + "\n\n"
+                        }
                     # Accumulate usage from barb
                     if usage:
                         accumulated_usage["input_tokens"] += usage.get("input_tokens", 0)
