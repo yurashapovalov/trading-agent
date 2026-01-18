@@ -6,6 +6,31 @@ Fast mode: plain markdown without JSON/stats for speed.
 """
 
 import config
+from agent.market.instruments import get_instrument
+
+
+def _format_instrument_context(symbol: str | None) -> str:
+    """Generate instrument context for Analyst prompt."""
+    if not symbol:
+        return ""
+
+    instrument = get_instrument(symbol)
+    if not instrument:
+        return ""
+
+    sessions = instrument.get("sessions", {})
+    session_list = ", ".join(
+        f"{name} ({times[0]}-{times[1]} ET)"
+        for name, times in sessions.items()
+    )
+
+    return f"""<instrument>
+You are analyzing: {symbol} ({instrument['name']})
+Exchange: {instrument['exchange']}
+Trading hours: {instrument['trading_day_start']} prev day → {instrument['trading_day_end']} current day (ET)
+Sessions: {session_list}
+Maintenance break: {instrument['maintenance'][0]}-{instrument['maintenance'][1]} ET (no data)
+</instrument>"""
 
 
 # =============================================================================
@@ -187,6 +212,7 @@ def get_analyst_prompt(
     issues: list = None,
     chat_history: list = None,
     search_condition: str = None,
+    symbol: str = None,
     holiday_info: dict = None,
     event_info: dict = None,
     assumptions: list = None,
@@ -202,6 +228,7 @@ def get_analyst_prompt(
         issues: Validation issues if rewriting
         chat_history: Previous messages for context
         search_condition: Natural language condition for filtering data
+        symbol: Trading instrument (NQ, ES, etc.) for context
         holiday_info: Info about holidays in requested dates (from Barb)
         event_info: Info about events in requested dates (OPEX, NFP, etc. from Barb)
         assumptions: List of assumptions made by Understander (for transparency)
@@ -259,6 +286,9 @@ def get_analyst_prompt(
         else:
             event_context = f"\n\n<event_context>\nNote: Requested dates include market events: {event_list}. Consider mentioning if relevant.\n</event_context>"
 
+    # Format instrument context
+    instrument_context = _format_instrument_context(symbol)
+
     # Rewrite case
     if previous_response and issues:
         return SYSTEM_PROMPT + "\n" + USER_PROMPT_REWRITE.format(
@@ -276,7 +306,7 @@ def get_analyst_prompt(
 
     # Search query - Analyst filters the data
     if search_condition:
-        return SYSTEM_PROMPT + "\n" + USER_PROMPT_SEARCH.format(
+        return SYSTEM_PROMPT + "\n" + instrument_context + "\n" + USER_PROMPT_SEARCH.format(
             chat_history=history_str,
             data=json.dumps(data, indent=2, default=str),
             search_condition=search_condition,
@@ -284,7 +314,7 @@ def get_analyst_prompt(
         ) + assumptions_context + holiday_context + event_context
 
     # Data (default)
-    return SYSTEM_PROMPT + "\n" + USER_PROMPT_DATA.format(
+    return SYSTEM_PROMPT + "\n" + instrument_context + "\n" + USER_PROMPT_DATA.format(
         chat_history=history_str,
         data=json.dumps(data, indent=2, default=str),
         question=question,
@@ -318,6 +348,7 @@ def get_analyst_prompt_streaming(
     data: dict,
     chat_history: list = None,
     search_condition: str = None,
+    symbol: str = None,
     holiday_info: dict = None,
     event_info: dict = None,
     assumptions: list = None,
@@ -383,7 +414,10 @@ def get_analyst_prompt_streaming(
     if search_condition:
         task_suffix = f"\n\nNote: Filter the data to find rows matching: {search_condition}"
 
-    prompt = SYSTEM_PROMPT_STREAMING + "\n" + USER_PROMPT_DATA_STREAMING.format(
+    # Format instrument context
+    instrument_context = _format_instrument_context(symbol)
+
+    prompt = SYSTEM_PROMPT_STREAMING + "\n" + instrument_context + "\n" + USER_PROMPT_DATA_STREAMING.format(
         chat_history=history_str,
         data=json_module.dumps(data, indent=2, default=str),
         question=question,
@@ -396,16 +430,18 @@ def get_analyst_prompt_streaming(
 # Fast Mode Prompt (minimal, no JSON)
 # =============================================================================
 
-def get_analyst_prompt_fast(question: str, data: dict) -> str:
+def get_analyst_prompt_fast(question: str, data: dict, symbol: str = None) -> str:
     """
     Build minimal prompt for fast mode.
 
-    No JSON, no stats, no chat history, no holidays - just data and question.
+    No JSON, no stats, no chat history, no holidays - just data, question, and instrument.
     ~3x faster than full prompt.
     """
     import json as json_module
 
-    return SYSTEM_PROMPT_FAST + "\n" + USER_PROMPT_FAST.format(
+    instrument_context = _format_instrument_context(symbol)
+
+    return SYSTEM_PROMPT_FAST + "\n" + instrument_context + "\n" + USER_PROMPT_FAST.format(
         data=json_module.dumps(data, indent=2, default=str),
         question=question,
     )

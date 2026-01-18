@@ -82,6 +82,7 @@ def ask_barb(state: AgentState) -> Command:
             "type": "data",
             "summary": result.summary,
             "parser_output": parser_output,
+            "symbol": result.spec.symbol,  # Instrument for Analyst context
             "holiday_info": result.holiday_info,  # Holiday info for Analyst
             "event_info": result.event_info,  # Event info for Analyst (OPEX, NFP, etc.)
             # Dict version for SSE streaming / tests

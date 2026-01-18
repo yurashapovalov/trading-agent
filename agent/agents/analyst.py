@@ -80,6 +80,7 @@ class Analyst:
         data = state.get("data") or {}
         intent = state.get("intent") or {}
         intent_type = intent.get("type", "data")
+        symbol = intent.get("symbol")  # Instrument for context (from Barb)
         holiday_info = intent.get("holiday_info")  # From Barb if dates are holidays
         event_info = intent.get("event_info")  # From Barb if dates have events (OPEX, NFP, etc.)
         assumptions = intent.get("assumptions")  # From Understander if defaults were used
@@ -94,7 +95,7 @@ class Analyst:
 
         # Fast mode - minimal prompt, plain text, no JSON overhead
         if config.ANALYST_FAST_MODE:
-            prompt = get_analyst_prompt_fast(question=question, data=data)
+            prompt = get_analyst_prompt_fast(question=question, data=data, symbol=symbol)
             # Debug: log prompt size
             rows = data.get("rows", []) if isinstance(data, dict) else []
             print(f"    [Analyst] rows={len(rows)}, prompt_len={len(prompt)}")
@@ -114,6 +115,7 @@ class Analyst:
                 question=question,
                 data=data,
                 chat_history=chat_history,
+                symbol=symbol,
                 holiday_info=holiday_info,
                 event_info=event_info,
                 assumptions=assumptions,
@@ -128,6 +130,7 @@ class Analyst:
                 previous_response=previous_response,
                 issues=issues,
                 chat_history=chat_history,
+                symbol=symbol,
                 holiday_info=holiday_info,
                 event_info=event_info,
                 assumptions=assumptions,
