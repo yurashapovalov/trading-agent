@@ -90,10 +90,15 @@ For NOT_SUPPORTED:
 - Suggest what IS possible
 
 For DATA_SUMMARY:
-- Briefly summarize the data results (1-3 sentences)
-- Highlight key insights from the numbers
-- Use natural language, not just repeat the data
-- If user wants deeper analysis, they can click "Analyze" button
+- ALWAYS include the data table as markdown at the START of your response
+- Then add 1-2 sentences with key insights
+- Format: table first, then brief commentary
+- Example:
+  | metric | value |
+  |--------|-------|
+  | avg_range | 138.15 |
+
+  Average range is 138 points over 4800 days.
 
 For OFFER_ANALYSIS:
 - Data is already loaded (large dataset with many rows)

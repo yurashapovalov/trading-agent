@@ -1,0 +1,79 @@
+{
+  "request_id": "f9033be8-7d0d-4171-ab7f-9b0cf1c96197",
+  "user_id": "test",
+  "session_id": "full_debug_1",
+  "intent": {
+    "type": "data",
+    "parser_output": {
+      "what": "statistics",
+      "period": null,
+      "filters": null,
+      "modifiers": null,
+      "unclear": []
+    },
+    "symbol": "NQ",
+    "holiday_info": null,
+    "event_info": null,
+    "query_spec": {
+      "special_op": "none",
+      "source": "daily",
+      "grouping": "total"
+    }
+  },
+  "query_spec_obj": "symbol='NQ' source=<Source.DAILY: 'daily'> filters=Filters(period=PeriodFilter(start='2008-01-02', end='2026-01-08', specific_dates=None), calendar=None, time=None, conditions=[], holidays=HolidaysConfig(market_holidays=<HolidayFilter.INCLUDE: 'include'>, early_close_days=<HolidayFilter.INCLUDE: 'include'>)) grouping=<Grouping.TOTAL: 'total'> metrics=[MetricSpec(metric=<Metric.AVG: 'avg'>, column='range', alias='avg_range'), MetricSpec(metric=<Metric.AVG: 'avg'>, column='change_pct', alias='avg_change'), MetricSpec(metric=<Metric.STDDEV: 'stddev'>, column='change_pct', alias='volatility'), MetricSpec(metric=<Metric.COUNT: 'count'>, column=None, alias='count')] special_op=<SpecialOp.NONE: 'none'> event_time_spec=None top_n_spec=None compare_spec=None find_extremum_spec=None order_by=None order_direction='ASC' limit=None",
+  "sql_query": "WITH daily_raw AS (\n    SELECT\n        (CASE\n        WHEN timestamp::time < '17:00:00'::time\n        THEN timestamp::date\n        ELSE timestamp::date + INTERVAL '1 day'\n    END)::date as date,\n        FIRST(open ORDER BY timestamp) as open,\n        MAX(high) as high,\n        MIN(low) as low,\n        LAST(close ORDER BY timestamp) as close,\n        SUM(volume) as volume,\n        -- Basic metrics\n        ROUND(MAX(high) - MIN(low), 2) as range,\n        ROUND((LAST(close ORDER BY timestamp) - FIRST(open ORDER BY timestamp))\n              / NULLIF(FIRST(open ORDER BY timestamp), 0) * 100, 2) as change_pct,\n        -- Close to extremes\n        ROUND(LAST(close ORDER BY timestamp) - MIN(low), 2) as close_to_low,\n        ROUND(MAX(high) - LAST(close ORDER BY timestamp), 2) as close_to_high,\n        -- Open to extremes\n        ROUND(MAX(high) - FIRST(open ORDER BY timestamp), 2) as open_to_high,\n        ROUND(FIRST(open ORDER BY timestamp) - MIN(low), 2) as open_to_low,\n        -- Candle structure\n        ROUND(ABS(LAST(close ORDER BY timestamp) - FIRST(open ORDER BY timestamp)), 2) as body,\n        ROUND(MAX(high) - GREATEST(FIRST(open ORDER BY timestamp), LAST(close ORDER BY timestamp)), 2) as upper_wick,\n        ROUND(LEAST(FIRST(open ORDER BY timestamp), LAST(close ORDER BY timestamp)) - MIN(low), 2) as lower_wick\n    FROM ohlcv_1min\n    WHERE symbol = 'NQ'\n      AND timestamp >= (('2008-01-02'::date - INTERVAL '1 day')::date + '18:00:00'::time)\n      AND timestamp < (('2026-01-08'::date - INTERVAL '1 day')::date + '17:00:00'::time)\n    GROUP BY (CASE\n        WHEN timestamp::time < '17:00:00'::time\n        THEN timestamp::date\n        ELSE timestamp::date + INTERVAL '1 day'\n    END)::date\n),\ndaily AS (\n    SELECT * FROM daily_raw\n    \n)\nSELECT\n    ROUND(AVG(range), 2) as avg_range,\n    ROUND(AVG(change_pct), 2) as avg_change,\n    ROUND(STDDEV(change_pct), 4) as volatility,\n    COUNT(*) as count\nFROM daily",
+  "data": {
+    "rows": [
+      {
+        "avg_range": 138.15,
+        "avg_change": 0.07,
+        "volatility": 1.3856,
+        "count": 4800
+      }
+    ],
+    "row_count": 1,
+    "granularity": "daily",
+    "columns": [
+      "avg_range",
+      "avg_change",
+      "volatility",
+      "count"
+    ],
+    "source": "query_builder",
+    "sorted_by": "count"
+  },
+  "full_data": {
+    "rows": [
+      {
+        "avg_range": 138.15,
+        "avg_change": 0.07,
+        "volatility": 1.3856,
+        "count": 4800
+      }
+    ],
+    "row_count": 1,
+    "granularity": "daily",
+    "columns": [
+      "avg_range",
+      "avg_change",
+      "volatility",
+      "count"
+    ],
+    "source": "query_builder",
+    "sorted_by": "count"
+  },
+  "data_title": "Статистика NQ",
+  "response": "Статистика показывает, что средний дневной диапазон (avg_range) для NQ составляет 138.15 пунктов, а среднее изменение цены (avg_change) — 0.07 пункта. Волатильность (volatility) за этот период составила 1.3856. Это дает хорошее представление о типичной дневной активности инструмента.",
+  "validation_attempts": 0,
+  "agents_used": [
+    "responder_summary"
+  ],
+  "step_number": 5,
+  "usage": {
+    "input_tokens": 938,
+    "output_tokens": 100,
+    "thinking_tokens": 0,
+    "cost_usd": 0.000769
+  },
+  "total_duration_ms": 282
+}

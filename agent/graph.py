@@ -281,13 +281,16 @@ def summarize_data(state: AgentState) -> dict:
     rows = full_data.get("rows", [])
     columns = full_data.get("columns", [])
 
-    # Format data for Responder
+    # Format data as markdown table for Responder
     data_summary = ""
     if rows and columns:
-        # Simple table format
-        data_summary = f"Columns: {', '.join(columns)}\n"
+        # Build markdown table
+        header = "| " + " | ".join(columns) + " |"
+        separator = "| " + " | ".join(["---"] * len(columns)) + " |"
+        data_summary = header + "\n" + separator + "\n"
         for row in rows[:5]:
-            data_summary += f"  {row}\n"
+            values = [str(row.get(col, "")) for col in columns]
+            data_summary += "| " + " | ".join(values) + " |\n"
 
     # Update state with data summary for Responder
     summary_state = {
