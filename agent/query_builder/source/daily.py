@@ -40,7 +40,9 @@ class DailySourceBuilder(SourceBuilder):
             This allows getting daily OHLC for specific sessions (e.g., RTH only).
         """
         daily_raw = build_daily_aggregation_sql(
-            symbol, filters.period_start, filters.period_end, session=filters.session
+            symbol, filters.period_start, filters.period_end,
+            session=filters.session,
+            time_start=filters.time_start,
         )
 
         # extra_filters_sql содержит календарные фильтры

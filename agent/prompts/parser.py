@@ -5,7 +5,7 @@ Parser extracts WHAT user wants, not HOW to get it.
 Minimal structure, maximum simplicity.
 """
 
-from agent.query_builder.instruments import get_instrument
+from agent.market.instruments import get_instrument
 
 
 def _format_instrument_context(symbol: str) -> str:
@@ -50,7 +50,8 @@ Extract facts from user's question. Do NOT make decisions — just extract.
     "weekdays": ["Friday"] or null,
     "months": [1, 12] or null,
     "session": "RTH" or null,
-    "conditions": ["raw condition text"] or null
+    "conditions": ["raw condition text"] or null,
+    "event_filter": "opex" | "nfp" | "quad_witching" | "vix_exp" | "fomc" | "cpi" or null
   },
 
   "modifiers": {
@@ -78,16 +79,23 @@ Extract facts from user's question. Do NOT make decisions — just extract.
    - Weekdays in English: ["Monday", "Friday"]
    - Session ONLY if named: "RTH", "ETH", "OVERNIGHT"
    - Conditions as raw text: ["range > 300", "close - low >= 200"]
+   - event_filter for market events:
+     * "OPEX", "expiration", "экспирация" → "opex"
+     * "NFP", "non-farm", "нонфарм" → "nfp"
+     * "Quad Witching", "квадвитчинг" → "quad_witching"
+     * "VIX expiration" → "vix_exp"
+     * "FOMC", "ставка", "rate decision" → "fomc"
+     * "CPI", "инфляция" → "cpi"
 
 4. Modifiers — special requests:
    - "compare X vs Y" → compare: ["X", "Y"]
    - "top 10" → top_n: 10
    - "by month" → group_by: "month"
 
-5. Unclear — when user's intent is ambiguous:
-   - Specific date without year (e.g., "May 16") → ["year"]
-   - Specific date WITH year but without session → ["session"]
-   - "volatile" without threshold → ["threshold"]
+5. Unclear — ONLY for missing required info:
+   - Date without year → ["year"] (need to know which year)
+   - Specific date WITH year but without session → ["session"] (need to know RTH/ETH/full day)
+   - Do NOT mark subjective terms (huge, volatile, crazy, etc.) as unclear — interpret as top_n instead
 
 6. Summary — conversational confirmation:
    - Write in the SAME language as user's question
@@ -178,6 +186,18 @@ Q: "Top 10 volatile days in 2024"
 }
 ```
 
+Q: "Find me days with huge moves last year"
+```json
+{
+  "what": "huge moves days",
+  "period": {"raw": "last year", "start": "2025-01-01", "end": "2025-12-31"},
+  "filters": {},
+  "modifiers": {"top_n": 10},
+  "unclear": [],
+  "summary": "Got it! Finding days with the biggest moves last year."
+}
+```
+
 Q: "RTH vs ETH range"
 ```json
 {
@@ -187,6 +207,42 @@ Q: "RTH vs ETH range"
   "modifiers": {"compare": ["RTH", "ETH"]},
   "unclear": [],
   "summary": "Got it! Comparing RTH vs ETH range across all available data."
+}
+```
+
+Q: "Show me OPEX days for 2024"
+```json
+{
+  "what": "OPEX days",
+  "period": {"raw": "2024", "start": "2024-01-01", "end": "2024-12-31"},
+  "filters": {"event_filter": "opex"},
+  "modifiers": {},
+  "unclear": [],
+  "summary": "Got it! Showing all options expiration days in 2024."
+}
+```
+
+Q: "NFP statistics for 2023-2024"
+```json
+{
+  "what": "NFP statistics",
+  "period": {"raw": "2023-2024", "start": "2023-01-01", "end": "2024-12-31"},
+  "filters": {"event_filter": "nfp"},
+  "modifiers": {},
+  "unclear": [],
+  "summary": "Understood! I'll show statistics for Non-Farm Payroll days 2023-2024."
+}
+```
+
+Q: "Статистика по дням экспирации"
+```json
+{
+  "what": "expiration statistics",
+  "period": {},
+  "filters": {"event_filter": "opex"},
+  "modifiers": {},
+  "unclear": [],
+  "summary": "Понял! Покажу статистику по дням экспирации опционов."
 }
 ```
 
@@ -223,6 +279,45 @@ Q: "Hello"
   "modifiers": null,
   "unclear": [],
   "summary": "Hello! How can I help you with trading data today?"
+}
+```
+
+History: "User: what was jan 10\\nAssistant: Which year?"
+Q: "2024"
+```json
+{
+  "what": "day data",
+  "period": {"raw": "jan 10 2024", "dates": ["2024-01-10"]},
+  "filters": {},
+  "modifiers": {},
+  "unclear": ["session"],
+  "summary": "Looking at January 10, 2024. Which session — RTH or full day?"
+}
+```
+
+History: "User: 2024\\nAssistant: Looking at January 10, 2024. Which session — RTH or full day?"
+Q: "RTH"
+```json
+{
+  "what": "day data",
+  "period": {"raw": "January 10, 2024", "dates": ["2024-01-10"]},
+  "filters": {"session": "RTH"},
+  "modifiers": {},
+  "unclear": [],
+  "summary": "Got it! Showing RTH data for January 10, 2024."
+}
+```
+
+History: "User: What was May 16, 2024?\\nAssistant: Which session — RTH or full day?"
+Q: "Calendar day"
+```json
+{
+  "what": "day data",
+  "period": {"raw": "May 16, 2024", "dates": ["2024-05-16"]},
+  "filters": {"time_start": "00:00", "time_end": "23:59"},
+  "modifiers": {},
+  "unclear": [],
+  "summary": "Got it! Showing full calendar day data for May 16, 2024."
 }
 ```
 </examples>"""

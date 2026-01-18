@@ -10,24 +10,53 @@ Grouping Builders — функции для генерации GROUP BY логи
 from __future__ import annotations
 
 from agent.query_builder.types import Grouping
+from agent.market.instruments import get_session_times, list_sessions
 
 
-def get_grouping_column(grouping: Grouping) -> str:
+def _build_session_case(symbol: str) -> str:
+    """Build dynamic CASE expression for session classification.
+
+    Uses session times from instruments.py (single source of truth).
+    """
+    sessions = list_sessions(symbol)
+    if not sessions:
+        # Fallback if no instrument config
+        return """CASE
+        WHEN time BETWEEN '09:30:00' AND '17:00:00' THEN 'RTH'
+        ELSE 'ETH'
+    END as session"""
+
+    # Build CASE with actual session times
+    # Priority: RTH first (most specific), then others
+    cases = []
+
+    # RTH is the main session
+    rth_times = get_session_times(symbol, "RTH")
+    if rth_times:
+        start, end = rth_times
+        start = start if len(start.split(":")) == 3 else f"{start}:00"
+        end = end if len(end.split(":")) == 3 else f"{end}:00"
+        cases.append(f"WHEN time BETWEEN '{start}' AND '{end}' THEN 'RTH'")
+
+    # Default to ETH for everything else
+    cases.append("ELSE 'ETH'")
+
+    case_body = "\n        ".join(cases)
+    return f"""CASE
+        {case_body}
+    END as session"""
+
+
+def get_grouping_column(grouping: Grouping, symbol: str = "NQ") -> str:
     """
     Возвращает SELECT колонку для группировки.
 
     Args:
         grouping: Тип группировки
+        symbol: Инструмент (для SESSION — берёт времена из instruments.py)
 
     Returns:
         SQL выражение для SELECT или пустую строку
-
-    Examples:
-        >>> get_grouping_column(Grouping.YEAR)
-        "YEAR(date) as year"
-
-        >>> get_grouping_column(Grouping.WEEKDAY)
-        "DAYNAME(date) as weekday, DAYOFWEEK(date) as day_num"
     """
     if grouping == Grouping.NONE:
         return "date"
@@ -56,10 +85,7 @@ def get_grouping_column(grouping: Grouping) -> str:
         return "DAYNAME(date) as weekday, DAYOFWEEK(date) as day_num"
 
     elif grouping == Grouping.SESSION:
-        return """CASE
-        WHEN time BETWEEN '09:30:00' AND '16:00:00' THEN 'RTH'
-        ELSE 'ETH'
-    END as session"""
+        return _build_session_case(symbol)
 
     elif grouping.is_time_based():
         # Группировка по времени суток (5min, 15min, hour, etc.)
@@ -70,19 +96,16 @@ def get_grouping_column(grouping: Grouping) -> str:
     raise ValueError(f"Unknown grouping type: {grouping}")
 
 
-def get_grouping_expression(grouping: Grouping) -> str:
+def get_grouping_expression(grouping: Grouping, symbol: str = "NQ") -> str:
     """
     Возвращает выражение для GROUP BY.
 
     Args:
         grouping: Тип группировки
+        symbol: Инструмент (для консистентности API, не используется)
 
     Returns:
         SQL выражение для GROUP BY или пустую строку
-
-    Note:
-        GROUP BY выражение может отличаться от SELECT колонки.
-        Например, для WEEKDAY в SELECT два поля, но GROUP BY по обоим.
     """
     if grouping == Grouping.DAY:
         return "date"

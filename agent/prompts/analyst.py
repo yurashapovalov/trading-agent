@@ -188,6 +188,7 @@ def get_analyst_prompt(
     chat_history: list = None,
     search_condition: str = None,
     holiday_info: dict = None,
+    event_info: dict = None,
     assumptions: list = None,
 ) -> str:
     """
@@ -201,7 +202,8 @@ def get_analyst_prompt(
         issues: Validation issues if rewriting
         chat_history: Previous messages for context
         search_condition: Natural language condition for filtering data
-        holiday_info: Info about holidays in requested dates (from Understander)
+        holiday_info: Info about holidays in requested dates (from Barb)
+        event_info: Info about events in requested dates (OPEX, NFP, etc. from Barb)
         assumptions: List of assumptions made by Understander (for transparency)
 
     Returns:
@@ -241,6 +243,22 @@ def get_analyst_prompt(
         else:
             holiday_context = f"\n\n<holiday_notice>\nNote: Some requested dates are market holidays: {holiday_list}. These days will have no data in the results.\n</holiday_notice>"
 
+    # Format event context if present (OPEX, NFP, Quad Witching, etc.)
+    event_context = ""
+    if event_info:
+        event_dates = event_info.get("dates", [])
+        events_map = event_info.get("events", {})
+        event_list = ", ".join(
+            f"{d} ({', '.join(events_map.get(d, []))})"
+            for d in event_dates
+        )
+        high_impact = event_info.get("high_impact_count", 0)
+
+        if high_impact > 0:
+            event_context = f"\n\n<event_context>\nIMPORTANT: Requested dates include high-impact events: {event_list}. These events typically cause increased volatility. Mention this in your analysis if relevant to the data patterns.\n</event_context>"
+        else:
+            event_context = f"\n\n<event_context>\nNote: Requested dates include market events: {event_list}. Consider mentioning if relevant.\n</event_context>"
+
     # Rewrite case
     if previous_response and issues:
         return SYSTEM_PROMPT + "\n" + USER_PROMPT_REWRITE.format(
@@ -263,14 +281,14 @@ def get_analyst_prompt(
             data=json.dumps(data, indent=2, default=str),
             search_condition=search_condition,
             question=question,
-        ) + assumptions_context + holiday_context
+        ) + assumptions_context + holiday_context + event_context
 
     # Data (default)
     return SYSTEM_PROMPT + "\n" + USER_PROMPT_DATA.format(
         chat_history=history_str,
         data=json.dumps(data, indent=2, default=str),
         question=question,
-    ) + assumptions_context + holiday_context
+    ) + assumptions_context + holiday_context + event_context
 
 
 # =============================================================================
@@ -301,6 +319,7 @@ def get_analyst_prompt_streaming(
     chat_history: list = None,
     search_condition: str = None,
     holiday_info: dict = None,
+    event_info: dict = None,
     assumptions: list = None,
 ) -> str:
     """
@@ -343,6 +362,22 @@ def get_analyst_prompt_streaming(
         else:
             holiday_context = f"\n\n<holiday_notice>\nNote: Some requested dates are market holidays: {holiday_list}. These days will have no data in the results.\n</holiday_notice>"
 
+    # Format event context if present (OPEX, NFP, Quad Witching, etc.)
+    event_context = ""
+    if event_info:
+        event_dates = event_info.get("dates", [])
+        events_map = event_info.get("events", {})
+        event_list = ", ".join(
+            f"{d} ({', '.join(events_map.get(d, []))})"
+            for d in event_dates
+        )
+        high_impact = event_info.get("high_impact_count", 0)
+
+        if high_impact > 0:
+            event_context = f"\n\n<event_context>\nIMPORTANT: Requested dates include high-impact events: {event_list}. These events typically cause increased volatility. Mention this in your analysis if relevant to the data patterns.\n</event_context>"
+        else:
+            event_context = f"\n\n<event_context>\nNote: Requested dates include market events: {event_list}. Consider mentioning if relevant.\n</event_context>"
+
     # Add search condition hint if present
     task_suffix = ""
     if search_condition:
@@ -354,7 +389,7 @@ def get_analyst_prompt_streaming(
         question=question,
     )
 
-    return prompt + task_suffix + assumptions_context + holiday_context
+    return prompt + task_suffix + assumptions_context + holiday_context + event_context
 
 
 # =============================================================================

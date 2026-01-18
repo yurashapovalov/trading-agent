@@ -21,9 +21,8 @@ if TYPE_CHECKING:
     from agent.query_builder.types import QuerySpec
 
 from agent.query_builder.types import SpecialOp
-from agent.query_builder.source.common import OHLCV_TABLE, get_trading_date_expression
-from agent.query_builder.sql_utils import safe_sql_symbol, safe_sql_date
-from agent.query_builder.instruments import get_trading_day_boundaries
+from agent.query_builder.source.common import OHLCV_TABLE, build_trading_day_timestamp_filter
+from agent.query_builder.sql_utils import safe_sql_symbol
 from .base import SpecialOpBuilder, SpecialOpRegistry
 
 
@@ -38,41 +37,6 @@ class EventTimeOpBuilder(SpecialOpBuilder):
     """
 
     op_type = SpecialOp.EVENT_TIME
-
-    def _get_trading_day_filter(
-        self,
-        symbol: str,
-        period_start: str,
-        period_end: str,
-        session: str | None = None,
-        time_start: str | None = None
-    ) -> tuple[str, str]:
-        """
-        Get timestamp filter and date expression for trading day.
-
-        Returns:
-            (timestamp_filter, trading_date_expr)
-        """
-        safe_start = safe_sql_date(period_start)
-        safe_end = safe_sql_date(period_end)
-
-        trading_bounds = get_trading_day_boundaries(symbol)
-
-        if not session and not time_start and trading_bounds:
-            day_start, day_end = trading_bounds
-            day_start_time = day_start if len(day_start.split(":")) == 3 else f"{day_start}:00"
-            day_end_time = day_end if len(day_end.split(":")) == 3 else f"{day_end}:00"
-
-            # DuckDB: (date - interval)::date + time::time -> timestamp
-            timestamp_filter = f"""timestamp >= (({safe_start}::date - INTERVAL '1 day')::date + '{day_start_time}'::time)
-      AND timestamp < (({safe_end}::date - INTERVAL '1 day')::date + '{day_end_time}'::time)"""
-            trading_date_expr = get_trading_date_expression(symbol)
-        else:
-            timestamp_filter = f"""timestamp >= {safe_start}
-      AND timestamp < {safe_end}"""
-            trading_date_expr = "timestamp::date"
-
-        return timestamp_filter, trading_date_expr
 
     def build_query(
         self,
@@ -130,7 +94,7 @@ class EventTimeOpBuilder(SpecialOpBuilder):
     ) -> str:
         """Запрос для одного типа события (high, low, open, close, max_volume)."""
         safe_symbol = safe_sql_symbol(symbol)
-        timestamp_filter, trading_date_expr = self._get_trading_day_filter(
+        timestamp_filter, trading_date_expr = build_trading_day_timestamp_filter(
             symbol, period_start, period_end, session, time_start
         )
 
@@ -192,7 +156,7 @@ ORDER BY time_bucket"""
     ) -> str:
         """UNION запрос для high И low."""
         safe_symbol = safe_sql_symbol(symbol)
-        timestamp_filter, trading_date_expr = self._get_trading_day_filter(
+        timestamp_filter, trading_date_expr = build_trading_day_timestamp_filter(
             symbol, period_start, period_end, session, time_start
         )
 
@@ -260,7 +224,7 @@ ORDER BY event_type DESC, time_bucket"""
     ) -> str:
         """UNION запрос для всех событий: open, high, low, close, max_volume."""
         safe_symbol = safe_sql_symbol(symbol)
-        timestamp_filter, trading_date_expr = self._get_trading_day_filter(
+        timestamp_filter, trading_date_expr = build_trading_day_timestamp_filter(
             symbol, period_start, period_end, session, time_start
         )
 

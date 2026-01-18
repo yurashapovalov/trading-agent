@@ -14,9 +14,125 @@ JSON Schema for LLM is auto-generated from these types in schema.py.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from enum import Enum
 from typing import Literal
+
+from pydantic import BaseModel, Field
+
+
+# =============================================================================
+# PARSED QUERY — Parser → Composer contract
+# =============================================================================
+
+class ParsedPeriod(BaseModel):
+    """Period extracted from user question."""
+
+    raw: str | None = None
+    start: str | None = None  # YYYY-MM-DD, inclusive
+    end: str | None = None    # YYYY-MM-DD, inclusive
+    dates: list[str] | None = None  # specific dates
+
+
+class ParsedFilters(BaseModel):
+    """Filters extracted from user question."""
+
+    weekdays: list[str] | None = None
+    months: list[int] | None = None
+    session: str | None = None
+    time_start: str | None = None  # HH:MM for calendar day
+    time_end: str | None = None    # HH:MM for calendar day
+    conditions: list[str] | None = None  # raw strings like "close - low >= 200"
+    event_filter: str | None = None  # "opex", "nfp", "quad_witching", "fomc", etc.
+
+
+class ParsedModifiers(BaseModel):
+    """Query modifiers: grouping, top_n, compare."""
+
+    group_by: str | None = None
+    top_n: int | None = None
+    compare: list[str] | None = None
+
+
+class ParsedQuery(BaseModel):
+    """
+    Parser output — structured extraction from user question.
+
+    This is the contract between Parser (LLM) and Composer (code).
+    Parser fills this, Composer validates and converts to QuerySpec.
+    """
+
+    what: str  # "statistics", "day data", "range comparison", "explain gap", "greeting"
+    period: ParsedPeriod | None = None
+    filters: ParsedFilters | None = None
+    modifiers: ParsedModifiers | None = None
+    unclear: list[str] = Field(default_factory=list)  # fields needing clarification
+    summary: str = ""  # human-readable summary
+
+    def merge_with(self, new: "ParsedQuery") -> "ParsedQuery":
+        """Merge new parsed data with this (base) data.
+
+        Used in clarification flow: base contains previously resolved data,
+        new contains freshly parsed data. New values take priority,
+        base provides fallback for missing fields.
+        """
+        merged_period = None
+        if new.period or self.period:
+            new_p = new.period or ParsedPeriod()
+            base_p = self.period or ParsedPeriod()
+            merged_period = ParsedPeriod(
+                raw=new_p.raw or base_p.raw,
+                start=new_p.start or base_p.start,
+                end=new_p.end or base_p.end,
+                dates=new_p.dates or base_p.dates,
+            )
+
+        merged_filters = None
+        if new.filters or self.filters:
+            new_f = new.filters or ParsedFilters()
+            base_f = self.filters or ParsedFilters()
+            merged_filters = ParsedFilters(
+                weekdays=new_f.weekdays or base_f.weekdays,
+                months=new_f.months or base_f.months,
+                session=new_f.session or base_f.session,
+                time_start=new_f.time_start or base_f.time_start,
+                time_end=new_f.time_end or base_f.time_end,
+                conditions=new_f.conditions or base_f.conditions,
+                event_filter=new_f.event_filter or base_f.event_filter,
+            )
+
+        merged_modifiers = None
+        if new.modifiers or self.modifiers:
+            new_m = new.modifiers or ParsedModifiers()
+            base_m = self.modifiers or ParsedModifiers()
+            merged_modifiers = ParsedModifiers(
+                group_by=new_m.group_by or base_m.group_by,
+                top_n=new_m.top_n or base_m.top_n,
+                compare=new_m.compare or base_m.compare,
+            )
+
+        return ParsedQuery(
+            what=new.what or self.what,
+            period=merged_period,
+            filters=merged_filters,
+            modifiers=merged_modifiers,
+            unclear=new.unclear,
+            summary=new.summary,
+        )
+
+
+class ClarificationState(BaseModel):
+    """Holds resolved data between clarification rounds.
+
+    Instead of relying on LLM to extract context from chat history,
+    we preserve parsed data across rounds deterministically.
+
+    Usage:
+        r1 = barb.ask("what was jan 10")  # returns state
+        r2 = barb.ask("2024", state=r1.state)  # merges with previous
+    """
+
+    original_question: str
+    resolved: ParsedQuery | None = None
 
 
 # =============================================================================
@@ -74,31 +190,14 @@ class Source(Enum):
 # FILTERS — фильтрация данных
 # =============================================================================
 
-@dataclass
-class Condition:
-    """
-    Условие фильтрации по значению колонки.
-
-    Примеры:
-        Condition("change_pct", "<", -2.0)   → change_pct < -2
-        Condition("volume", ">", 1000000)    → volume > 1000000
-        Condition("gap_pct", ">=", 1.0)      → gap_pct >= 1
-
-    Attributes:
-        column: Имя колонки для фильтрации.
-                Доступные: open, high, low, close, volume,
-                          range, change_pct, gap_pct
-        operator: Оператор сравнения: >, <, >=, <=, ==, !=
-        value: Значение для сравнения (число)
-    """
+class Condition(BaseModel):
+    """Filter condition: column operator value (e.g. change_pct < -2.0)."""
 
     column: str
     operator: Literal[">", "<", ">=", "<=", "==", "!="]
     value: float
 
     def to_sql(self) -> str:
-        """Преобразует условие в SQL выражение."""
-        # Маппинг операторов Python → SQL
         op_map = {"==": "=", "!=": "<>"}
         sql_op = op_map.get(self.operator, self.operator)
         return f"{self.column} {sql_op} {self.value}"
@@ -112,7 +211,7 @@ class Condition:
 # This file only defines the type alias for type checking.
 #
 # To get session times, use:
-#   from agent.query_builder.instruments import get_session_times
+#   from agent.market.instruments import get_session_times
 #   times = get_session_times("NQ", "RTH")  # → ("09:30", "17:00")
 
 # Type alias - actual valid sessions are defined in instruments.py per symbol
@@ -138,82 +237,100 @@ class HolidayFilter(Enum):
     """Показать ТОЛЬКО эти дни (для анализа праздничной торговли)."""
 
 
-@dataclass
-class Filters:
-    """
-    Фильтры для ограничения выборки данных.
+class PeriodFilter(BaseModel):
+    """Period boundaries for the query."""
 
-    Attributes:
-        # === Календарные фильтры ===
-        period_start: Начало периода в ISO формате (YYYY-MM-DD). Включительно.
-        period_end: Конец периода в ISO формате (YYYY-MM-DD). Не включительно.
-        specific_dates: Конкретные даты ["2005-05-16", "2003-04-12"]
-        years: Конкретные годы [2020, 2022, 2024]
-        months: Месяцы (1-12) [1, 6] для января и июня
-        weekdays: Дни недели ["Monday", "Friday"]
+    start: str  # YYYY-MM-DD, inclusive
+    end: str    # YYYY-MM-DD, exclusive for MINUTES source
+    specific_dates: list[str] | None = None  # Overrides start/end if set
 
-        # === Время суток ===
-        session: Торговая сессия (RTH, ETH, PREMARKET, etc.)
-        time_start: Начало кастомного времени (HH:MM:SS)
-        time_end: Конец кастомного времени (HH:MM:SS)
 
-        # === Условия по значениям ===
-        conditions: Список условий фильтрации [{column, operator, value}]
+class CalendarFilter(BaseModel):
+    """Calendar-based filters: years, months, weekdays."""
 
-        # === Праздники ===
-        market_holidays: Режим для дней полного закрытия (include/exclude/only)
-        early_close_days: Режим для дней раннего закрытия (include/exclude/only)
-
-    Example:
-        # Январь 2024, только RTH сессия, дни с падением > 1%
-        Filters(
-            period_start="2024-01-01",
-            period_end="2024-02-01",
-            session="RTH",
-            conditions=[Condition("change_pct", "<", -1.0)]
-        )
-
-        # Статистика без праздников
-        Filters(
-            period_start="2024-01-01",
-            period_end="2025-01-01",
-            market_holidays=HolidayFilter.EXCLUDE,
-            early_close_days=HolidayFilter.EXCLUDE
-        )
-
-        # Только укороченные дни
-        Filters(
-            period_start="2020-01-01",
-            period_end="2025-01-01",
-            early_close_days=HolidayFilter.ONLY
-        )
-    """
-
-    # Календарные фильтры
-    period_start: str
-    period_end: str
-    specific_dates: list[str] | None = None
     years: list[int] | None = None
     months: list[int] | None = None
     weekdays: list[str] | None = None
 
-    # Время суток
-    session: SessionType | None = None
-    time_start: str | None = None
-    time_end: str | None = None
 
-    # Условия по значениям
-    conditions: list[Condition] = field(default_factory=list)
+class TimeFilter(BaseModel):
+    """Intraday time filters: session or explicit time range."""
 
-    # Праздники
+    session: SessionType | None = None  # RTH, ETH, OVERNIGHT
+    start: str | None = None  # HH:MM
+    end: str | None = None    # HH:MM
+
+
+class HolidaysConfig(BaseModel):
+    """Holiday filtering configuration."""
+
     market_holidays: HolidayFilter = HolidayFilter.INCLUDE
-    """Режим для дней полного закрытия рынка (Christmas, New Year, etc.)"""
-
     early_close_days: HolidayFilter = HolidayFilter.INCLUDE
-    """Режим для дней раннего закрытия (Christmas Eve, Black Friday, etc.)"""
 
-    # Note: Session time resolution is done in query_builder/filters/time.py
-    # using instruments.py as the single source of truth for session times.
+
+class Filters(BaseModel):
+    """Query filters: period, calendar, time, conditions, holidays.
+
+    Structured into logical groups for scalability:
+    - period: date range boundaries
+    - calendar: year/month/weekday filters
+    - time: session or explicit time range
+    - conditions: price/volume conditions
+    - holidays: holiday handling config
+    """
+
+    period: PeriodFilter
+    calendar: CalendarFilter | None = None
+    time: TimeFilter | None = None
+    conditions: list[Condition] = Field(default_factory=list)
+    holidays: HolidaysConfig = Field(default_factory=HolidaysConfig)
+
+    # === Backward compatibility properties ===
+    # TODO: Remove after all usages migrated to new structure
+
+    @property
+    def period_start(self) -> str:
+        return self.period.start
+
+    @property
+    def period_end(self) -> str:
+        return self.period.end
+
+    @property
+    def specific_dates(self) -> list[str] | None:
+        return self.period.specific_dates
+
+    @property
+    def years(self) -> list[int] | None:
+        return self.calendar.years if self.calendar else None
+
+    @property
+    def months(self) -> list[int] | None:
+        return self.calendar.months if self.calendar else None
+
+    @property
+    def weekdays(self) -> list[str] | None:
+        return self.calendar.weekdays if self.calendar else None
+
+    @property
+    def session(self) -> SessionType | None:
+        return self.time.session if self.time else None
+
+    @property
+    def time_start(self) -> str | None:
+        return self.time.start if self.time else None
+
+    @property
+    def time_end(self) -> str | None:
+        return self.time.end if self.time else None
+
+    @property
+    def market_holidays(self) -> HolidayFilter:
+        return self.holidays.market_holidays
+
+    @property
+    def early_close_days(self) -> HolidayFilter:
+        return self.holidays.early_close_days
 
 
 # =============================================================================
@@ -423,61 +540,29 @@ class Metric(Enum):
         )
 
 
-@dataclass
-class MetricSpec:
-    """
-    Спецификация метрики для расчёта.
-
-    Attributes:
-        metric: Какую метрику/функцию использовать
-        column: Для агрегатов — к какой колонке применять.
-                Например: AVG("range"), SUM("volume")
-        alias: Название колонки в результате.
-               Если не указано, генерируется автоматически.
-
-    Examples:
-        # Средний диапазон
-        MetricSpec(Metric.AVG, "range", "avg_range")
-
-        # Количество записей
-        MetricSpec(Metric.COUNT, alias="trading_days")
-
-        # Просто колонка close
-        MetricSpec(Metric.CLOSE)
-    """
+class MetricSpec(BaseModel):
+    """Metric specification: what to calculate and how to name it."""
 
     metric: Metric
     column: str | None = None
     alias: str | None = None
 
     def to_sql(self) -> str:
-        """Генерирует SQL выражение для метрики."""
         m = self.metric
         col = self.column
 
-        # Агрегатные функции
-        if m == Metric.COUNT:
-            expr = "COUNT(*)"
-        elif m == Metric.AVG:
-            expr = f"ROUND(AVG({col}), 2)" if col else "AVG(*)"
-        elif m == Metric.SUM:
-            expr = f"SUM({col})" if col else "SUM(*)"
-        elif m == Metric.MIN:
-            expr = f"MIN({col})" if col else "MIN(*)"
-        elif m == Metric.MAX:
-            expr = f"MAX({col})" if col else "MAX(*)"
-        elif m == Metric.STDDEV:
-            expr = f"ROUND(STDDEV({col}), 4)" if col else "STDDEV(*)"
-        elif m == Metric.MEDIAN:
-            expr = f"PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY {col})" if col else "NULL"
-        # Простые колонки
-        else:
-            expr = m.value
+        aggregate_map = {
+            Metric.COUNT: "COUNT(*)",
+            Metric.AVG: f"ROUND(AVG({col}), 2)" if col else "AVG(*)",
+            Metric.SUM: f"SUM({col})" if col else "SUM(*)",
+            Metric.MIN: f"MIN({col})" if col else "MIN(*)",
+            Metric.MAX: f"MAX({col})" if col else "MAX(*)",
+            Metric.STDDEV: f"ROUND(STDDEV({col}), 4)" if col else "STDDEV(*)",
+            Metric.MEDIAN: f"PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY {col})" if col else "NULL",
+        }
 
-        # Добавляем alias если есть
-        if self.alias:
-            return f"{expr} as {self.alias}"
-        return expr
+        expr = aggregate_map.get(m, m.value)
+        return f"{expr} as {self.alias}" if self.alias else expr
 
 
 # =============================================================================
@@ -549,78 +634,28 @@ class SpecialOp(Enum):
     """
 
 
-@dataclass
-class EventTimeSpec:
-    """
-    Параметры для операции EVENT_TIME.
-
-    Находит распределение времени события по дням (когда ОБЫЧНО происходит).
-
-    Attributes:
-        find: Что ищем внутри каждого дня.
-              "high" — момент максимальной цены
-              "low" — момент минимальной цены
-              "open" — момент открытия (первая минутка)
-              "close" — момент закрытия (последняя минутка)
-              "max_volume" — минута с максимальным объёмом
-              "both" — high и low
-              "all" — open + high + low + close + max_volume
-    """
+class EventTimeSpec(BaseModel):
+    """When does event usually occur? Finds time distribution across days."""
 
     find: Literal["high", "low", "open", "close", "max_volume", "both", "all"]
 
 
-@dataclass
-class TopNSpec:
-    """
-    Параметры для операции TOP_N.
-
-    Attributes:
-        n: Количество записей для возврата (топ N)
-        order_by: По какой колонке сортировать
-        direction: Направление сортировки (DESC = от большего)
-    """
+class TopNSpec(BaseModel):
+    """Top N records by metric."""
 
     n: int
     order_by: str
     direction: Literal["DESC", "ASC"] = "DESC"
 
 
-@dataclass
-class CompareSpec:
-    """
-    Параметры для операции COMPARE.
-
-    Attributes:
-        items: Список элементов для сравнения.
-               Например: ["Monday", "Friday"] или ["RTH", "ETH"]
-    """
+class CompareSpec(BaseModel):
+    """Compare categories (e.g. Monday vs Friday, RTH vs ETH)."""
 
     items: list[str]
 
 
-@dataclass
-class FindExtremumSpec:
-    """
-    Параметры для операции FIND_EXTREMUM.
-
-    Находит точное время и значение события для конкретных дней.
-
-    Attributes:
-        find: Что ищем.
-              "high" — время и значение максимума
-              "low" — время и значение минимума
-              "open" — время и цена открытия (первая минутка)
-              "close" — время и цена закрытия (последняя минутка)
-              "max_volume" — минута с максимальным объёмом
-              "both" — high и low
-              "ohlc" — open + high + low + close
-              "all" — open + high + low + close + max_volume
-
-    Example output:
-        {"date": "2025-01-10", "high_time": "06:12:00", "high_value": 21543.25,
-         "low_time": "10:15:00", "low_value": 21234.50}
-    """
+class FindExtremumSpec(BaseModel):
+    """Find exact time and value of high/low for specific days."""
 
     find: Literal["high", "low", "open", "close", "max_volume", "both", "ohlc", "all"]
 
@@ -629,112 +664,49 @@ class FindExtremumSpec:
 # QUERY SPEC — полная спецификация запроса
 # =============================================================================
 
-@dataclass
-class QuerySpec:
-    """
-    Полная спецификация запроса от Understander.
+class QuerySpec(BaseModel):
+    """Full query specification: source, filters, grouping, metrics, special ops."""
 
-    QueryBuilder использует эту структуру для генерации SQL.
-    Все поля типизированы — невозможно передать невалидные данные.
-
-    Attributes:
-        symbol: Торговый инструмент (NQ, ES, CL)
-        source: Откуда данные (minutes, daily, daily_with_prev)
-        filters: Фильтры (период, время, условия)
-        grouping: Способ группировки результатов
-        metrics: Список метрик для расчёта
-        special_op: Специальная операция (если нужна)
-        event_time_spec: Параметры для EVENT_TIME
-        top_n_spec: Параметры для TOP_N
-        compare_spec: Параметры для COMPARE
-        order_by: Колонка для сортировки
-        order_direction: Направление сортировки
-        limit: Ограничение количества строк
-
-    Example:
-        # "Найди дни когда NQ упал больше 2%"
-        QuerySpec(
-            symbol="NQ",
-            source=Source.DAILY,
-            filters=Filters(
-                period_start="2020-01-01",
-                period_end="2025-01-01",
-                conditions=[Condition("change_pct", "<", -2.0)],
-            ),
-            grouping=Grouping.NONE,
-            metrics=[
-                MetricSpec(Metric.OPEN),
-                MetricSpec(Metric.CLOSE),
-                MetricSpec(Metric.CHANGE_PCT),
-            ],
-            order_by="date",
-        )
-    """
-
-    # === Обязательные поля ===
     symbol: str
     source: Source
     filters: Filters
 
-    # === Группировка и метрики ===
     grouping: Grouping = Grouping.NONE
-    metrics: list[MetricSpec] = field(default_factory=list)
+    metrics: list[MetricSpec] = Field(default_factory=list)
 
-    # === Специальные операции ===
     special_op: SpecialOp = SpecialOp.NONE
     event_time_spec: EventTimeSpec | None = None
     top_n_spec: TopNSpec | None = None
     compare_spec: CompareSpec | None = None
     find_extremum_spec: FindExtremumSpec | None = None
 
-    # === Сортировка и лимит ===
     order_by: str | None = None
     order_direction: Literal["ASC", "DESC"] = "ASC"
     limit: int | None = None
 
     def validate(self) -> list[str]:
-        """
-        Проверяет корректность спецификации.
-
-        Returns:
-            Список ошибок (пустой если всё ок)
-        """
+        """Check spec consistency. Returns list of errors (empty if valid)."""
         errors = []
 
-        # Проверка специальных операций
-        if self.special_op == SpecialOp.EVENT_TIME and not self.event_time_spec:
-            errors.append("EVENT_TIME требует event_time_spec")
+        spec_requirements = {
+            SpecialOp.EVENT_TIME: ("event_time_spec", self.event_time_spec),
+            SpecialOp.TOP_N: ("top_n_spec", self.top_n_spec),
+            SpecialOp.COMPARE: ("compare_spec", self.compare_spec),
+            SpecialOp.FIND_EXTREMUM: ("find_extremum_spec", self.find_extremum_spec),
+        }
 
-        if self.special_op == SpecialOp.TOP_N and not self.top_n_spec:
-            errors.append("TOP_N требует top_n_spec")
+        if self.special_op in spec_requirements:
+            spec_name, spec_value = spec_requirements[self.special_op]
+            if not spec_value:
+                errors.append(f"{self.special_op.name} requires {spec_name}")
 
-        if self.special_op == SpecialOp.COMPARE and not self.compare_spec:
-            errors.append("COMPARE требует compare_spec")
-
-        if self.special_op == SpecialOp.FIND_EXTREMUM and not self.find_extremum_spec:
-            errors.append("FIND_EXTREMUM требует find_extremum_spec")
-
-        # EVENT_TIME требует группировку по времени
         if self.special_op == SpecialOp.EVENT_TIME:
             if not self.grouping.is_time_based():
-                errors.append(
-                    "EVENT_TIME требует группировку по времени "
-                    "(MINUTE_5, MINUTE_15, HOUR и т.д.)"
-                )
-
-        # EVENT_TIME требует Source.MINUTES
-        if self.special_op == SpecialOp.EVENT_TIME:
+                errors.append("EVENT_TIME requires time-based grouping (HOUR, MINUTE_5, etc.)")
             if self.source != Source.MINUTES:
-                errors.append("EVENT_TIME требует source=MINUTES")
+                errors.append("EVENT_TIME requires source=MINUTES")
 
-        # FIND_EXTREMUM требует Source.MINUTES
-        if self.special_op == SpecialOp.FIND_EXTREMUM:
-            if self.source != Source.MINUTES:
-                errors.append("FIND_EXTREMUM требует source=MINUTES")
-
-        # Session filter now supported in both:
-        # - MINUTES: time filter applied to raw bars
-        # - DAILY: time filter applied during aggregation (in build_daily_aggregation_sql)
-        # No validation needed — both sources handle session correctly.
+        if self.special_op == SpecialOp.FIND_EXTREMUM and self.source != Source.MINUTES:
+            errors.append("FIND_EXTREMUM requires source=MINUTES")
 
         return errors

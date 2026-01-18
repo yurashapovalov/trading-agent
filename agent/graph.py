@@ -1,18 +1,17 @@
 """
-LangGraph v2
+LangGraph v2 — Barb Flow
 
-Упрощённый flow:
+Flow:
                     ┌─ chitchat/out_of_scope/clarification ─► Responder ──► END
                     │
-Question ─► Understander ─┤
+Question ─► Barb ───┤
                     │
                     └─ data ─► QueryBuilder ─► DataFetcher ─► Analyst ─► Validator ─► END
 
-Преимущества:
-- Нет SQL Agent (LLM для генерации SQL)
-- Нет SQL Validator + retry loop
-- QueryBuilder генерирует SQL детерминированно
-- Быстрее и надёжнее
+Barb Architecture:
+- Parser (LLM) extracts entities from question
+- Composer (code) makes business decisions, builds QuerySpec
+- QueryBuilder generates SQL deterministically
 """
 
 from typing import Literal
@@ -21,12 +20,12 @@ from langgraph.types import Command
 
 from agent.state import AgentState, create_initial_input, get_current_question, get_chat_history
 from langchain_core.messages import AIMessage
-from agent.agents.understander import Understander, query_spec_to_builder
 from agent.agents.data_fetcher import DataFetcher
 from agent.agents.analyst import Analyst
 from agent.agents.validator import Validator
 from agent.query_builder import QueryBuilder
 from agent.checkpointer import get_checkpointer
+from agent.agents.barb import Barb
 import config
 
 
@@ -34,58 +33,27 @@ import config
 # Initialize agents (singletons)
 # =============================================================================
 
-understander = Understander()
+barb = Barb()
 query_builder = QueryBuilder()
 data_fetcher = DataFetcher()
 analyst = Analyst()
 validator = Validator()
-
-# Barb (new Parser+Composer flow)
-if config.USE_BARB:
-    from agent.barb import Barb
-    barb = Barb()
 
 
 # =============================================================================
 # Node Functions
 # =============================================================================
 
-def understand_question(state: AgentState) -> Command:
-    """
-    Understander node — парсит вопрос и возвращает query_spec.
-
-    Routing:
-    - chitchat/out_of_scope/concept/clarification → responder
-    - data с query_spec → query_builder
-    - data без query_spec → data_fetcher (простые запросы)
-    """
-    result = understander(state)
-    intent = result.get("intent") or {}
-    intent_type = intent.get("type", "data")
-
-    # Определяем следующий node
-    if intent_type in ("chitchat", "out_of_scope", "concept", "clarification"):
-        next_node = "responder"
-    elif intent.get("query_spec"):
-        next_node = "query_builder"
-    else:
-        # Простой запрос без query_spec — сразу в data_fetcher
-        next_node = "data_fetcher"
-
-    return Command(update=result, goto=next_node)
-
-
 def ask_barb(state: AgentState) -> Command:
     """
-    Barb node — new Parser+Composer flow.
+    Barb node — Parser + Composer flow.
 
-    Cleaner than Understander:
     - Parser (LLM) extracts entities only
     - Composer (code) makes all business decisions
-    - Returns typed QuerySpec directly (no dict conversion!)
+    - Returns typed QuerySpec directly
 
     Routing:
-    - query → query_builder (QuerySpec passed directly via query_spec_obj)
+    - query → query_builder (QuerySpec passed via query_spec_obj)
     - clarification/greeting/concept/not_supported → responder
     """
     question = get_current_question(state)
@@ -115,6 +83,13 @@ def ask_barb(state: AgentState) -> Command:
             "summary": result.summary,
             "parser_output": parser_output,
             "holiday_info": result.holiday_info,  # Holiday info for Analyst
+            "event_info": result.event_info,  # Event info for Analyst (OPEX, NFP, etc.)
+            # Dict version for SSE streaming / tests
+            "query_spec": {
+                "special_op": result.spec.special_op.value if result.spec else None,
+                "source": result.spec.source.value if result.spec else None,
+                "grouping": result.spec.grouping.value if result.spec else None,
+            },
         }
         update["query_spec_obj"] = result.spec  # QuerySpec object directly
         next_node = "query_builder"
@@ -177,25 +152,16 @@ def _format_chat_history(chat_history: list) -> str:
 
 def build_query(state: AgentState) -> dict:
     """
-    QueryBuilder node — строит SQL из query_spec.
+    QueryBuilder node — builds SQL from QuerySpec.
 
-    Детерминированно, без LLM, всегда валидный SQL.
-
-    Supports two paths:
-    - Barb: query_spec_obj contains QuerySpec directly (no conversion)
-    - Understander: intent["query_spec"] contains dict (needs conversion)
+    Deterministic, no LLM, always valid SQL.
+    Barb passes QuerySpec directly via query_spec_obj.
     """
     try:
-        # Path 1: Barb — QuerySpec passed directly (no conversion needed!)
         query_spec = state.get("query_spec_obj")
-
-        # Path 2: Understander — need to convert dict to QuerySpec
         if query_spec is None:
-            intent = state.get("intent") or {}
-            query_spec_dict = intent.get("query_spec", {})
-            query_spec = query_spec_to_builder(query_spec_dict)
+            raise ValueError("query_spec_obj is required but not found in state")
 
-        # Build SQL
         sql = query_builder.build(query_spec)
 
         return {
@@ -206,7 +172,6 @@ def build_query(state: AgentState) -> dict:
 
     except Exception as e:
         print(f"[QueryBuilder] Error: {e}")
-        # Fallback — пустой SQL, data_fetcher использует дефолтный
         return {
             "sql_query": None,
             "query_builder_error": str(e),
@@ -281,26 +246,22 @@ def after_validation(state: AgentState) -> Literal["end", "analyst"]:
 # =============================================================================
 
 def build_graph() -> StateGraph:
-    """Строит граф агентов."""
+    """Build agent graph."""
 
     graph = StateGraph(AgentState)
 
-    # Nodes — выбираем Barb или Understander по флагу
-    if config.USE_BARB:
-        graph.add_node("understander", ask_barb)  # Barb заменяет Understander
-    else:
-        graph.add_node("understander", understand_question)
-
+    # Nodes
+    graph.add_node("barb", ask_barb)
     graph.add_node("responder", simple_respond)
     graph.add_node("query_builder", build_query)
     graph.add_node("data_fetcher", fetch_data)
     graph.add_node("analyst", analyze_data)
     graph.add_node("validator", validate_response)
 
-    # START → understander (или barb)
-    graph.add_edge(START, "understander")
+    # START → barb
+    graph.add_edge(START, "barb")
 
-    # understander/barb использует Command API для routing
+    # barb uses Command API for routing
 
     # responder → END
     graph.add_edge("responder", END)
@@ -463,11 +424,10 @@ class TradingGraph:
                     "message": self._get_agent_message(node_name)
                 }
 
-                # Обработка по типу node
-                if node_name == "understander":
+                # Handle by node type
+                if node_name == "barb":
                     intent = updates.get("intent") or {}
                     usage = updates.get("usage") or {}
-                    query_spec = intent.get("query_spec", {})
 
                     yield {
                         "type": "step_end",
@@ -479,9 +439,6 @@ class TradingGraph:
                         "result": {
                             "type": intent.get("type"),
                             "symbol": "NQ",
-                            "source": query_spec.get("source"),
-                            "grouping": query_spec.get("grouping"),
-                            "special_op": query_spec.get("special_op"),
                         },
                         "output": {
                             "intent": intent,
@@ -489,7 +446,7 @@ class TradingGraph:
                         }
                     }
                     accumulated_state["intent"] = intent
-                    # Accumulate usage from understander
+                    # Accumulate usage from barb
                     if usage:
                         accumulated_usage["input_tokens"] += usage.get("input_tokens", 0)
                         accumulated_usage["output_tokens"] += usage.get("output_tokens", 0)
@@ -630,9 +587,9 @@ class TradingGraph:
         }
 
     def _get_agent_message(self, agent: str) -> str:
-        """Возвращает сообщение для агента."""
+        """Return status message for agent."""
         messages = {
-            "understander": "Understanding question...",
+            "barb": "Understanding question...",
             "responder": "Responding...",
             "query_builder": "Building SQL query...",
             "data_fetcher": "Fetching data...",

@@ -14,10 +14,68 @@ from agent.query_builder.sql_utils import (
     safe_sql_symbol,
     safe_sql_date,
 )
-from agent.query_builder.instruments import get_instrument, get_trading_day_boundaries, get_session_times
+from agent.market.instruments import get_instrument, get_trading_day_boundaries, get_session_times
 
 # Название таблицы с минутными данными (единая точка изменения)
 OHLCV_TABLE = "ohlcv_1min"
+
+
+def build_trading_day_timestamp_filter(
+    symbol: str,
+    period_start: str,
+    period_end: str,
+    session: str | None = None,
+    time_start: str | None = None,
+) -> tuple[str, str]:
+    """
+    Build SQL filter for trading day boundaries.
+
+    For futures, trading day spans overnight: prev day 18:00 → current day 17:00.
+    This function builds the correct WHERE clause for a date range.
+
+    When session or time_start is specified, uses calendar dates instead of
+    trading day boundaries (time filtering is handled separately).
+
+    Args:
+        symbol: Instrument symbol
+        period_start: Start date (YYYY-MM-DD), inclusive
+        period_end: End date (YYYY-MM-DD), exclusive
+        session: If provided, use calendar dates (session time filtering done separately)
+        time_start: If provided, use calendar dates (custom time filtering done separately)
+
+    Returns:
+        (timestamp_filter, trading_date_expr) tuple:
+        - timestamp_filter: SQL WHERE clause fragment
+        - trading_date_expr: SQL expression for trading date
+
+    Example:
+        filter, expr = build_trading_day_timestamp_filter("NQ", "2024-01-01", "2024-01-02")
+        # filter: "timestamp >= ... AND timestamp < ..."
+        # expr: "CASE WHEN timestamp::time < '17:00:00' THEN ..."
+    """
+    safe_start = safe_sql_date(period_start)
+    safe_end = safe_sql_date(period_end)
+
+    trading_bounds = get_trading_day_boundaries(symbol)
+
+    # Use trading day boundaries only when no session/time filter is specified
+    if not session and not time_start and trading_bounds:
+        day_start, day_end = trading_bounds
+
+        # Normalize to HH:MM:SS
+        day_start_time = day_start if len(day_start.split(":")) == 3 else f"{day_start}:00"
+        day_end_time = day_end if len(day_end.split(":")) == 3 else f"{day_end}:00"
+
+        timestamp_filter = f"""timestamp >= (({safe_start}::date - INTERVAL '1 day')::date + '{day_start_time}'::time)
+      AND timestamp < (({safe_end}::date - INTERVAL '1 day')::date + '{day_end_time}'::time)"""
+        trading_date_expr = get_trading_date_expression(symbol)
+    else:
+        # Session/time specified or no trading bounds — use calendar dates
+        timestamp_filter = f"""timestamp >= {safe_start}
+      AND timestamp < {safe_end}"""
+        trading_date_expr = "timestamp::date"
+
+    return timestamp_filter, trading_date_expr
 
 
 def get_trading_date_expression(symbol: str) -> str:
@@ -65,6 +123,7 @@ def build_daily_aggregation_sql(
     period_start: str,
     period_end: str,
     session: str | None = None,
+    time_start: str | None = None,
 ) -> str:
     """
     Строит SQL для агрегации минуток в дневные бары.
@@ -82,6 +141,10 @@ def build_daily_aggregation_sql(
         If session is provided (e.g., "RTH"), only bars within that session's
         time range are included in the aggregation.
 
+    Calendar Day:
+        If time_start is provided (e.g., "00:00"), uses calendar dates instead
+        of trading day boundaries. This is for "calendar day" queries.
+
     Это базовый CTE который используется в:
     - daily.py (Source.DAILY)
     - daily_with_prev.py (Source.DAILY_WITH_PREV)
@@ -93,6 +156,7 @@ def build_daily_aggregation_sql(
         period_start: Начало периода (YYYY-MM-DD)
         period_end: Конец периода (YYYY-MM-DD)
         session: Опционально — сессия для фильтрации (RTH, ETH, etc.)
+        time_start: Опционально — начало времени для calendar day (HH:MM)
 
     Returns:
         SQL для daily_raw CTE (без WITH, без запятой в конце)
@@ -100,33 +164,13 @@ def build_daily_aggregation_sql(
     Raises:
         ValidationError: Если входные данные невалидны
     """
-    # Валидация и безопасное экранирование
     safe_symbol = safe_sql_symbol(symbol)
-    safe_start = safe_sql_date(period_start)
-    safe_end = safe_sql_date(period_end)
 
-    # Get trading date expression for this instrument
-    trading_date_expr = get_trading_date_expression(symbol)
-
-    # Get trading day boundaries for timestamp filtering
-    trading_bounds = get_trading_day_boundaries(symbol)
-
-    if trading_bounds:
-        # Use trading day boundaries instead of calendar dates
-        day_start, day_end = trading_bounds  # e.g., ("18:00", "17:00")
-
-        # Normalize times to HH:MM:SS
-        day_start_time = day_start if len(day_start.split(":")) == 3 else f"{day_start}:00"
-        day_end_time = day_end if len(day_end.split(":")) == 3 else f"{day_end}:00"
-
-        # DuckDB: (date - interval)::date + time::time -> timestamp
-        # Cast back to date before adding time to avoid TIMESTAMP + TIME error
-        timestamp_filter = f"""timestamp >= (({safe_start}::date - INTERVAL '1 day')::date + '{day_start_time}'::time)
-      AND timestamp < (({safe_end}::date - INTERVAL '1 day')::date + '{day_end_time}'::time)"""
-    else:
-        # Fallback to calendar dates
-        timestamp_filter = f"""timestamp >= {safe_start}
-      AND timestamp < {safe_end}"""
+    # Use centralized helper for trading day boundaries
+    # Pass time_start to signal calendar day mode
+    timestamp_filter, trading_date_expr = build_trading_day_timestamp_filter(
+        symbol, period_start, period_end, time_start=time_start
+    )
 
     # Session time filter (e.g., RTH 09:30-17:00)
     session_filter = ""

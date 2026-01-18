@@ -5,6 +5,7 @@ Tests full flow: Barb → QueryBuilder → DataFetcher → Analyst
 Handles clarifications automatically by selecting first option.
 
 Run: python -m agent.scripts.barb_test
+     python -m agent.scripts.barb_test --fast  # Skip Analyst (faster)
 """
 
 import json
@@ -12,8 +13,7 @@ import os
 from datetime import datetime
 from pathlib import Path
 
-# Force USE_BARB=true and ANALYST_FAST_MODE=true for this test
-os.environ["USE_BARB"] = "true"
+# Force ANALYST_FAST_MODE=true for this test
 os.environ["ANALYST_FAST_MODE"] = "true"
 
 # Reload config to pick up the flag
@@ -23,6 +23,11 @@ importlib.reload(config)
 
 from agent.graph import TradingGraph
 from agent.state import create_initial_input
+
+# Fast mode components (skip Analyst)
+from agent.agents.barb import Barb
+from agent.query_builder import QueryBuilder
+from agent.agents.data_fetcher import DataFetcher
 
 
 # =============================================================================
@@ -68,6 +73,12 @@ TEST_QUESTIONS = [
     "Win rate for gap down strategy",
     "Days after 3+ days of growth in a row",
 
+    # === Events ===
+    "what's the volatility on expiration days?",  # OPEX — calculable
+    "how does NQ behave on NFP?",                 # NFP — calculable
+    "volatility on FOMC days",                    # FOMC — not supported (no calendar)
+    "статистика по дням экспирации",              # Russian + OPEX
+
     # === Russian ===
     "Статистика по пятницам 2020-2025 где close - low >= 200",
     "Что было 16 мая 2024?",
@@ -98,44 +109,219 @@ def get_clarification_response(suggestions: list[str]) -> str:
 
 
 # =============================================================================
+# Fast Mode (skip Analyst)
+# =============================================================================
+
+def run_fast_question(
+    barb: Barb,
+    query_builder: QueryBuilder,
+    data_fetcher: DataFetcher,
+    question: str,
+    max_rounds: int = 3,
+    force_clarification_choice: str | None = None,
+) -> dict:
+    """
+    Run question through Barb → QueryBuilder → DataFetcher (skip Analyst).
+
+    Faster for testing — validates parsing and data fetching without LLM analysis.
+    """
+    start_time = datetime.now()
+    chat_history = ""
+    current_question = question
+    rounds = []
+    clarification_options = None  # Store first clarification options
+    clarification_state = None  # Track state between clarification rounds
+
+    for round_num in range(max_rounds):
+        round_start = datetime.now()
+
+        try:
+            # Step 1: Barb (Parser + Composer) — pass state for multi-round context
+            barb_result = barb.ask(current_question, chat_history=chat_history, state=clarification_state)
+            round_time = int((datetime.now() - round_start).total_seconds() * 1000)
+
+            round_data = {
+                "round": round_num + 1,
+                "question": current_question,
+                "barb_type": barb_result.type,
+                "time_ms": round_time,
+                "parser_output": barb_result.parser_output,
+            }
+
+            # Handle different result types
+            if barb_result.type == "clarification":
+                options = barb_result.options or []
+                round_data["clarification"] = {
+                    "text": barb_result.summary,
+                    "suggestions": options,
+                }
+
+                # Store options from first clarification
+                if round_num == 0 and options:
+                    clarification_options = options
+
+                if options:
+                    # Use forced choice or auto-select first
+                    if force_clarification_choice and round_num == 0:
+                        selected = force_clarification_choice
+                    else:
+                        selected = get_clarification_response(options)
+                    round_data["selected"] = selected
+                    chat_history = f"User: {current_question}\nAssistant: {barb_result.summary}"
+                    clarification_state = barb_result.state  # Preserve state for next round
+                    current_question = selected
+                    rounds.append(round_data)
+                    continue
+                elif "year" in barb_result.summary.lower() or "год" in barb_result.summary.lower():
+                    # Year clarification without buttons — simulate typing year
+                    selected = "2024"
+                    round_data["selected"] = selected
+                    chat_history = f"User: {current_question}\nAssistant: {barb_result.summary}"
+                    clarification_state = barb_result.state  # Preserve state for next round
+                    current_question = selected
+                    rounds.append(round_data)
+                    continue
+                else:
+                    round_data["error"] = "Clarification without suggestions"
+                    rounds.append(round_data)
+                    break
+
+            elif barb_result.type in ("greeting", "concept", "not_supported"):
+                # Non-data types — success, no data fetch needed
+                rounds.append(round_data)
+                return {
+                    "original_question": question,
+                    "rounds": len(rounds),
+                    "round_details": rounds,
+                    "final_type": {"greeting": "chitchat", "concept": "concept", "not_supported": "out_of_scope"}[barb_result.type],
+                    "success": True,
+                    "error": None,
+                    "total_time_ms": int((datetime.now() - start_time).total_seconds() * 1000),
+                    "summary": barb_result.summary,
+                    "parser_output": barb_result.parser_output,
+                    "clarification_options": clarification_options,
+                }
+
+            elif barb_result.type == "query":
+                # Data query — build SQL and fetch data
+                spec = barb_result.spec
+                sql = query_builder.build(spec)
+
+                # Fetch data using DataFetcher
+                state = {
+                    "sql_query": sql,
+                    "intent": {"query_spec": {}},
+                }
+                fetch_result = data_fetcher(state)
+                data = fetch_result.get("data", {})
+
+                round_data["intent_type"] = "data"
+                round_data["sql_preview"] = sql[:100] if sql else None
+                rounds.append(round_data)
+
+                total_time = int((datetime.now() - start_time).total_seconds() * 1000)
+
+                return {
+                    "original_question": question,
+                    "rounds": len(rounds),
+                    "round_details": rounds,
+                    "final_type": "data",
+                    "success": True,
+                    "error": None,
+                    "total_time_ms": total_time,
+                    "row_count": data.get("row_count", 0),
+                    "columns": data.get("columns", []),
+                    "sql_query": sql,
+                    "parser_output": barb_result.parser_output,
+                    "clarification_options": clarification_options,
+                }
+
+        except Exception as e:
+            rounds.append({
+                "round": round_num + 1,
+                "question": current_question,
+                "error": str(e),
+            })
+            break
+
+    total_time = int((datetime.now() - start_time).total_seconds() * 1000)
+
+    return {
+        "original_question": question,
+        "rounds": len(rounds),
+        "round_details": rounds,
+        "final_type": rounds[-1].get("intent_type", "error") if rounds else "error",
+        "success": False,
+        "error": rounds[-1].get("error") if rounds else "Unknown error",
+        "total_time_ms": total_time,
+    }
+
+
+# =============================================================================
 # Test Runner
 # =============================================================================
 
-def run_barb_test(max_clarification_rounds: int = 3, test_all_clarifications: bool = True):
+def run_barb_test(
+    max_clarification_rounds: int = 3,
+    test_all_clarifications: bool = True,
+    fast_mode: bool = False,
+):
     """
     Run full end-to-end test with Barb.
 
     Args:
         max_clarification_rounds: Max rounds per question
         test_all_clarifications: If True, test ALL clarification options, not just first
+        fast_mode: If True, skip Analyst (Barb → QueryBuilder → DataFetcher only)
     """
+    mode_str = "FAST (no Analyst)" if fast_mode else "FULL (with Analyst)"
     print(f"\n{'='*70}")
-    print("Barb End-to-End Test")
+    print(f"Barb End-to-End Test — {mode_str}")
     print(f"USE_BARB: {config.USE_BARB}")
-    print(f"ANALYST_FAST_MODE: {config.ANALYST_FAST_MODE}")
     print(f"Questions: {len(TEST_QUESTIONS)}")
     print(f"Test all clarifications: {test_all_clarifications}")
     print(f"{'='*70}\n")
 
-    graph = TradingGraph()
+    # Initialize components
+    if fast_mode:
+        barb = Barb()
+        query_builder = QueryBuilder()
+        data_fetcher = DataFetcher()
+        graph = None
+    else:
+        barb = None
+        query_builder = None
+        data_fetcher = None
+        graph = TradingGraph()
+
     results = []
 
     for i, question in enumerate(TEST_QUESTIONS, 1):
         print(f"[{i}/{len(TEST_QUESTIONS)}] Q: {question[:50]}...")
 
-        result = run_single_question(
-            graph,
-            question,
-            user_id="barb_test",
-            session_id=f"test_{i}_{datetime.now().strftime('%H%M%S')}",
-            max_rounds=max_clarification_rounds,
-        )
+        session_id = f"test_{i}_{datetime.now().strftime('%H%M%S')}"
+
+        if fast_mode:
+            result = run_fast_question(
+                barb, query_builder, data_fetcher,
+                question,
+                max_rounds=max_clarification_rounds,
+            )
+        else:
+            result = run_single_question(
+                graph,
+                question,
+                user_id="barb_test",
+                session_id=session_id,
+                max_rounds=max_clarification_rounds,
+            )
 
         results.append(result)
 
         # Summary
         status = "✓" if result["success"] else "✗"
-        print(f"    {status} {result['final_type']} | {result['total_time_ms']}ms | rounds: {result['rounds']}")
+        rows_info = f", rows={result.get('row_count', '?')}" if result.get("row_count") else ""
+        print(f"    {status} {result['final_type']} | {result['total_time_ms']}ms{rows_info}")
         if result.get("error"):
             print(f"    Error: {result['error']}")
 
@@ -145,21 +331,30 @@ def run_barb_test(max_clarification_rounds: int = 3, test_all_clarifications: bo
             print(f"    Testing all {len(options)} clarification options...")
 
             for opt_idx, option in enumerate(options[1:], 2):  # Skip first (already tested)
-                opt_result = run_single_question(
-                    graph,
-                    question,
-                    user_id="barb_test",
-                    session_id=f"test_{i}_opt{opt_idx}_{datetime.now().strftime('%H%M%S')}",
-                    max_rounds=max_clarification_rounds,
-                    force_clarification_choice=option,
-                )
+                if fast_mode:
+                    opt_result = run_fast_question(
+                        barb, query_builder, data_fetcher,
+                        question,
+                        max_rounds=max_clarification_rounds,
+                        force_clarification_choice=option,
+                    )
+                else:
+                    opt_result = run_single_question(
+                        graph,
+                        question,
+                        user_id="barb_test",
+                        session_id=f"test_{i}_opt{opt_idx}_{datetime.now().strftime('%H%M%S')}",
+                        max_rounds=max_clarification_rounds,
+                        force_clarification_choice=option,
+                    )
 
                 opt_result["original_question"] = question
                 opt_result["clarification_option_tested"] = option
                 results.append(opt_result)
 
                 opt_status = "✓" if opt_result["success"] else "✗"
-                print(f"      [{opt_idx}/{len(options)}] {option[:30]}... → {opt_status} {opt_result['total_time_ms']}ms")
+                rows_info = f", rows={opt_result.get('row_count', '?')}" if opt_result.get("row_count") else ""
+                print(f"      [{opt_idx}/{len(options)}] {option[:30]}... → {opt_status} {opt_result['total_time_ms']}ms{rows_info}")
 
         print()
 
@@ -241,16 +436,25 @@ def run_single_question(
                     else:
                         selected = get_clarification_response(suggestions)
                     round_data["selected"] = selected
-                    # Combine original question with clarification choice
-                    current_question = f"{question}: {selected}"
+                    # Send just the selection — checkpointer preserves history
+                    current_question = selected
                     rounds.append(round_data)
                     continue
                 else:
-                    # No suggestions, can't continue
-                    round_data["error"] = "No suggestions provided"
-                    rounds.append(round_data)
-                    error = "Clarification without suggestions"
-                    break
+                    # No suggestions — check if it's a year/text clarification
+                    # Simulate user typing a year
+                    if "year" in response_text.lower() or "год" in response_text.lower():
+                        selected = "2024"
+                        round_data["selected"] = selected
+                        current_question = selected
+                        rounds.append(round_data)
+                        continue
+                    else:
+                        # Unknown clarification without suggestions
+                        round_data["error"] = "No suggestions provided"
+                        rounds.append(round_data)
+                        error = "Clarification without suggestions"
+                        break
 
             # Not clarification — we have final result
             rounds.append(round_data)
@@ -391,8 +595,12 @@ if __name__ == "__main__":
     import sys
 
     max_rounds = 3
+    fast_mode = False
+
     for arg in sys.argv:
         if arg.startswith("--max-rounds="):
             max_rounds = int(arg.split("=")[1])
+        elif arg == "--fast":
+            fast_mode = True
 
-    run_barb_test(max_clarification_rounds=max_rounds)
+    run_barb_test(max_clarification_rounds=max_rounds, fast_mode=fast_mode)

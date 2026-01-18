@@ -5,7 +5,7 @@ Calculates actual dates from holiday rules (e.g., "3rd Monday of January").
 Determines if a date is a regular trading day, early close, or full closure.
 
 Usage:
-    from agent.query_builder.holidays import get_day_type, get_close_time
+    from agent.market import get_day_type, get_close_time
 
     day_type = get_day_type("NQ", "2024-12-25")  # "closed"
     day_type = get_day_type("NQ", "2024-12-24")  # "early_close"
@@ -16,7 +16,7 @@ Usage:
 from datetime import date, timedelta
 from typing import Literal
 
-from agent.query_builder.instruments import get_instrument
+from agent.market.instruments import get_instrument
 
 
 # =============================================================================
@@ -296,3 +296,87 @@ def is_trading_day(symbol: str, check_date: str | date) -> bool:
         return False
 
     return get_day_type(symbol, check_date) != "closed"
+
+
+# =============================================================================
+# Holiday Names (human-readable)
+# =============================================================================
+
+HOLIDAY_NAMES = {
+    "new_year": "New Year's Day",
+    "mlk_day": "Martin Luther King Jr. Day",
+    "presidents_day": "Presidents Day",
+    "good_friday": "Good Friday",
+    "memorial_day": "Memorial Day",
+    "juneteenth": "Juneteenth",
+    "independence_day": "Independence Day",
+    "labor_day": "Labor Day",
+    "thanksgiving": "Thanksgiving",
+    "christmas": "Christmas Day",
+    # Early close days
+    "independence_day_eve": "Day before Independence Day",
+    "black_friday": "Black Friday",
+    "christmas_eve": "Christmas Eve",
+    "new_year_eve": "New Year's Eve",
+}
+
+
+def check_dates_for_holidays(
+    dates: list[str],
+    symbol: str = "NQ",
+) -> dict | None:
+    """
+    Check if any requested dates fall on market holidays or early close.
+
+    Returns None if no issues, or dict with holiday info for Analyst.
+    """
+    if not dates:
+        return None
+
+    instrument = get_instrument(symbol)
+    if not instrument:
+        return None
+
+    holidays_config = instrument.get("holidays", {})
+
+    # Build date -> name maps for requested years
+    years = {int(d[:4]) for d in dates if len(d) >= 4}
+
+    full_close_map = {}  # date_str -> name
+    early_close_map = {}  # date_str -> name
+
+    for year in years:
+        # Full close holidays
+        for rule in holidays_config.get("full_close", []):
+            d = get_holiday_date(rule, year)
+            if d:
+                full_close_map[d.isoformat()] = HOLIDAY_NAMES.get(rule, "Market Holiday")
+
+        # Early close holidays
+        for rule in holidays_config.get("early_close", {}).keys():
+            d = get_holiday_date(rule, year)
+            if d:
+                early_close_map[d.isoformat()] = HOLIDAY_NAMES.get(rule, "Early Close")
+
+    # Check requested dates
+    holiday_dates = []
+    early_close_dates = []
+    holiday_names = {}
+
+    for d in dates:
+        if d in full_close_map:
+            holiday_dates.append(d)
+            holiday_names[d] = full_close_map[d]
+        elif d in early_close_map:
+            early_close_dates.append(d)
+            holiday_names[d] = early_close_map[d] + " (early close)"
+
+    if not holiday_dates and not early_close_dates:
+        return None
+
+    return {
+        "holiday_dates": holiday_dates,
+        "early_close_dates": early_close_dates,
+        "holiday_names": holiday_names,
+        "all_holidays": len(holiday_dates) == len(dates),
+    }

@@ -23,10 +23,9 @@ if TYPE_CHECKING:
     from agent.query_builder.types import Filters
 
 from agent.query_builder.types import Source
-from agent.query_builder.sql_utils import safe_sql_symbol, safe_sql_date
-from agent.query_builder.instruments import get_trading_day_boundaries
+from agent.query_builder.sql_utils import safe_sql_symbol
 from .base import SourceBuilder, SourceRegistry
-from .common import OHLCV_TABLE, get_trading_date_expression
+from .common import OHLCV_TABLE, build_trading_day_timestamp_filter
 
 
 @SourceRegistry.register
@@ -56,41 +55,16 @@ class MinutesSourceBuilder(SourceBuilder):
         Raises:
             ValidationError: Если входные данные невалидны
         """
-        period_start = filters.period_start
-        period_end = filters.period_end
-
-        # Валидация входных данных
         safe_symbol = safe_sql_symbol(symbol)
-        safe_start = safe_sql_date(period_start)
-        safe_end = safe_sql_date(period_end)
 
-        # Determine timestamp filtering based on session
-        # If session is specified, time filtering is handled by build_time_filter_sql
-        # If session is NOT specified, use trading day boundaries (not calendar day)
-        trading_bounds = get_trading_day_boundaries(symbol)
-
-        if not filters.session and not filters.time_start and trading_bounds:
-            # Use trading day boundaries
-            # Trading day for date D: (D-1 day) at day_start → D at day_end
-            # period_start/period_end are dates, period_end is exclusive
-            day_start, day_end = trading_bounds  # e.g., ("18:00", "17:00")
-
-            # Normalize times to HH:MM:SS
-            day_start_time = day_start if len(day_start.split(":")) == 3 else f"{day_start}:00"
-            day_end_time = day_end if len(day_end.split(":")) == 3 else f"{day_end}:00"
-
-            # Trading date expression for grouping
-            trading_date_expr = get_trading_date_expression(symbol)
-
-            # DuckDB: (date - interval)::date + time::time -> timestamp
-            timestamp_filter = f"""timestamp >= (({safe_start}::date - INTERVAL '1 day')::date + '{day_start_time}'::time)
-      AND timestamp < (({safe_end}::date - INTERVAL '1 day')::date + '{day_end_time}'::time)"""
-        else:
-            # Session is specified or custom time - use calendar dates
-            # Time filtering will be added by build_time_filter_sql
-            trading_date_expr = "timestamp::date"
-            timestamp_filter = f"""timestamp >= {safe_start}
-      AND timestamp < {safe_end}"""
+        # Use centralized helper for trading day boundaries
+        timestamp_filter, trading_date_expr = build_trading_day_timestamp_filter(
+            symbol,
+            filters.period_start,
+            filters.period_end,
+            session=filters.session,
+            time_start=filters.time_start,
+        )
 
         return f"""WITH minutes AS (
     SELECT

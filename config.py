@@ -46,7 +46,7 @@ ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", _default_origins).split(",")
 CHAT_HISTORY_LIMIT = 10  # Max recent messages to include in LLM context (sliding window)
 
 # Feature flags
-USE_BARB = os.getenv("USE_BARB", "false").lower() == "true"  # New Parser+Composer flow
+USE_BARB = os.getenv("USE_BARB", "true").lower() == "true"  # Parser+Composer flow (default)
 ANALYST_FAST_MODE = os.getenv("ANALYST_FAST_MODE", "false").lower() == "true"  # Skip JSON/stats, plain text
 
 # Trading symbols config

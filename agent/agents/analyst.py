@@ -80,7 +80,8 @@ class Analyst:
         data = state.get("data") or {}
         intent = state.get("intent") or {}
         intent_type = intent.get("type", "data")
-        holiday_info = intent.get("holiday_info")  # From Understander if dates are holidays
+        holiday_info = intent.get("holiday_info")  # From Barb if dates are holidays
+        event_info = intent.get("event_info")  # From Barb if dates have events (OPEX, NFP, etc.)
         assumptions = intent.get("assumptions")  # From Understander if defaults were used
 
         # Check if rewrite needed
@@ -114,6 +115,7 @@ class Analyst:
                 data=data,
                 chat_history=chat_history,
                 holiday_info=holiday_info,
+                event_info=event_info,
                 assumptions=assumptions,
             )
             return self._generate_with_streaming(prompt, writer, state)
@@ -127,6 +129,7 @@ class Analyst:
                 issues=issues,
                 chat_history=chat_history,
                 holiday_info=holiday_info,
+                event_info=event_info,
                 assumptions=assumptions,
             )
             return self._generate_batch(prompt, state)
@@ -341,7 +344,7 @@ class Analyst:
                 data = json.loads(json_str)
                 if "stats" in data:
                     return Stats(**data["stats"])
-        except:
+        except (json.JSONDecodeError, KeyError, TypeError, ValueError):
             pass
         return None
 

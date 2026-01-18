@@ -20,9 +20,9 @@ if TYPE_CHECKING:
     from agent.query_builder.types import QuerySpec
 
 from agent.query_builder.types import SpecialOp
-from agent.query_builder.source.common import OHLCV_TABLE, get_trading_date_expression
-from agent.query_builder.sql_utils import safe_sql_symbol, safe_sql_date
-from agent.query_builder.instruments import get_trading_day_boundaries, get_session_times
+from agent.query_builder.source.common import OHLCV_TABLE, build_trading_day_timestamp_filter
+from agent.query_builder.sql_utils import safe_sql_symbol
+from agent.market.instruments import get_session_times
 from .base import SpecialOpBuilder, SpecialOpRegistry
 
 
@@ -95,29 +95,15 @@ class CompareOpBuilder(SpecialOpBuilder):
         return "unknown"
 
     def _get_base_filter(self, spec: "QuerySpec") -> tuple[str, str, str]:
-        """Get base filters for query."""
+        """Get base filters for query using centralized helper."""
         symbol = spec.symbol
         safe_symbol = safe_sql_symbol(symbol)
 
-        period_start = spec.filters.period_start
-        period_end = spec.filters.period_end
-        safe_start = safe_sql_date(period_start)
-        safe_end = safe_sql_date(period_end)
-
-        trading_bounds = get_trading_day_boundaries(symbol)
-
-        if trading_bounds:
-            day_start, day_end = trading_bounds
-            day_start_time = day_start if len(day_start.split(":")) == 3 else f"{day_start}:00"
-            day_end_time = day_end if len(day_end.split(":")) == 3 else f"{day_end}:00"
-
-            timestamp_filter = f"""timestamp >= (({safe_start}::date - INTERVAL '1 day')::date + '{day_start_time}'::time)
-      AND timestamp < (({safe_end}::date - INTERVAL '1 day')::date + '{day_end_time}'::time)"""
-        else:
-            timestamp_filter = f"""timestamp >= {safe_start}
-      AND timestamp < {safe_end}"""
-
-        trading_date_expr = get_trading_date_expression(symbol)
+        timestamp_filter, trading_date_expr = build_trading_day_timestamp_filter(
+            symbol,
+            spec.filters.period_start,
+            spec.filters.period_end,
+        )
 
         return safe_symbol, timestamp_filter, trading_date_expr
 

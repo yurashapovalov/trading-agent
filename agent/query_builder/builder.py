@@ -162,7 +162,7 @@ class QueryBuilder:
         """Build SELECT clause with metrics and grouping columns."""
         columns = []
 
-        group_col = get_grouping_column(spec.grouping)
+        group_col = get_grouping_column(spec.grouping, spec.symbol)
         if group_col:
             columns.append(group_col)
 
@@ -188,7 +188,7 @@ class QueryBuilder:
         """Build GROUP BY clause based on grouping type."""
         if spec.grouping in (Grouping.NONE, Grouping.TOTAL):
             return ""
-        return get_grouping_expression(spec.grouping)
+        return get_grouping_expression(spec.grouping, spec.symbol)
 
     def _build_order_by(self, spec: QuerySpec) -> str:
         """Build ORDER BY clause based on grouping or explicit order."""
@@ -203,7 +203,7 @@ class QueryBuilder:
         if grouping == Grouping.TOTAL:
             return ""
 
-        return get_grouping_expression(grouping)
+        return get_grouping_expression(grouping, spec.symbol)
 
     # =========================================================================
     # Utilities

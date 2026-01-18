@@ -101,18 +101,22 @@ class ValidationError(ValueError):
 
 def validate_date(value: str, field_name: str = "date") -> str:
     """
-    Валидирует ISO дату (YYYY-MM-DD).
+    Валидирует ISO дату (YYYY-MM-DD или YYYY-MM-DDTHH:MM:SS).
 
     Args:
         value: Строка с датой
         field_name: Имя поля для сообщения об ошибке
 
     Returns:
-        Валидная дата
+        Валидная дата (только YYYY-MM-DD часть)
 
     Raises:
         ValidationError: Если формат неверный
     """
+    # Handle ISO datetime format (extract date part)
+    if "T" in value:
+        value = value.split("T")[0]
+
     if not DATE_PATTERN.match(value):
         raise ValidationError(
             f"Invalid {field_name}: '{value}'. Expected format: YYYY-MM-DD"

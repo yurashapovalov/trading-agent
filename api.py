@@ -618,8 +618,8 @@ async def chat_stream(request: ChatRequest, user_id: str = Depends(require_auth)
                     duration_ms = event.get("duration_ms", 0)
                     result = event.get("result") or {}
 
-                    # Get route from understander
-                    if agent_name == "understander":
+                    # Get route from barb
+                    if agent_name == "barb":
                         route = result.get("type")
 
                     # Log trace step (use 'output' for full data, fallback to 'result')

@@ -41,7 +41,9 @@ class DailyWithPrevSourceBuilder(SourceBuilder):
         3. daily_with_prev: LAG колонки
         """
         daily_raw = build_daily_aggregation_sql(
-            symbol, filters.period_start, filters.period_end
+            symbol, filters.period_start, filters.period_end,
+            session=filters.session,
+            time_start=filters.time_start,
         )
 
         calendar_where = f"WHERE {extra_filters_sql}" if extra_filters_sql else ""

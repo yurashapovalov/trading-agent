@@ -1,0 +1,1434 @@
+{
+  "meta": {
+    "timestamp": "2026-01-18T16:25:51.896992",
+    "total_questions": 30,
+    "successful": 26,
+    "failed": 4,
+    "use_barb": true,
+    "analyst_fast_mode": true
+  },
+  "results": [
+    {
+      "original_question": "Statistics for Fridays 2020-2025 where close - low >= 200",
+      "rounds": 1,
+      "round_details": [
+        {
+          "round": 1,
+          "question": "Statistics for Fridays 2020-2025 where close - low >= 200",
+          "barb_type": "query",
+          "time_ms": 1184,
+          "parser_output": {
+            "what": "statistics",
+            "period": {
+              "raw": "2020-2025",
+              "start": "2020-01-01",
+              "end": "2025-12-31"
+            },
+            "filters": {
+              "weekdays": [
+                "Friday"
+              ],
+              "conditions": [
+                "close - low >= 200"
+              ]
+            },
+            "modifiers": {},
+            "unclear": [],
+            "summary": "Got it! I'll show statistics for Fridays 2020-2025 where close - low >= 200."
+          },
+          "intent_type": "data",
+          "sql_preview": "WITH daily_raw AS (\n    SELECT\n        (CASE\n        WHEN timestamp::time < '17:00:00'::time\n       "
+        }
+      ],
+      "final_type": "data",
+      "success": true,
+      "error": null,
+      "total_time_ms": 1439,
+      "row_count": 1,
+      "columns": [
+        "avg_range",
+        "avg_change",
+        "volatility",
+        "count"
+      ],
+      "sql_query": "WITH daily_raw AS (\n    SELECT\n        (CASE\n        WHEN timestamp::time < '17:00:00'::time\n        THEN timestamp::date\n        ELSE timestamp::date + INTERVAL '1 day'\n    END)::date as date,\n        FIRST(open ORDER BY timestamp) as open,\n        MAX(high) as high,\n        MIN(low) as low,\n        LAST(close ORDER BY timestamp) as close,\n        SUM(volume) as volume,\n        -- Basic metrics\n        ROUND(MAX(high) - MIN(low), 2) as range,\n        ROUND((LAST(close ORDER BY timestamp) - FIRST(open ORDER BY timestamp))\n              / NULLIF(FIRST(open ORDER BY timestamp), 0) * 100, 2) as change_pct,\n        -- Close to extremes\n        ROUND(LAST(close ORDER BY timestamp) - MIN(low), 2) as close_to_low,\n        ROUND(MAX(high) - LAST(close ORDER BY timestamp), 2) as close_to_high,\n        -- Open to extremes\n        ROUND(MAX(high) - FIRST(open ORDER BY timestamp), 2) as open_to_high,\n        ROUND(FIRST(open ORDER BY timestamp) - MIN(low), 2) as open_to_low,\n        -- Candle structure\n        ROUND(ABS(LAST(close ORDER BY timestamp) - FIRST(open ORDER BY timestamp)), 2) as body,\n        ROUND(MAX(high) - GREATEST(FIRST(open ORDER BY timestamp), LAST(close ORDER BY timestamp)), 2) as upper_wick,\n        ROUND(LEAST(FIRST(open ORDER BY timestamp), LAST(close ORDER BY timestamp)) - MIN(low), 2) as lower_wick\n    FROM ohlcv_1min\n    WHERE symbol = 'NQ'\n      AND timestamp >= (('2020-01-01'::date - INTERVAL '1 day')::date + '18:00:00'::time)\n      AND timestamp < (('2026-01-01'::date - INTERVAL '1 day')::date + '17:00:00'::time)\n    GROUP BY (CASE\n        WHEN timestamp::time < '17:00:00'::time\n        THEN timestamp::date\n        ELSE timestamp::date + INTERVAL '1 day'\n    END)::date\n),\ndaily AS (\n    SELECT * FROM daily_raw\n    WHERE DAYNAME(date) IN ('Friday')\n)\nSELECT\n    ROUND(AVG(range), 2) as avg_range,\n    ROUND(AVG(change_pct), 2) as avg_change,\n    ROUND(STDDEV(change_pct), 4) as volatility,\n    COUNT(*) as count\nFROM daily\nWHERE close_to_low >= 200.0",
+      "parser_output": {
+        "what": "statistics",
+        "period": {
+          "raw": "2020-2025",
+          "start": "2020-01-01",
+          "end": "2025-12-31"
+        },
+        "filters": {
+          "weekdays": [
+            "Friday"
+          ],
+          "conditions": [
+            "close - low >= 200"
+          ]
+        },
+        "modifiers": {},
+        "unclear": [],
+        "summary": "Got it! I'll show statistics for Fridays 2020-2025 where close - low >= 200."
+      },
+      "clarification_options": null
+    },
+    {
+      "original_question": "Fridays where price closed 200+ points above the low",
+      "rounds": 1,
+      "round_details": [
+        {
+          "round": 1,
+          "question": "Fridays where price closed 200+ points above the low",
+          "barb_type": "query",
+          "time_ms": 851,
+          "parser_output": {
+            "what": "days statistics",
+            "period": {},
+            "filters": {
+              "weekdays": [
+                "Friday"
+              ],
+              "conditions": [
+                "close - low >= 200"
+              ]
+            },
+            "modifiers": {},
+            "unclear": [],
+            "summary": "Got it! Showing statistics for Fridays where the price closed 200+ points above the low."
+          },
+          "intent_type": "data",
+          "sql_preview": "WITH daily_raw AS (\n    SELECT\n        (CASE\n        WHEN timestamp::time < '17:00:00'::time\n       "
+        }
+      ],
+      "final_type": "data",
+      "success": true,
+      "error": null,
+      "total_time_ms": 901,
+      "row_count": 1,
+      "columns": [
+        "avg_range",
+        "avg_change",
+        "volatility",
+        "count"
+      ],
+      "sql_query": "WITH daily_raw AS (\n    SELECT\n        (CASE\n        WHEN timestamp::time < '17:00:00'::time\n        THEN timestamp::date\n        ELSE timestamp::date + INTERVAL '1 day'\n    END)::date as date,\n        FIRST(open ORDER BY timestamp) as open,\n        MAX(high) as high,\n        MIN(low) as low,\n        LAST(close ORDER BY timestamp) as close,\n        SUM(volume) as volume,\n        -- Basic metrics\n        ROUND(MAX(high) - MIN(low), 2) as range,\n        ROUND((LAST(close ORDER BY timestamp) - FIRST(open ORDER BY timestamp))\n              / NULLIF(FIRST(open ORDER BY timestamp), 0) * 100, 2) as change_pct,\n        -- Close to extremes\n        ROUND(LAST(close ORDER BY timestamp) - MIN(low), 2) as close_to_low,\n        ROUND(MAX(high) - LAST(close ORDER BY timestamp), 2) as close_to_high,\n        -- Open to extremes\n        ROUND(MAX(high) - FIRST(open ORDER BY timestamp), 2) as open_to_high,\n        ROUND(FIRST(open ORDER BY timestamp) - MIN(low), 2) as open_to_low,\n        -- Candle structure\n        ROUND(ABS(LAST(close ORDER BY timestamp) - FIRST(open ORDER BY timestamp)), 2) as body,\n        ROUND(MAX(high) - GREATEST(FIRST(open ORDER BY timestamp), LAST(close ORDER BY timestamp)), 2) as upper_wick,\n        ROUND(LEAST(FIRST(open ORDER BY timestamp), LAST(close ORDER BY timestamp)) - MIN(low), 2) as lower_wick\n    FROM ohlcv_1min\n    WHERE symbol = 'NQ'\n      AND timestamp >= (('2008-01-02'::date - INTERVAL '1 day')::date + '18:00:00'::time)\n      AND timestamp < (('2026-01-08'::date - INTERVAL '1 day')::date + '17:00:00'::time)\n    GROUP BY (CASE\n        WHEN timestamp::time < '17:00:00'::time\n        THEN timestamp::date\n        ELSE timestamp::date + INTERVAL '1 day'\n    END)::date\n),\ndaily AS (\n    SELECT * FROM daily_raw\n    WHERE DAYNAME(date) IN ('Friday')\n)\nSELECT\n    ROUND(AVG(range), 2) as avg_range,\n    ROUND(AVG(change_pct), 2) as avg_change,\n    ROUND(STDDEV(change_pct), 4) as volatility,\n    COUNT(*) as count\nFROM daily\nWHERE close_to_low >= 200.0",
+      "parser_output": {
+        "what": "days statistics",
+        "period": {},
+        "filters": {
+          "weekdays": [
+            "Friday"
+          ],
+          "conditions": [
+            "close - low >= 200"
+          ]
+        },
+        "modifiers": {},
+        "unclear": [],
+        "summary": "Got it! Showing statistics for Fridays where the price closed 200+ points above the low."
+      },
+      "clarification_options": null
+    },
+    {
+      "original_question": "Statistics for 2024",
+      "rounds": 1,
+      "round_details": [
+        {
+          "round": 1,
+          "question": "Statistics for 2024",
+          "barb_type": "query",
+          "time_ms": 885,
+          "parser_output": {
+            "what": "statistics",
+            "period": {
+              "raw": "2024",
+              "start": "2024-01-01",
+              "end": "2024-12-31"
+            },
+            "filters": {},
+            "modifiers": {},
+            "unclear": [],
+            "summary": "Got it! I'll show statistics for 2024."
+          },
+          "intent_type": "data",
+          "sql_preview": "WITH daily_raw AS (\n    SELECT\n        (CASE\n        WHEN timestamp::time < '17:00:00'::time\n       "
+        }
+      ],
+      "final_type": "data",
+      "success": true,
+      "error": null,
+      "total_time_ms": 916,
+      "row_count": 1,
+      "columns": [
+        "avg_range",
+        "avg_change",
+        "volatility",
+        "count"
+      ],
+      "sql_query": "WITH daily_raw AS (\n    SELECT\n        (CASE\n        WHEN timestamp::time < '17:00:00'::time\n        THEN timestamp::date\n        ELSE timestamp::date + INTERVAL '1 day'\n    END)::date as date,\n        FIRST(open ORDER BY timestamp) as open,\n        MAX(high) as high,\n        MIN(low) as low,\n        LAST(close ORDER BY timestamp) as close,\n        SUM(volume) as volume,\n        -- Basic metrics\n        ROUND(MAX(high) - MIN(low), 2) as range,\n        ROUND((LAST(close ORDER BY timestamp) - FIRST(open ORDER BY timestamp))\n              / NULLIF(FIRST(open ORDER BY timestamp), 0) * 100, 2) as change_pct,\n        -- Close to extremes\n        ROUND(LAST(close ORDER BY timestamp) - MIN(low), 2) as close_to_low,\n        ROUND(MAX(high) - LAST(close ORDER BY timestamp), 2) as close_to_high,\n        -- Open to extremes\n        ROUND(MAX(high) - FIRST(open ORDER BY timestamp), 2) as open_to_high,\n        ROUND(FIRST(open ORDER BY timestamp) - MIN(low), 2) as open_to_low,\n        -- Candle structure\n        ROUND(ABS(LAST(close ORDER BY timestamp) - FIRST(open ORDER BY timestamp)), 2) as body,\n        ROUND(MAX(high) - GREATEST(FIRST(open ORDER BY timestamp), LAST(close ORDER BY timestamp)), 2) as upper_wick,\n        ROUND(LEAST(FIRST(open ORDER BY timestamp), LAST(close ORDER BY timestamp)) - MIN(low), 2) as lower_wick\n    FROM ohlcv_1min\n    WHERE symbol = 'NQ'\n      AND timestamp >= (('2024-01-01'::date - INTERVAL '1 day')::date + '18:00:00'::time)\n      AND timestamp < (('2025-01-01'::date - INTERVAL '1 day')::date + '17:00:00'::time)\n    GROUP BY (CASE\n        WHEN timestamp::time < '17:00:00'::time\n        THEN timestamp::date\n        ELSE timestamp::date + INTERVAL '1 day'\n    END)::date\n),\ndaily AS (\n    SELECT * FROM daily_raw\n    \n)\nSELECT\n    ROUND(AVG(range), 2) as avg_range,\n    ROUND(AVG(change_pct), 2) as avg_change,\n    ROUND(STDDEV(change_pct), 4) as volatility,\n    COUNT(*) as count\nFROM daily",
+      "parser_output": {
+        "what": "statistics",
+        "period": {
+          "raw": "2024",
+          "start": "2024-01-01",
+          "end": "2024-12-31"
+        },
+        "filters": {},
+        "modifiers": {},
+        "unclear": [],
+        "summary": "Got it! I'll show statistics for 2024."
+      },
+      "clarification_options": null
+    },
+    {
+      "original_question": "Average range by month for 2024",
+      "rounds": 1,
+      "round_details": [
+        {
+          "round": 1,
+          "question": "Average range by month for 2024",
+          "barb_type": "query",
+          "time_ms": 2174,
+          "parser_output": {
+            "what": "average range",
+            "period": {
+              "raw": "2024",
+              "start": "2024-01-01",
+              "end": "2024-12-31"
+            },
+            "filters": {},
+            "modifiers": {
+              "group_by": "month"
+            },
+            "unclear": [],
+            "summary": "Got it! I'll show the average range by month for 2024."
+          },
+          "intent_type": "data",
+          "sql_preview": "WITH daily_raw AS (\n    SELECT\n        (CASE\n        WHEN timestamp::time < '17:00:00'::time\n       "
+        }
+      ],
+      "final_type": "data",
+      "success": true,
+      "error": null,
+      "total_time_ms": 2207,
+      "row_count": 12,
+      "columns": [
+        "month",
+        "avg_range",
+        "avg_change",
+        "volatility",
+        "count"
+      ],
+      "sql_query": "WITH daily_raw AS (\n    SELECT\n        (CASE\n        WHEN timestamp::time < '17:00:00'::time\n        THEN timestamp::date\n        ELSE timestamp::date + INTERVAL '1 day'\n    END)::date as date,\n        FIRST(open ORDER BY timestamp) as open,\n        MAX(high) as high,\n        MIN(low) as low,\n        LAST(close ORDER BY timestamp) as close,\n        SUM(volume) as volume,\n        -- Basic metrics\n        ROUND(MAX(high) - MIN(low), 2) as range,\n        ROUND((LAST(close ORDER BY timestamp) - FIRST(open ORDER BY timestamp))\n              / NULLIF(FIRST(open ORDER BY timestamp), 0) * 100, 2) as change_pct,\n        -- Close to extremes\n        ROUND(LAST(close ORDER BY timestamp) - MIN(low), 2) as close_to_low,\n        ROUND(MAX(high) - LAST(close ORDER BY timestamp), 2) as close_to_high,\n        -- Open to extremes\n        ROUND(MAX(high) - FIRST(open ORDER BY timestamp), 2) as open_to_high,\n        ROUND(FIRST(open ORDER BY timestamp) - MIN(low), 2) as open_to_low,\n        -- Candle structure\n        ROUND(ABS(LAST(close ORDER BY timestamp) - FIRST(open ORDER BY timestamp)), 2) as body,\n        ROUND(MAX(high) - GREATEST(FIRST(open ORDER BY timestamp), LAST(close ORDER BY timestamp)), 2) as upper_wick,\n        ROUND(LEAST(FIRST(open ORDER BY timestamp), LAST(close ORDER BY timestamp)) - MIN(low), 2) as lower_wick\n    FROM ohlcv_1min\n    WHERE symbol = 'NQ'\n      AND timestamp >= (('2024-01-01'::date - INTERVAL '1 day')::date + '18:00:00'::time)\n      AND timestamp < (('2025-01-01'::date - INTERVAL '1 day')::date + '17:00:00'::time)\n    GROUP BY (CASE\n        WHEN timestamp::time < '17:00:00'::time\n        THEN timestamp::date\n        ELSE timestamp::date + INTERVAL '1 day'\n    END)::date\n),\ndaily AS (\n    SELECT * FROM daily_raw\n    \n)\nSELECT\n    STRFTIME(date, '%Y-%m') as month,\n    ROUND(AVG(range), 2) as avg_range,\n    ROUND(AVG(change_pct), 2) as avg_change,\n    ROUND(STDDEV(change_pct), 4) as volatility,\n    COUNT(*) as count\nFROM daily\nGROUP BY STRFTIME(date, '%Y-%m')\nORDER BY STRFTIME(date, '%Y-%m')",
+      "parser_output": {
+        "what": "average range",
+        "period": {
+          "raw": "2024",
+          "start": "2024-01-01",
+          "end": "2024-12-31"
+        },
+        "filters": {},
+        "modifiers": {
+          "group_by": "month"
+        },
+        "unclear": [],
+        "summary": "Got it! I'll show the average range by month for 2024."
+      },
+      "clarification_options": null
+    },
+    {
+      "original_question": "may 16 2024",
+      "rounds": 2,
+      "round_details": [
+        {
+          "round": 1,
+          "question": "may 16 2024",
+          "barb_type": "clarification",
+          "time_ms": 2585,
+          "parser_output": {
+            "what": "day data",
+            "period": {
+              "raw": "may 16 2024",
+              "dates": [
+                "2024-05-16"
+              ]
+            },
+            "filters": {},
+            "modifiers": {},
+            "unclear": [
+              "session"
+            ],
+            "summary": "Looking at May 16, 2024. Which session do you want — RTH or full day?"
+          },
+          "clarification": {
+            "text": "Looking at May 16, 2024. Which session do you want — RTH or full day?",
+            "suggestions": [
+              "RTH (09:30-17:00 ET)",
+              "ETH (18:00 prev - 17:00 ET)",
+              "Calendar day (00:00-23:59 ET)"
+            ]
+          },
+          "selected": "RTH (09:30-17:00 ET)"
+        },
+        {
+          "round": 2,
+          "question": "RTH (09:30-17:00 ET)",
+          "error": "503 UNAVAILABLE. {'error': {'code': 503, 'message': 'The model is overloaded. Please try again later.', 'status': 'UNAVAILABLE'}}"
+        }
+      ],
+      "final_type": "error",
+      "success": false,
+      "error": "503 UNAVAILABLE. {'error': {'code': 503, 'message': 'The model is overloaded. Please try again later.', 'status': 'UNAVAILABLE'}}",
+      "total_time_ms": 3123
+    },
+    {
+      "original_question": "what was jan 10",
+      "rounds": 3,
+      "round_details": [
+        {
+          "round": 1,
+          "question": "what was jan 10",
+          "barb_type": "clarification",
+          "time_ms": 844,
+          "parser_output": {
+            "what": "day data",
+            "period": {
+              "raw": "jan 10"
+            },
+            "filters": {},
+            "modifiers": {},
+            "unclear": [
+              "year"
+            ],
+            "summary": "Which year do you mean — or should I show all Jan 10ths?"
+          },
+          "clarification": {
+            "text": "Which year for jan 10? Or say 'all years' to see all.",
+            "suggestions": []
+          },
+          "selected": "2024"
+        },
+        {
+          "round": 2,
+          "question": "2024",
+          "barb_type": "clarification",
+          "time_ms": 755,
+          "parser_output": {
+            "what": "day data",
+            "period": {
+              "raw": "jan 10 2024",
+              "dates": [
+                "2024-01-10"
+              ]
+            },
+            "filters": {},
+            "modifiers": {},
+            "unclear": [
+              "session"
+            ],
+            "summary": "Looking at January 10, 2024. Which session — RTH or full day?"
+          },
+          "clarification": {
+            "text": "Looking at January 10, 2024. Which session — RTH or full day?",
+            "suggestions": [
+              "RTH (09:30-17:00 ET)",
+              "ETH (18:00 prev - 17:00 ET)",
+              "Calendar day (00:00-23:59 ET)"
+            ]
+          },
+          "selected": "RTH (09:30-17:00 ET)"
+        },
+        {
+          "round": 3,
+          "question": "RTH (09:30-17:00 ET)",
+          "barb_type": "query",
+          "time_ms": 1102,
+          "parser_output": {
+            "what": "day data",
+            "period": {
+              "raw": "January 10, 2024",
+              "dates": [
+                "2024-01-10"
+              ]
+            },
+            "filters": {
+              "session": "RTH"
+            },
+            "modifiers": {},
+            "unclear": [],
+            "summary": "Got it! Showing RTH data for January 10, 2024."
+          },
+          "intent_type": "data",
+          "sql_preview": "WITH daily_raw AS (\n    SELECT\n        (CASE\n        WHEN timestamp::time < '17:00:00'::time\n       "
+        }
+      ],
+      "final_type": "data",
+      "success": true,
+      "error": null,
+      "total_time_ms": 2726,
+      "row_count": 1,
+      "columns": [
+        "open",
+        "high",
+        "low",
+        "close",
+        "range"
+      ],
+      "sql_query": "WITH daily_raw AS (\n    SELECT\n        (CASE\n        WHEN timestamp::time < '17:00:00'::time\n        THEN timestamp::date\n        ELSE timestamp::date + INTERVAL '1 day'\n    END)::date as date,\n        FIRST(open ORDER BY timestamp) as open,\n        MAX(high) as high,\n        MIN(low) as low,\n        LAST(close ORDER BY timestamp) as close,\n        SUM(volume) as volume,\n        -- Basic metrics\n        ROUND(MAX(high) - MIN(low), 2) as range,\n        ROUND((LAST(close ORDER BY timestamp) - FIRST(open ORDER BY timestamp))\n              / NULLIF(FIRST(open ORDER BY timestamp), 0) * 100, 2) as change_pct,\n        -- Close to extremes\n        ROUND(LAST(close ORDER BY timestamp) - MIN(low), 2) as close_to_low,\n        ROUND(MAX(high) - LAST(close ORDER BY timestamp), 2) as close_to_high,\n        -- Open to extremes\n        ROUND(MAX(high) - FIRST(open ORDER BY timestamp), 2) as open_to_high,\n        ROUND(FIRST(open ORDER BY timestamp) - MIN(low), 2) as open_to_low,\n        -- Candle structure\n        ROUND(ABS(LAST(close ORDER BY timestamp) - FIRST(open ORDER BY timestamp)), 2) as body,\n        ROUND(MAX(high) - GREATEST(FIRST(open ORDER BY timestamp), LAST(close ORDER BY timestamp)), 2) as upper_wick,\n        ROUND(LEAST(FIRST(open ORDER BY timestamp), LAST(close ORDER BY timestamp)) - MIN(low), 2) as lower_wick\n    FROM ohlcv_1min\n    WHERE symbol = 'NQ'\n      AND timestamp >= (('2024-01-10'::date - INTERVAL '1 day')::date + '18:00:00'::time)\n      AND timestamp < (('2024-01-11'::date - INTERVAL '1 day')::date + '17:00:00'::time)\n      AND timestamp::time BETWEEN '09:30:00' AND '17:00:00'\n    GROUP BY (CASE\n        WHEN timestamp::time < '17:00:00'::time\n        THEN timestamp::date\n        ELSE timestamp::date + INTERVAL '1 day'\n    END)::date\n),\ndaily AS (\n    SELECT * FROM daily_raw\n    WHERE date IN ('2024-01-10')\n)\nSELECT\n    open as open,\n    high as high,\n    low as low,\n    close as close,\n    range as range\nFROM daily",
+      "parser_output": {
+        "what": "day data",
+        "period": {
+          "raw": "January 10, 2024",
+          "dates": [
+            "2024-01-10"
+          ]
+        },
+        "filters": {
+          "session": "RTH"
+        },
+        "modifiers": {},
+        "unclear": [],
+        "summary": "Got it! Showing RTH data for January 10, 2024."
+      },
+      "clarification_options": null
+    },
+    {
+      "original_question": "What happened on December 25 те2024?",
+      "rounds": 2,
+      "round_details": [
+        {
+          "round": 1,
+          "question": "What happened on December 25 те2024?",
+          "barb_type": "clarification",
+          "time_ms": 1643,
+          "parser_output": {
+            "what": "day data",
+            "period": {
+              "raw": "December 25 te2024",
+              "dates": [
+                "2024-12-25"
+              ]
+            },
+            "filters": {},
+            "modifiers": {},
+            "unclear": [
+              "session"
+            ],
+            "summary": "Looking at December 25, 2024. Which session do you want — RTH or full day?"
+          },
+          "clarification": {
+            "text": "Looking at December 25, 2024. Which session do you want — RTH or full day?",
+            "suggestions": [
+              "Market closed on 2024-12-25"
+            ]
+          },
+          "selected": "Market closed on 2024-12-25"
+        },
+        {
+          "round": 2,
+          "question": "Market closed on 2024-12-25",
+          "error": "503 UNAVAILABLE. {'error': {'code': 503, 'message': 'The model is overloaded. Please try again later.', 'status': 'UNAVAILABLE'}}"
+        }
+      ],
+      "final_type": "error",
+      "success": false,
+      "error": "503 UNAVAILABLE. {'error': {'code': 503, 'message': 'The model is overloaded. Please try again later.', 'status': 'UNAVAILABLE'}}",
+      "total_time_ms": 2013
+    },
+    {
+      "original_question": "When was the market craziest in 2023?",
+      "rounds": 1,
+      "round_details": [
+        {
+          "round": 1,
+          "question": "When was the market craziest in 2023?",
+          "error": "503 UNAVAILABLE. {'error': {'code': 503, 'message': 'The model is overloaded. Please try again later.', 'status': 'UNAVAILABLE'}}"
+        }
+      ],
+      "final_type": "error",
+      "success": false,
+      "error": "503 UNAVAILABLE. {'error': {'code': 503, 'message': 'The model is overloaded. Please try again later.', 'status': 'UNAVAILABLE'}}",
+      "total_time_ms": 491
+    },
+    {
+      "original_question": "Find me days with huge moves last year",
+      "rounds": 1,
+      "round_details": [
+        {
+          "round": 1,
+          "question": "Find me days with huge moves last year",
+          "barb_type": "query",
+          "time_ms": 1379,
+          "parser_output": {
+            "what": "huge moves days",
+            "period": {
+              "raw": "last year",
+              "start": "2025-01-01",
+              "end": "2025-12-31"
+            },
+            "filters": {},
+            "modifiers": {
+              "top_n": 10
+            },
+            "unclear": [],
+            "summary": "Got it! Finding days with the biggest moves last year."
+          },
+          "intent_type": "data",
+          "sql_preview": "WITH daily_raw AS (\n    SELECT\n        (CASE\n        WHEN timestamp::time < '17:00:00'::time\n       "
+        }
+      ],
+      "final_type": "data",
+      "success": true,
+      "error": null,
+      "total_time_ms": 1409,
+      "row_count": 10,
+      "columns": [
+        "date",
+        "open",
+        "high",
+        "low",
+        "close",
+        "range"
+      ],
+      "sql_query": "WITH daily_raw AS (\n    SELECT\n        (CASE\n        WHEN timestamp::time < '17:00:00'::time\n        THEN timestamp::date\n        ELSE timestamp::date + INTERVAL '1 day'\n    END)::date as date,\n        FIRST(open ORDER BY timestamp) as open,\n        MAX(high) as high,\n        MIN(low) as low,\n        LAST(close ORDER BY timestamp) as close,\n        SUM(volume) as volume,\n        -- Basic metrics\n        ROUND(MAX(high) - MIN(low), 2) as range,\n        ROUND((LAST(close ORDER BY timestamp) - FIRST(open ORDER BY timestamp))\n              / NULLIF(FIRST(open ORDER BY timestamp), 0) * 100, 2) as change_pct,\n        -- Close to extremes\n        ROUND(LAST(close ORDER BY timestamp) - MIN(low), 2) as close_to_low,\n        ROUND(MAX(high) - LAST(close ORDER BY timestamp), 2) as close_to_high,\n        -- Open to extremes\n        ROUND(MAX(high) - FIRST(open ORDER BY timestamp), 2) as open_to_high,\n        ROUND(FIRST(open ORDER BY timestamp) - MIN(low), 2) as open_to_low,\n        -- Candle structure\n        ROUND(ABS(LAST(close ORDER BY timestamp) - FIRST(open ORDER BY timestamp)), 2) as body,\n        ROUND(MAX(high) - GREATEST(FIRST(open ORDER BY timestamp), LAST(close ORDER BY timestamp)), 2) as upper_wick,\n        ROUND(LEAST(FIRST(open ORDER BY timestamp), LAST(close ORDER BY timestamp)) - MIN(low), 2) as lower_wick\n    FROM ohlcv_1min\n    WHERE symbol = 'NQ'\n      AND timestamp >= (('2025-01-01'::date - INTERVAL '1 day')::date + '18:00:00'::time)\n      AND timestamp < (('2026-01-01'::date - INTERVAL '1 day')::date + '17:00:00'::time)\n    GROUP BY (CASE\n        WHEN timestamp::time < '17:00:00'::time\n        THEN timestamp::date\n        ELSE timestamp::date + INTERVAL '1 day'\n    END)::date\n),\ndaily AS (\n    SELECT * FROM daily_raw\n    \n)\nSELECT\n    date,\n    open as open,\n    high as high,\n    low as low,\n    close as close,\n    range as range\nFROM daily\nORDER BY range DESC\nLIMIT 10",
+      "parser_output": {
+        "what": "huge moves days",
+        "period": {
+          "raw": "last year",
+          "start": "2025-01-01",
+          "end": "2025-12-31"
+        },
+        "filters": {},
+        "modifiers": {
+          "top_n": 10
+        },
+        "unclear": [],
+        "summary": "Got it! Finding days with the biggest moves last year."
+      },
+      "clarification_options": null
+    },
+    {
+      "original_question": "RTH vs ETH range",
+      "rounds": 1,
+      "round_details": [
+        {
+          "round": 1,
+          "question": "RTH vs ETH range",
+          "barb_type": "query",
+          "time_ms": 842,
+          "parser_output": {
+            "what": "range comparison",
+            "period": {},
+            "filters": {},
+            "modifiers": {
+              "compare": [
+                "RTH",
+                "ETH"
+              ]
+            },
+            "unclear": [],
+            "summary": "Got it! Comparing RTH vs ETH range across all available data."
+          },
+          "intent_type": "data",
+          "sql_preview": "WITH daily_rth AS (\n    SELECT\n        (CASE\n        WHEN timestamp::time < '17:00:00'::time\n       "
+        }
+      ],
+      "final_type": "data",
+      "success": true,
+      "error": null,
+      "total_time_ms": 932,
+      "row_count": 2,
+      "columns": [
+        "group_name",
+        "avg_range",
+        "avg_change",
+        "volatility",
+        "count"
+      ],
+      "sql_query": "WITH daily_rth AS (\n    SELECT\n        (CASE\n        WHEN timestamp::time < '17:00:00'::time\n        THEN timestamp::date\n        ELSE timestamp::date + INTERVAL '1 day'\n    END)::date as date,\n        FIRST(open ORDER BY timestamp) as open,\n        MAX(high) as high,\n        MIN(low) as low,\n        LAST(close ORDER BY timestamp) as close,\n        SUM(volume) as volume,\n        ROUND(MAX(high) - MIN(low), 2) as range,\n        ROUND((LAST(close ORDER BY timestamp) - FIRST(open ORDER BY timestamp))\n              / NULLIF(FIRST(open ORDER BY timestamp), 0) * 100, 2) as change_pct\n    FROM ohlcv_1min\n    WHERE symbol = 'NQ'\n      AND timestamp >= (('2008-01-02'::date - INTERVAL '1 day')::date + '18:00:00'::time)\n      AND timestamp < (('2026-01-08'::date - INTERVAL '1 day')::date + '17:00:00'::time)\n      AND timestamp::time BETWEEN '09:30:00' AND '17:00:00'\n      \n    GROUP BY (CASE\n        WHEN timestamp::time < '17:00:00'::time\n        THEN timestamp::date\n        ELSE timestamp::date + INTERVAL '1 day'\n    END)::date\n),\ndaily_eth AS (\n    SELECT\n        (CASE\n        WHEN timestamp::time < '17:00:00'::time\n        THEN timestamp::date\n        ELSE timestamp::date + INTERVAL '1 day'\n    END)::date as date,\n        FIRST(open ORDER BY timestamp) as open,\n        MAX(high) as high,\n        MIN(low) as low,\n        LAST(close ORDER BY timestamp) as close,\n        SUM(volume) as volume,\n        ROUND(MAX(high) - MIN(low), 2) as range,\n        ROUND((LAST(close ORDER BY timestamp) - FIRST(open ORDER BY timestamp))\n              / NULLIF(FIRST(open ORDER BY timestamp), 0) * 100, 2) as change_pct\n    FROM ohlcv_1min\n    WHERE symbol = 'NQ'\n      AND timestamp >= (('2008-01-02'::date - INTERVAL '1 day')::date + '18:00:00'::time)\n      AND timestamp < (('2026-01-08'::date - INTERVAL '1 day')::date + '17:00:00'::time)\n      \n      \n    GROUP BY (CASE\n        WHEN timestamp::time < '17:00:00'::time\n        THEN timestamp::date\n        ELSE timestamp::date + INTERVAL '1 day'\n    END)::date\n)\nSELECT\n    'RTH' as group_name,\n    ROUND(AVG(range), 2) as avg_range,\n    ROUND(AVG(change_pct), 2) as avg_change,\n    ROUND(STDDEV(change_pct), 2) as volatility,\n    COUNT(*) as count\nFROM daily_rth\nUNION ALL\nSELECT\n    'ETH' as group_name,\n    ROUND(AVG(range), 2) as avg_range,\n    ROUND(AVG(change_pct), 2) as avg_change,\n    ROUND(STDDEV(change_pct), 2) as volatility,\n    COUNT(*) as count\nFROM daily_eth",
+      "parser_output": {
+        "what": "range comparison",
+        "period": {},
+        "filters": {},
+        "modifiers": {
+          "compare": [
+            "RTH",
+            "ETH"
+          ]
+        },
+        "unclear": [],
+        "summary": "Got it! Comparing RTH vs ETH range across all available data."
+      },
+      "clarification_options": null
+    },
+    {
+      "original_question": "Compare Monday and Friday volatility",
+      "rounds": 1,
+      "round_details": [
+        {
+          "round": 1,
+          "question": "Compare Monday and Friday volatility",
+          "barb_type": "query",
+          "time_ms": 1051,
+          "parser_output": {
+            "what": "volatility comparison",
+            "period": {},
+            "filters": {
+              "weekdays": [
+                "Monday",
+                "Friday"
+              ]
+            },
+            "modifiers": {
+              "compare": [
+                "Monday",
+                "Friday"
+              ]
+            },
+            "unclear": [],
+            "summary": "Got it! Comparing volatility between Mondays and Fridays across all available data."
+          },
+          "intent_type": "data",
+          "sql_preview": "WITH daily_raw AS (\n    SELECT\n        (CASE\n        WHEN timestamp::time < '17:00:00'::time\n       "
+        }
+      ],
+      "final_type": "data",
+      "success": true,
+      "error": null,
+      "total_time_ms": 1133,
+      "row_count": 2,
+      "columns": [
+        "group_name",
+        "avg_range",
+        "avg_change",
+        "volatility",
+        "count"
+      ],
+      "sql_query": "WITH daily_raw AS (\n    SELECT\n        (CASE\n        WHEN timestamp::time < '17:00:00'::time\n        THEN timestamp::date\n        ELSE timestamp::date + INTERVAL '1 day'\n    END)::date as date,\n        FIRST(open ORDER BY timestamp) as open,\n        MAX(high) as high,\n        MIN(low) as low,\n        LAST(close ORDER BY timestamp) as close,\n        SUM(volume) as volume,\n        ROUND(MAX(high) - MIN(low), 2) as range,\n        ROUND((LAST(close ORDER BY timestamp) - FIRST(open ORDER BY timestamp))\n              / NULLIF(FIRST(open ORDER BY timestamp), 0) * 100, 2) as change_pct\n    FROM ohlcv_1min\n    WHERE symbol = 'NQ'\n      AND timestamp >= (('2008-01-02'::date - INTERVAL '1 day')::date + '18:00:00'::time)\n      AND timestamp < (('2026-01-08'::date - INTERVAL '1 day')::date + '17:00:00'::time)\n      AND DAYNAME(timestamp::date) IN ('Monday', 'Friday')\n    GROUP BY (CASE\n        WHEN timestamp::time < '17:00:00'::time\n        THEN timestamp::date\n        ELSE timestamp::date + INTERVAL '1 day'\n    END)::date\n)\nSELECT\n    DAYNAME(date) as group_name,\n    ROUND(AVG(range), 2) as avg_range,\n    ROUND(AVG(change_pct), 2) as avg_change,\n    ROUND(STDDEV(change_pct), 2) as volatility,\n    COUNT(*) as count\nFROM daily_raw\nWHERE DAYNAME(date) IN ('Monday', 'Friday')\nGROUP BY DAYNAME(date)\nORDER BY CASE DAYNAME(date)\n    WHEN 'Monday' THEN 1\n    WHEN 'Tuesday' THEN 2\n    WHEN 'Wednesday' THEN 3\n    WHEN 'Thursday' THEN 4\n    WHEN 'Friday' THEN 5\n    WHEN 'Saturday' THEN 6\n    WHEN 'Sunday' THEN 7\nEND",
+      "parser_output": {
+        "what": "volatility comparison",
+        "period": {},
+        "filters": {
+          "weekdays": [
+            "Monday",
+            "Friday"
+          ]
+        },
+        "modifiers": {
+          "compare": [
+            "Monday",
+            "Friday"
+          ]
+        },
+        "unclear": [],
+        "summary": "Got it! Comparing volatility between Mondays and Fridays across all available data."
+      },
+      "clarification_options": null
+    },
+    {
+      "original_question": "When is high usually formed?",
+      "rounds": 1,
+      "round_details": [
+        {
+          "round": 1,
+          "question": "When is high usually formed?",
+          "barb_type": "query",
+          "time_ms": 1339,
+          "parser_output": {
+            "what": "time of high",
+            "period": {},
+            "filters": {},
+            "modifiers": {},
+            "unclear": [],
+            "summary": "Got it! I'll analyze when the daily high is typically formed."
+          },
+          "intent_type": "data",
+          "sql_preview": "WITH filtered_data AS (\n    -- Минутные данные с фильтрами\n    SELECT\n        timestamp,\n        (CA"
+        }
+      ],
+      "final_type": "data",
+      "success": true,
+      "error": null,
+      "total_time_ms": 1394,
+      "row_count": 24,
+      "columns": [
+        "time_bucket",
+        "frequency",
+        "percentage"
+      ],
+      "sql_query": "WITH filtered_data AS (\n    -- Минутные данные с фильтрами\n    SELECT\n        timestamp,\n        (CASE\n        WHEN timestamp::time < '17:00:00'::time\n        THEN timestamp::date\n        ELSE timestamp::date + INTERVAL '1 day'\n    END)::date as date,\n        high\n    FROM ohlcv_1min\n    WHERE symbol = 'NQ'\n      AND timestamp >= (('2008-01-02'::date - INTERVAL '1 day')::date + '18:00:00'::time)\n      AND timestamp < (('2026-01-08'::date - INTERVAL '1 day')::date + '17:00:00'::time)\n      \n),\ndaily_events AS (\n    -- Для каждого дня находим момент события\n    SELECT\n        date,\n        FIRST(timestamp ORDER BY high DESC, timestamp ASC) as event_ts\n    FROM filtered_data\n    GROUP BY date\n),\ndistribution AS (\n    -- Группируем по временным интервалам\n    SELECT\n        STRFTIME(TIME_BUCKET(INTERVAL '1 hour', event_ts), '%H:%M') as time_bucket,\n        COUNT(*) as frequency\n    FROM daily_events\n    GROUP BY time_bucket\n)\nSELECT\n    time_bucket,\n    frequency,\n    ROUND(frequency * 100.0 / SUM(frequency) OVER (), 2) as percentage\nFROM distribution\nORDER BY time_bucket",
+      "parser_output": {
+        "what": "time of high",
+        "period": {},
+        "filters": {},
+        "modifiers": {},
+        "unclear": [],
+        "summary": "Got it! I'll analyze when the daily high is typically formed."
+      },
+      "clarification_options": null
+    },
+    {
+      "original_question": "When is low usually formed?",
+      "rounds": 1,
+      "round_details": [
+        {
+          "round": 1,
+          "question": "When is low usually formed?",
+          "barb_type": "query",
+          "time_ms": 750,
+          "parser_output": {
+            "what": "time of low",
+            "period": {},
+            "filters": {},
+            "modifiers": {},
+            "unclear": [],
+            "summary": "Got it! I'll analyze when the daily low is typically formed."
+          },
+          "intent_type": "data",
+          "sql_preview": "WITH filtered_data AS (\n    -- Минутные данные с фильтрами\n    SELECT\n        timestamp,\n        (CA"
+        }
+      ],
+      "final_type": "data",
+      "success": true,
+      "error": null,
+      "total_time_ms": 801,
+      "row_count": 24,
+      "columns": [
+        "time_bucket",
+        "frequency",
+        "percentage"
+      ],
+      "sql_query": "WITH filtered_data AS (\n    -- Минутные данные с фильтрами\n    SELECT\n        timestamp,\n        (CASE\n        WHEN timestamp::time < '17:00:00'::time\n        THEN timestamp::date\n        ELSE timestamp::date + INTERVAL '1 day'\n    END)::date as date,\n        low\n    FROM ohlcv_1min\n    WHERE symbol = 'NQ'\n      AND timestamp >= (('2008-01-02'::date - INTERVAL '1 day')::date + '18:00:00'::time)\n      AND timestamp < (('2026-01-08'::date - INTERVAL '1 day')::date + '17:00:00'::time)\n      \n),\ndaily_events AS (\n    -- Для каждого дня находим момент события\n    SELECT\n        date,\n        FIRST(timestamp ORDER BY low ASC, timestamp ASC) as event_ts\n    FROM filtered_data\n    GROUP BY date\n),\ndistribution AS (\n    -- Группируем по временным интервалам\n    SELECT\n        STRFTIME(TIME_BUCKET(INTERVAL '1 hour', event_ts), '%H:%M') as time_bucket,\n        COUNT(*) as frequency\n    FROM daily_events\n    GROUP BY time_bucket\n)\nSELECT\n    time_bucket,\n    frequency,\n    ROUND(frequency * 100.0 / SUM(frequency) OVER (), 2) as percentage\nFROM distribution\nORDER BY time_bucket",
+      "parser_output": {
+        "what": "time of low",
+        "period": {},
+        "filters": {},
+        "modifiers": {},
+        "unclear": [],
+        "summary": "Got it! I'll analyze when the daily low is typically formed."
+      },
+      "clarification_options": null
+    },
+    {
+      "original_question": "What is gap?",
+      "rounds": 1,
+      "round_details": [
+        {
+          "round": 1,
+          "question": "What is gap?",
+          "barb_type": "concept",
+          "time_ms": 712,
+          "parser_output": {
+            "what": "explain gap",
+            "period": null,
+            "filters": null,
+            "modifiers": null,
+            "unclear": [],
+            "summary": "I'll explain what a gap is in trading."
+          }
+        }
+      ],
+      "final_type": "concept",
+      "success": true,
+      "error": null,
+      "total_time_ms": 712,
+      "summary": "I'll explain what a gap is in trading.",
+      "parser_output": {
+        "what": "explain gap",
+        "period": null,
+        "filters": null,
+        "modifiers": null,
+        "unclear": [],
+        "summary": "I'll explain what a gap is in trading."
+      },
+      "clarification_options": null
+    },
+    {
+      "original_question": "Explain RTH session",
+      "rounds": 1,
+      "round_details": [
+        {
+          "round": 1,
+          "question": "Explain RTH session",
+          "barb_type": "concept",
+          "time_ms": 838,
+          "parser_output": {
+            "what": "explain session",
+            "period": null,
+            "filters": {
+              "session": "RTH"
+            },
+            "modifiers": null,
+            "unclear": [],
+            "summary": "Got it! I'll explain what the RTH session is."
+          }
+        }
+      ],
+      "final_type": "concept",
+      "success": true,
+      "error": null,
+      "total_time_ms": 838,
+      "summary": "Got it! I'll explain what the RTH session is.",
+      "parser_output": {
+        "what": "explain session",
+        "period": null,
+        "filters": {
+          "session": "RTH"
+        },
+        "modifiers": null,
+        "unclear": [],
+        "summary": "Got it! I'll explain what the RTH session is."
+      },
+      "clarification_options": null
+    },
+    {
+      "original_question": "Hello",
+      "rounds": 1,
+      "round_details": [
+        {
+          "round": 1,
+          "question": "Hello",
+          "barb_type": "greeting",
+          "time_ms": 723,
+          "parser_output": {
+            "what": "greeting",
+            "period": null,
+            "filters": null,
+            "modifiers": null,
+            "unclear": [],
+            "summary": "Hello! How can I help you with trading data today?"
+          }
+        }
+      ],
+      "final_type": "chitchat",
+      "success": true,
+      "error": null,
+      "total_time_ms": 723,
+      "summary": "Hello! How can I help you with trading data today?",
+      "parser_output": {
+        "what": "greeting",
+        "period": null,
+        "filters": null,
+        "modifiers": null,
+        "unclear": [],
+        "summary": "Hello! How can I help you with trading data today?"
+      },
+      "clarification_options": null
+    },
+    {
+      "original_question": "Hi there",
+      "rounds": 1,
+      "round_details": [
+        {
+          "round": 1,
+          "question": "Hi there",
+          "barb_type": "greeting",
+          "time_ms": 645,
+          "parser_output": {
+            "what": "greeting",
+            "period": null,
+            "filters": null,
+            "modifiers": null,
+            "unclear": [],
+            "summary": "Hello! How can I help you with trading data today?"
+          }
+        }
+      ],
+      "final_type": "chitchat",
+      "success": true,
+      "error": null,
+      "total_time_ms": 645,
+      "summary": "Hello! How can I help you with trading data today?",
+      "parser_output": {
+        "what": "greeting",
+        "period": null,
+        "filters": null,
+        "modifiers": null,
+        "unclear": [],
+        "summary": "Hello! How can I help you with trading data today?"
+      },
+      "clarification_options": null
+    },
+    {
+      "original_question": "What happens the day after a gap up > 1%?",
+      "rounds": 1,
+      "round_details": [
+        {
+          "round": 1,
+          "question": "What happens the day after a gap up > 1%?",
+          "barb_type": "not_supported",
+          "time_ms": 929,
+          "parser_output": {
+            "what": "day after gap up",
+            "period": {},
+            "filters": {
+              "conditions": [
+                "gap up > 1%"
+              ]
+            },
+            "modifiers": {},
+            "unclear": [],
+            "summary": "Got it! Analyzing what happens the day after a gap up greater than 1%."
+          }
+        }
+      ],
+      "final_type": "out_of_scope",
+      "success": true,
+      "error": null,
+      "total_time_ms": 929,
+      "summary": "Got it! Analyzing what happens the day after a gap up greater than 1%.",
+      "parser_output": {
+        "what": "day after gap up",
+        "period": {},
+        "filters": {
+          "conditions": [
+            "gap up > 1%"
+          ]
+        },
+        "modifiers": {},
+        "unclear": [],
+        "summary": "Got it! Analyzing what happens the day after a gap up greater than 1%."
+      },
+      "clarification_options": null
+    },
+    {
+      "original_question": "Win rate for gap down strategy",
+      "rounds": 1,
+      "round_details": [
+        {
+          "round": 1,
+          "question": "Win rate for gap down strategy",
+          "barb_type": "not_supported",
+          "time_ms": 909,
+          "parser_output": {
+            "what": "win rate",
+            "period": {},
+            "filters": {
+              "conditions": [
+                "gap down"
+              ]
+            },
+            "modifiers": {},
+            "unclear": [],
+            "summary": "Got it! I'll analyze the win rate for a gap down strategy."
+          }
+        }
+      ],
+      "final_type": "out_of_scope",
+      "success": true,
+      "error": null,
+      "total_time_ms": 909,
+      "summary": "Got it! I'll analyze the win rate for a gap down strategy.",
+      "parser_output": {
+        "what": "win rate",
+        "period": {},
+        "filters": {
+          "conditions": [
+            "gap down"
+          ]
+        },
+        "modifiers": {},
+        "unclear": [],
+        "summary": "Got it! I'll analyze the win rate for a gap down strategy."
+      },
+      "clarification_options": null
+    },
+    {
+      "original_question": "Days after 3+ days of growth in a row",
+      "rounds": 1,
+      "round_details": [
+        {
+          "round": 1,
+          "question": "Days after 3+ days of growth in a row",
+          "barb_type": "not_supported",
+          "time_ms": 989,
+          "parser_output": {
+            "what": "days after growth",
+            "period": {},
+            "filters": {
+              "conditions": [
+                "3+ days of growth in a row"
+              ]
+            },
+            "modifiers": {},
+            "unclear": [],
+            "summary": "Got it! Showing days that occurred after 3 or more consecutive days of growth."
+          }
+        }
+      ],
+      "final_type": "out_of_scope",
+      "success": true,
+      "error": null,
+      "total_time_ms": 989,
+      "summary": "Got it! Showing days that occurred after 3 or more consecutive days of growth.",
+      "parser_output": {
+        "what": "days after growth",
+        "period": {},
+        "filters": {
+          "conditions": [
+            "3+ days of growth in a row"
+          ]
+        },
+        "modifiers": {},
+        "unclear": [],
+        "summary": "Got it! Showing days that occurred after 3 or more consecutive days of growth."
+      },
+      "clarification_options": null
+    },
+    {
+      "original_question": "what's the volatility on expiration days?",
+      "rounds": 1,
+      "round_details": [
+        {
+          "round": 1,
+          "question": "what's the volatility on expiration days?",
+          "barb_type": "query",
+          "time_ms": 1075,
+          "parser_output": {
+            "what": "volatility",
+            "period": {},
+            "filters": {
+              "event_filter": "opex"
+            },
+            "modifiers": {},
+            "unclear": [],
+            "summary": "Got it! I'll show volatility on expiration days."
+          },
+          "intent_type": "data",
+          "sql_preview": "WITH daily_raw AS (\n    SELECT\n        (CASE\n        WHEN timestamp::time < '17:00:00'::time\n       "
+        }
+      ],
+      "final_type": "data",
+      "success": true,
+      "error": null,
+      "total_time_ms": 1123,
+      "row_count": 1,
+      "columns": [
+        "avg_range",
+        "avg_change",
+        "volatility",
+        "count"
+      ],
+      "sql_query": "WITH daily_raw AS (\n    SELECT\n        (CASE\n        WHEN timestamp::time < '17:00:00'::time\n        THEN timestamp::date\n        ELSE timestamp::date + INTERVAL '1 day'\n    END)::date as date,\n        FIRST(open ORDER BY timestamp) as open,\n        MAX(high) as high,\n        MIN(low) as low,\n        LAST(close ORDER BY timestamp) as close,\n        SUM(volume) as volume,\n        -- Basic metrics\n        ROUND(MAX(high) - MIN(low), 2) as range,\n        ROUND((LAST(close ORDER BY timestamp) - FIRST(open ORDER BY timestamp))\n              / NULLIF(FIRST(open ORDER BY timestamp), 0) * 100, 2) as change_pct,\n        -- Close to extremes\n        ROUND(LAST(close ORDER BY timestamp) - MIN(low), 2) as close_to_low,\n        ROUND(MAX(high) - LAST(close ORDER BY timestamp), 2) as close_to_high,\n        -- Open to extremes\n        ROUND(MAX(high) - FIRST(open ORDER BY timestamp), 2) as open_to_high,\n        ROUND(FIRST(open ORDER BY timestamp) - MIN(low), 2) as open_to_low,\n        -- Candle structure\n        ROUND(ABS(LAST(close ORDER BY timestamp) - FIRST(open ORDER BY timestamp)), 2) as body,\n        ROUND(MAX(high) - GREATEST(FIRST(open ORDER BY timestamp), LAST(close ORDER BY timestamp)), 2) as upper_wick,\n        ROUND(LEAST(FIRST(open ORDER BY timestamp), LAST(close ORDER BY timestamp)) - MIN(low), 2) as lower_wick\n    FROM ohlcv_1min\n    WHERE symbol = 'NQ'\n      AND timestamp >= (('2008-01-02'::date - INTERVAL '1 day')::date + '18:00:00'::time)\n      AND timestamp < (('2026-01-08'::date - INTERVAL '1 day')::date + '17:00:00'::time)\n    GROUP BY (CASE\n        WHEN timestamp::time < '17:00:00'::time\n        THEN timestamp::date\n        ELSE timestamp::date + INTERVAL '1 day'\n    END)::date\n),\ndaily AS (\n    SELECT * FROM daily_raw\n    WHERE date IN ('2008-01-18', '2008-02-15', '2008-03-21', '2008-04-18', '2008-05-16', '2008-06-20', '2008-07-18', '2008-08-15', '2008-09-19', '2008-10-17', '2008-11-21', '2008-12-19', '2009-01-16', '2009-02-20', '2009-03-20', '2009-04-17', '2009-05-15', '2009-06-19', '2009-07-17', '2009-08-21', '2009-09-18', '2009-10-16', '2009-11-20', '2009-12-18', '2010-01-15', '2010-02-19', '2010-03-19', '2010-04-16', '2010-05-21', '2010-06-18', '2010-07-16', '2010-08-20', '2010-09-17', '2010-10-15', '2010-11-19', '2010-12-17', '2011-01-21', '2011-02-18', '2011-03-18', '2011-04-15', '2011-05-20', '2011-06-17', '2011-07-15', '2011-08-19', '2011-09-16', '2011-10-21', '2011-11-18', '2011-12-16', '2012-01-20', '2012-02-17', '2012-03-16', '2012-04-20', '2012-05-18', '2012-06-15', '2012-07-20', '2012-08-17', '2012-09-21', '2012-10-19', '2012-11-16', '2012-12-21', '2013-01-18', '2013-02-15', '2013-03-15', '2013-04-19', '2013-05-17', '2013-06-21', '2013-07-19', '2013-08-16', '2013-09-20', '2013-10-18', '2013-11-15', '2013-12-20', '2014-01-17', '2014-02-21', '2014-03-21', '2014-04-18', '2014-05-16', '2014-06-20', '2014-07-18', '2014-08-15', '2014-09-19', '2014-10-17', '2014-11-21', '2014-12-19', '2015-01-16', '2015-02-20', '2015-03-20', '2015-04-17', '2015-05-15', '2015-06-19', '2015-07-17', '2015-08-21', '2015-09-18', '2015-10-16', '2015-11-20', '2015-12-18', '2016-01-15', '2016-02-19', '2016-03-18', '2016-04-15', '2016-05-20', '2016-06-17', '2016-07-15', '2016-08-19', '2016-09-16', '2016-10-21', '2016-11-18', '2016-12-16', '2017-01-20', '2017-02-17', '2017-03-17', '2017-04-21', '2017-05-19', '2017-06-16', '2017-07-21', '2017-08-18', '2017-09-15', '2017-10-20', '2017-11-17', '2017-12-15', '2018-01-19', '2018-02-16', '2018-03-16', '2018-04-20', '2018-05-18', '2018-06-15', '2018-07-20', '2018-08-17', '2018-09-21', '2018-10-19', '2018-11-16', '2018-12-21', '2019-01-18', '2019-02-15', '2019-03-15', '2019-04-19', '2019-05-17', '2019-06-21', '2019-07-19', '2019-08-16', '2019-09-20', '2019-10-18', '2019-11-15', '2019-12-20', '2020-01-17', '2020-02-21', '2020-03-20', '2020-04-17', '2020-05-15', '2020-06-19', '2020-07-17', '2020-08-21', '2020-09-18', '2020-10-16', '2020-11-20', '2020-12-18', '2021-01-15', '2021-02-19', '2021-03-19', '2021-04-16', '2021-05-21', '2021-06-18', '2021-07-16', '2021-08-20', '2021-09-17', '2021-10-15', '2021-11-19', '2021-12-17', '2022-01-21', '2022-02-18', '2022-03-18', '2022-04-15', '2022-05-20', '2022-06-17', '2022-07-15', '2022-08-19', '2022-09-16', '2022-10-21', '2022-11-18', '2022-12-16', '2023-01-20', '2023-02-17', '2023-03-17', '2023-04-21', '2023-05-19', '2023-06-16', '2023-07-21', '2023-08-18', '2023-09-15', '2023-10-20', '2023-11-17', '2023-12-15', '2024-01-19', '2024-02-16', '2024-03-15', '2024-04-19', '2024-05-17', '2024-06-21', '2024-07-19', '2024-08-16', '2024-09-20', '2024-10-18', '2024-11-15', '2024-12-20', '2025-01-17', '2025-02-21', '2025-03-21', '2025-04-18', '2025-05-16', '2025-06-20', '2025-07-18', '2025-08-15', '2025-09-19', '2025-10-17', '2025-11-21', '2025-12-19')\n)\nSELECT\n    ROUND(AVG(range), 2) as avg_range,\n    ROUND(AVG(change_pct), 2) as avg_change,\n    ROUND(STDDEV(change_pct), 4) as volatility,\n    COUNT(*) as count\nFROM daily",
+      "parser_output": {
+        "what": "volatility",
+        "period": {},
+        "filters": {
+          "event_filter": "opex"
+        },
+        "modifiers": {},
+        "unclear": [],
+        "summary": "Got it! I'll show volatility on expiration days."
+      },
+      "clarification_options": null
+    },
+    {
+      "original_question": "how does NQ behave on NFP?",
+      "rounds": 1,
+      "round_details": [
+        {
+          "round": 1,
+          "question": "how does NQ behave on NFP?",
+          "barb_type": "query",
+          "time_ms": 1474,
+          "parser_output": {
+            "what": "NFP behavior",
+            "period": {},
+            "filters": {
+              "event_filter": "nfp"
+            },
+            "modifiers": {},
+            "unclear": [],
+            "summary": "Got it! I'll analyze how NQ behaves on Non-Farm Payroll days."
+          },
+          "intent_type": "data",
+          "sql_preview": "WITH daily_raw AS (\n    SELECT\n        (CASE\n        WHEN timestamp::time < '17:00:00'::time\n       "
+        }
+      ],
+      "final_type": "data",
+      "success": true,
+      "error": null,
+      "total_time_ms": 1520,
+      "row_count": 214,
+      "columns": [
+        "date",
+        "open",
+        "high",
+        "low",
+        "close",
+        "range"
+      ],
+      "sql_query": "WITH daily_raw AS (\n    SELECT\n        (CASE\n        WHEN timestamp::time < '17:00:00'::time\n        THEN timestamp::date\n        ELSE timestamp::date + INTERVAL '1 day'\n    END)::date as date,\n        FIRST(open ORDER BY timestamp) as open,\n        MAX(high) as high,\n        MIN(low) as low,\n        LAST(close ORDER BY timestamp) as close,\n        SUM(volume) as volume,\n        -- Basic metrics\n        ROUND(MAX(high) - MIN(low), 2) as range,\n        ROUND((LAST(close ORDER BY timestamp) - FIRST(open ORDER BY timestamp))\n              / NULLIF(FIRST(open ORDER BY timestamp), 0) * 100, 2) as change_pct,\n        -- Close to extremes\n        ROUND(LAST(close ORDER BY timestamp) - MIN(low), 2) as close_to_low,\n        ROUND(MAX(high) - LAST(close ORDER BY timestamp), 2) as close_to_high,\n        -- Open to extremes\n        ROUND(MAX(high) - FIRST(open ORDER BY timestamp), 2) as open_to_high,\n        ROUND(FIRST(open ORDER BY timestamp) - MIN(low), 2) as open_to_low,\n        -- Candle structure\n        ROUND(ABS(LAST(close ORDER BY timestamp) - FIRST(open ORDER BY timestamp)), 2) as body,\n        ROUND(MAX(high) - GREATEST(FIRST(open ORDER BY timestamp), LAST(close ORDER BY timestamp)), 2) as upper_wick,\n        ROUND(LEAST(FIRST(open ORDER BY timestamp), LAST(close ORDER BY timestamp)) - MIN(low), 2) as lower_wick\n    FROM ohlcv_1min\n    WHERE symbol = 'NQ'\n      AND timestamp >= (('2008-01-02'::date - INTERVAL '1 day')::date + '18:00:00'::time)\n      AND timestamp < (('2026-01-08'::date - INTERVAL '1 day')::date + '17:00:00'::time)\n    GROUP BY (CASE\n        WHEN timestamp::time < '17:00:00'::time\n        THEN timestamp::date\n        ELSE timestamp::date + INTERVAL '1 day'\n    END)::date\n),\ndaily AS (\n    SELECT * FROM daily_raw\n    WHERE date IN ('2008-01-04', '2008-02-01', '2008-03-07', '2008-04-04', '2008-05-02', '2008-06-06', '2008-07-04', '2008-08-01', '2008-09-05', '2008-10-03', '2008-11-07', '2008-12-05', '2009-01-02', '2009-02-06', '2009-03-06', '2009-04-03', '2009-05-01', '2009-06-05', '2009-07-03', '2009-08-07', '2009-09-04', '2009-10-02', '2009-11-06', '2009-12-04', '2010-01-01', '2010-02-05', '2010-03-05', '2010-04-02', '2010-05-07', '2010-06-04', '2010-07-02', '2010-08-06', '2010-09-03', '2010-10-01', '2010-11-05', '2010-12-03', '2011-01-07', '2011-02-04', '2011-03-04', '2011-04-01', '2011-05-06', '2011-06-03', '2011-07-01', '2011-08-05', '2011-09-02', '2011-10-07', '2011-11-04', '2011-12-02', '2012-01-06', '2012-02-03', '2012-03-02', '2012-04-06', '2012-05-04', '2012-06-01', '2012-07-06', '2012-08-03', '2012-09-07', '2012-10-05', '2012-11-02', '2012-12-07', '2013-01-04', '2013-02-01', '2013-03-01', '2013-04-05', '2013-05-03', '2013-06-07', '2013-07-05', '2013-08-02', '2013-09-06', '2013-10-04', '2013-11-01', '2013-12-06', '2014-01-03', '2014-02-07', '2014-03-07', '2014-04-04', '2014-05-02', '2014-06-06', '2014-07-04', '2014-08-01', '2014-09-05', '2014-10-03', '2014-11-07', '2014-12-05', '2015-01-02', '2015-02-06', '2015-03-06', '2015-04-03', '2015-05-01', '2015-06-05', '2015-07-03', '2015-08-07', '2015-09-04', '2015-10-02', '2015-11-06', '2015-12-04', '2016-01-01', '2016-02-05', '2016-03-04', '2016-04-01', '2016-05-06', '2016-06-03', '2016-07-01', '2016-08-05', '2016-09-02', '2016-10-07', '2016-11-04', '2016-12-02', '2017-01-06', '2017-02-03', '2017-03-03', '2017-04-07', '2017-05-05', '2017-06-02', '2017-07-07', '2017-08-04', '2017-09-01', '2017-10-06', '2017-11-03', '2017-12-01', '2018-01-05', '2018-02-02', '2018-03-02', '2018-04-06', '2018-05-04', '2018-06-01', '2018-07-06', '2018-08-03', '2018-09-07', '2018-10-05', '2018-11-02', '2018-12-07', '2019-01-04', '2019-02-01', '2019-03-01', '2019-04-05', '2019-05-03', '2019-06-07', '2019-07-05', '2019-08-02', '2019-09-06', '2019-10-04', '2019-11-01', '2019-12-06', '2020-01-03', '2020-02-07', '2020-03-06', '2020-04-03', '2020-05-01', '2020-06-05', '2020-07-03', '2020-08-07', '2020-09-04', '2020-10-02', '2020-11-06', '2020-12-04', '2021-01-01', '2021-02-05', '2021-03-05', '2021-04-02', '2021-05-07', '2021-06-04', '2021-07-02', '2021-08-06', '2021-09-03', '2021-10-01', '2021-11-05', '2021-12-03', '2022-01-07', '2022-02-04', '2022-03-04', '2022-04-01', '2022-05-06', '2022-06-03', '2022-07-01', '2022-08-05', '2022-09-02', '2022-10-07', '2022-11-04', '2022-12-02', '2023-01-06', '2023-02-03', '2023-03-03', '2023-04-07', '2023-05-05', '2023-06-02', '2023-07-07', '2023-08-04', '2023-09-01', '2023-10-06', '2023-11-03', '2023-12-01', '2024-01-05', '2024-02-02', '2024-03-01', '2024-04-05', '2024-05-03', '2024-06-07', '2024-07-05', '2024-08-02', '2024-09-06', '2024-10-04', '2024-11-01', '2024-12-06', '2025-01-03', '2025-02-07', '2025-03-07', '2025-04-04', '2025-05-02', '2025-06-06', '2025-07-04', '2025-08-01', '2025-09-05', '2025-10-03', '2025-11-07', '2025-12-05', '2026-01-02')\n)\nSELECT\n    date,\n    open as open,\n    high as high,\n    low as low,\n    close as close,\n    range as range\nFROM daily\nORDER BY date",
+      "parser_output": {
+        "what": "NFP behavior",
+        "period": {},
+        "filters": {
+          "event_filter": "nfp"
+        },
+        "modifiers": {},
+        "unclear": [],
+        "summary": "Got it! I'll analyze how NQ behaves on Non-Farm Payroll days."
+      },
+      "clarification_options": null
+    },
+    {
+      "original_question": "volatility on FOMC days",
+      "rounds": 1,
+      "round_details": [
+        {
+          "round": 1,
+          "question": "volatility on FOMC days",
+          "barb_type": "not_supported",
+          "time_ms": 1171,
+          "parser_output": {
+            "what": "volatility",
+            "period": {},
+            "filters": {
+              "event_filter": "fomc"
+            },
+            "modifiers": {},
+            "unclear": [],
+            "summary": "Got it! I'll show volatility on FOMC days."
+          }
+        }
+      ],
+      "final_type": "out_of_scope",
+      "success": true,
+      "error": null,
+      "total_time_ms": 1171,
+      "summary": "Got it! I'll show volatility on FOMC days.",
+      "parser_output": {
+        "what": "volatility",
+        "period": {},
+        "filters": {
+          "event_filter": "fomc"
+        },
+        "modifiers": {},
+        "unclear": [],
+        "summary": "Got it! I'll show volatility on FOMC days."
+      },
+      "clarification_options": null
+    },
+    {
+      "original_question": "статистика по дням экспирации",
+      "rounds": 1,
+      "round_details": [
+        {
+          "round": 1,
+          "question": "статистика по дням экспирации",
+          "barb_type": "query",
+          "time_ms": 1057,
+          "parser_output": {
+            "what": "statistics",
+            "period": {},
+            "filters": {
+              "event_filter": "opex"
+            },
+            "modifiers": {},
+            "unclear": [],
+            "summary": "Понял! Покажу статистику по дням экспирации опционов."
+          },
+          "intent_type": "data",
+          "sql_preview": "WITH daily_raw AS (\n    SELECT\n        (CASE\n        WHEN timestamp::time < '17:00:00'::time\n       "
+        }
+      ],
+      "final_type": "data",
+      "success": true,
+      "error": null,
+      "total_time_ms": 1101,
+      "row_count": 1,
+      "columns": [
+        "avg_range",
+        "avg_change",
+        "volatility",
+        "count"
+      ],
+      "sql_query": "WITH daily_raw AS (\n    SELECT\n        (CASE\n        WHEN timestamp::time < '17:00:00'::time\n        THEN timestamp::date\n        ELSE timestamp::date + INTERVAL '1 day'\n    END)::date as date,\n        FIRST(open ORDER BY timestamp) as open,\n        MAX(high) as high,\n        MIN(low) as low,\n        LAST(close ORDER BY timestamp) as close,\n        SUM(volume) as volume,\n        -- Basic metrics\n        ROUND(MAX(high) - MIN(low), 2) as range,\n        ROUND((LAST(close ORDER BY timestamp) - FIRST(open ORDER BY timestamp))\n              / NULLIF(FIRST(open ORDER BY timestamp), 0) * 100, 2) as change_pct,\n        -- Close to extremes\n        ROUND(LAST(close ORDER BY timestamp) - MIN(low), 2) as close_to_low,\n        ROUND(MAX(high) - LAST(close ORDER BY timestamp), 2) as close_to_high,\n        -- Open to extremes\n        ROUND(MAX(high) - FIRST(open ORDER BY timestamp), 2) as open_to_high,\n        ROUND(FIRST(open ORDER BY timestamp) - MIN(low), 2) as open_to_low,\n        -- Candle structure\n        ROUND(ABS(LAST(close ORDER BY timestamp) - FIRST(open ORDER BY timestamp)), 2) as body,\n        ROUND(MAX(high) - GREATEST(FIRST(open ORDER BY timestamp), LAST(close ORDER BY timestamp)), 2) as upper_wick,\n        ROUND(LEAST(FIRST(open ORDER BY timestamp), LAST(close ORDER BY timestamp)) - MIN(low), 2) as lower_wick\n    FROM ohlcv_1min\n    WHERE symbol = 'NQ'\n      AND timestamp >= (('2008-01-02'::date - INTERVAL '1 day')::date + '18:00:00'::time)\n      AND timestamp < (('2026-01-08'::date - INTERVAL '1 day')::date + '17:00:00'::time)\n    GROUP BY (CASE\n        WHEN timestamp::time < '17:00:00'::time\n        THEN timestamp::date\n        ELSE timestamp::date + INTERVAL '1 day'\n    END)::date\n),\ndaily AS (\n    SELECT * FROM daily_raw\n    WHERE date IN ('2008-01-18', '2008-02-15', '2008-03-21', '2008-04-18', '2008-05-16', '2008-06-20', '2008-07-18', '2008-08-15', '2008-09-19', '2008-10-17', '2008-11-21', '2008-12-19', '2009-01-16', '2009-02-20', '2009-03-20', '2009-04-17', '2009-05-15', '2009-06-19', '2009-07-17', '2009-08-21', '2009-09-18', '2009-10-16', '2009-11-20', '2009-12-18', '2010-01-15', '2010-02-19', '2010-03-19', '2010-04-16', '2010-05-21', '2010-06-18', '2010-07-16', '2010-08-20', '2010-09-17', '2010-10-15', '2010-11-19', '2010-12-17', '2011-01-21', '2011-02-18', '2011-03-18', '2011-04-15', '2011-05-20', '2011-06-17', '2011-07-15', '2011-08-19', '2011-09-16', '2011-10-21', '2011-11-18', '2011-12-16', '2012-01-20', '2012-02-17', '2012-03-16', '2012-04-20', '2012-05-18', '2012-06-15', '2012-07-20', '2012-08-17', '2012-09-21', '2012-10-19', '2012-11-16', '2012-12-21', '2013-01-18', '2013-02-15', '2013-03-15', '2013-04-19', '2013-05-17', '2013-06-21', '2013-07-19', '2013-08-16', '2013-09-20', '2013-10-18', '2013-11-15', '2013-12-20', '2014-01-17', '2014-02-21', '2014-03-21', '2014-04-18', '2014-05-16', '2014-06-20', '2014-07-18', '2014-08-15', '2014-09-19', '2014-10-17', '2014-11-21', '2014-12-19', '2015-01-16', '2015-02-20', '2015-03-20', '2015-04-17', '2015-05-15', '2015-06-19', '2015-07-17', '2015-08-21', '2015-09-18', '2015-10-16', '2015-11-20', '2015-12-18', '2016-01-15', '2016-02-19', '2016-03-18', '2016-04-15', '2016-05-20', '2016-06-17', '2016-07-15', '2016-08-19', '2016-09-16', '2016-10-21', '2016-11-18', '2016-12-16', '2017-01-20', '2017-02-17', '2017-03-17', '2017-04-21', '2017-05-19', '2017-06-16', '2017-07-21', '2017-08-18', '2017-09-15', '2017-10-20', '2017-11-17', '2017-12-15', '2018-01-19', '2018-02-16', '2018-03-16', '2018-04-20', '2018-05-18', '2018-06-15', '2018-07-20', '2018-08-17', '2018-09-21', '2018-10-19', '2018-11-16', '2018-12-21', '2019-01-18', '2019-02-15', '2019-03-15', '2019-04-19', '2019-05-17', '2019-06-21', '2019-07-19', '2019-08-16', '2019-09-20', '2019-10-18', '2019-11-15', '2019-12-20', '2020-01-17', '2020-02-21', '2020-03-20', '2020-04-17', '2020-05-15', '2020-06-19', '2020-07-17', '2020-08-21', '2020-09-18', '2020-10-16', '2020-11-20', '2020-12-18', '2021-01-15', '2021-02-19', '2021-03-19', '2021-04-16', '2021-05-21', '2021-06-18', '2021-07-16', '2021-08-20', '2021-09-17', '2021-10-15', '2021-11-19', '2021-12-17', '2022-01-21', '2022-02-18', '2022-03-18', '2022-04-15', '2022-05-20', '2022-06-17', '2022-07-15', '2022-08-19', '2022-09-16', '2022-10-21', '2022-11-18', '2022-12-16', '2023-01-20', '2023-02-17', '2023-03-17', '2023-04-21', '2023-05-19', '2023-06-16', '2023-07-21', '2023-08-18', '2023-09-15', '2023-10-20', '2023-11-17', '2023-12-15', '2024-01-19', '2024-02-16', '2024-03-15', '2024-04-19', '2024-05-17', '2024-06-21', '2024-07-19', '2024-08-16', '2024-09-20', '2024-10-18', '2024-11-15', '2024-12-20', '2025-01-17', '2025-02-21', '2025-03-21', '2025-04-18', '2025-05-16', '2025-06-20', '2025-07-18', '2025-08-15', '2025-09-19', '2025-10-17', '2025-11-21', '2025-12-19')\n)\nSELECT\n    ROUND(AVG(range), 2) as avg_range,\n    ROUND(AVG(change_pct), 2) as avg_change,\n    ROUND(STDDEV(change_pct), 4) as volatility,\n    COUNT(*) as count\nFROM daily",
+      "parser_output": {
+        "what": "statistics",
+        "period": {},
+        "filters": {
+          "event_filter": "opex"
+        },
+        "modifiers": {},
+        "unclear": [],
+        "summary": "Понял! Покажу статистику по дням экспирации опционов."
+      },
+      "clarification_options": null
+    },
+    {
+      "original_question": "Статистика по пятницам 2020-2025 где close - low >= 200",
+      "rounds": 1,
+      "round_details": [
+        {
+          "round": 1,
+          "question": "Статистика по пятницам 2020-2025 где close - low >= 200",
+          "barb_type": "query",
+          "time_ms": 1089,
+          "parser_output": {
+            "what": "statistics",
+            "period": {
+              "raw": "2020-2025",
+              "start": "2020-01-01",
+              "end": "2025-12-31"
+            },
+            "filters": {
+              "weekdays": [
+                "Friday"
+              ],
+              "months": null,
+              "session": null,
+              "conditions": [
+                "close - low >= 200"
+              ],
+              "event_filter": null
+            },
+            "modifiers": {
+              "compare": null,
+              "top_n": null,
+              "group_by": null
+            },
+            "unclear": [],
+            "summary": "Got it! I'll show statistics for Fridays 2020-2025 where close - low >= 200."
+          },
+          "intent_type": "data",
+          "sql_preview": "WITH daily_raw AS (\n    SELECT\n        (CASE\n        WHEN timestamp::time < '17:00:00'::time\n       "
+        }
+      ],
+      "final_type": "data",
+      "success": true,
+      "error": null,
+      "total_time_ms": 1135,
+      "row_count": 1,
+      "columns": [
+        "avg_range",
+        "avg_change",
+        "volatility",
+        "count"
+      ],
+      "sql_query": "WITH daily_raw AS (\n    SELECT\n        (CASE\n        WHEN timestamp::time < '17:00:00'::time\n        THEN timestamp::date\n        ELSE timestamp::date + INTERVAL '1 day'\n    END)::date as date,\n        FIRST(open ORDER BY timestamp) as open,\n        MAX(high) as high,\n        MIN(low) as low,\n        LAST(close ORDER BY timestamp) as close,\n        SUM(volume) as volume,\n        -- Basic metrics\n        ROUND(MAX(high) - MIN(low), 2) as range,\n        ROUND((LAST(close ORDER BY timestamp) - FIRST(open ORDER BY timestamp))\n              / NULLIF(FIRST(open ORDER BY timestamp), 0) * 100, 2) as change_pct,\n        -- Close to extremes\n        ROUND(LAST(close ORDER BY timestamp) - MIN(low), 2) as close_to_low,\n        ROUND(MAX(high) - LAST(close ORDER BY timestamp), 2) as close_to_high,\n        -- Open to extremes\n        ROUND(MAX(high) - FIRST(open ORDER BY timestamp), 2) as open_to_high,\n        ROUND(FIRST(open ORDER BY timestamp) - MIN(low), 2) as open_to_low,\n        -- Candle structure\n        ROUND(ABS(LAST(close ORDER BY timestamp) - FIRST(open ORDER BY timestamp)), 2) as body,\n        ROUND(MAX(high) - GREATEST(FIRST(open ORDER BY timestamp), LAST(close ORDER BY timestamp)), 2) as upper_wick,\n        ROUND(LEAST(FIRST(open ORDER BY timestamp), LAST(close ORDER BY timestamp)) - MIN(low), 2) as lower_wick\n    FROM ohlcv_1min\n    WHERE symbol = 'NQ'\n      AND timestamp >= (('2020-01-01'::date - INTERVAL '1 day')::date + '18:00:00'::time)\n      AND timestamp < (('2026-01-01'::date - INTERVAL '1 day')::date + '17:00:00'::time)\n    GROUP BY (CASE\n        WHEN timestamp::time < '17:00:00'::time\n        THEN timestamp::date\n        ELSE timestamp::date + INTERVAL '1 day'\n    END)::date\n),\ndaily AS (\n    SELECT * FROM daily_raw\n    WHERE DAYNAME(date) IN ('Friday')\n)\nSELECT\n    ROUND(AVG(range), 2) as avg_range,\n    ROUND(AVG(change_pct), 2) as avg_change,\n    ROUND(STDDEV(change_pct), 4) as volatility,\n    COUNT(*) as count\nFROM daily\nWHERE close_to_low >= 200.0",
+      "parser_output": {
+        "what": "statistics",
+        "period": {
+          "raw": "2020-2025",
+          "start": "2020-01-01",
+          "end": "2025-12-31"
+        },
+        "filters": {
+          "weekdays": [
+            "Friday"
+          ],
+          "months": null,
+          "session": null,
+          "conditions": [
+            "close - low >= 200"
+          ],
+          "event_filter": null
+        },
+        "modifiers": {
+          "compare": null,
+          "top_n": null,
+          "group_by": null
+        },
+        "unclear": [],
+        "summary": "Got it! I'll show statistics for Fridays 2020-2025 where close - low >= 200."
+      },
+      "clarification_options": null
+    },
+    {
+      "original_question": "Что было 16 мая 2024?",
+      "rounds": 1,
+      "round_details": [
+        {
+          "round": 1,
+          "question": "Что было 16 мая 2024?",
+          "error": "503 UNAVAILABLE. {'error': {'code': 503, 'message': 'The model is overloaded. Please try again later.', 'status': 'UNAVAILABLE'}}"
+        }
+      ],
+      "final_type": "error",
+      "success": false,
+      "error": "503 UNAVAILABLE. {'error': {'code': 503, 'message': 'The model is overloaded. Please try again later.', 'status': 'UNAVAILABLE'}}",
+      "total_time_ms": 313
+    },
+    {
+      "original_question": "Топ 10 волатильных дней за 2024",
+      "rounds": 1,
+      "round_details": [
+        {
+          "round": 1,
+          "question": "Топ 10 волатильных дней за 2024",
+          "barb_type": "query",
+          "time_ms": 1212,
+          "parser_output": {
+            "what": "volatile days",
+            "period": {
+              "raw": "2024",
+              "start": "2024-01-01",
+              "end": "2024-12-31"
+            },
+            "filters": {},
+            "modifiers": {
+              "top_n": 10
+            },
+            "unclear": [],
+            "summary": "Понял! Нахожу топ 10 самых волатильных дней за 2024 год."
+          },
+          "intent_type": "data",
+          "sql_preview": "WITH daily_raw AS (\n    SELECT\n        (CASE\n        WHEN timestamp::time < '17:00:00'::time\n       "
+        }
+      ],
+      "final_type": "data",
+      "success": true,
+      "error": null,
+      "total_time_ms": 1244,
+      "row_count": 10,
+      "columns": [
+        "date",
+        "open",
+        "high",
+        "low",
+        "close",
+        "range"
+      ],
+      "sql_query": "WITH daily_raw AS (\n    SELECT\n        (CASE\n        WHEN timestamp::time < '17:00:00'::time\n        THEN timestamp::date\n        ELSE timestamp::date + INTERVAL '1 day'\n    END)::date as date,\n        FIRST(open ORDER BY timestamp) as open,\n        MAX(high) as high,\n        MIN(low) as low,\n        LAST(close ORDER BY timestamp) as close,\n        SUM(volume) as volume,\n        -- Basic metrics\n        ROUND(MAX(high) - MIN(low), 2) as range,\n        ROUND((LAST(close ORDER BY timestamp) - FIRST(open ORDER BY timestamp))\n              / NULLIF(FIRST(open ORDER BY timestamp), 0) * 100, 2) as change_pct,\n        -- Close to extremes\n        ROUND(LAST(close ORDER BY timestamp) - MIN(low), 2) as close_to_low,\n        ROUND(MAX(high) - LAST(close ORDER BY timestamp), 2) as close_to_high,\n        -- Open to extremes\n        ROUND(MAX(high) - FIRST(open ORDER BY timestamp), 2) as open_to_high,\n        ROUND(FIRST(open ORDER BY timestamp) - MIN(low), 2) as open_to_low,\n        -- Candle structure\n        ROUND(ABS(LAST(close ORDER BY timestamp) - FIRST(open ORDER BY timestamp)), 2) as body,\n        ROUND(MAX(high) - GREATEST(FIRST(open ORDER BY timestamp), LAST(close ORDER BY timestamp)), 2) as upper_wick,\n        ROUND(LEAST(FIRST(open ORDER BY timestamp), LAST(close ORDER BY timestamp)) - MIN(low), 2) as lower_wick\n    FROM ohlcv_1min\n    WHERE symbol = 'NQ'\n      AND timestamp >= (('2024-01-01'::date - INTERVAL '1 day')::date + '18:00:00'::time)\n      AND timestamp < (('2025-01-01'::date - INTERVAL '1 day')::date + '17:00:00'::time)\n    GROUP BY (CASE\n        WHEN timestamp::time < '17:00:00'::time\n        THEN timestamp::date\n        ELSE timestamp::date + INTERVAL '1 day'\n    END)::date\n),\ndaily AS (\n    SELECT * FROM daily_raw\n    \n)\nSELECT\n    date,\n    open as open,\n    high as high,\n    low as low,\n    close as close,\n    range as range\nFROM daily\nORDER BY range DESC\nLIMIT 10",
+      "parser_output": {
+        "what": "volatile days",
+        "period": {
+          "raw": "2024",
+          "start": "2024-01-01",
+          "end": "2024-12-31"
+        },
+        "filters": {},
+        "modifiers": {
+          "top_n": 10
+        },
+        "unclear": [],
+        "summary": "Понял! Нахожу топ 10 самых волатильных дней за 2024 год."
+      },
+      "clarification_options": null
+    },
+    {
+      "original_question": "Сравни RTH и ETH по range",
+      "rounds": 1,
+      "round_details": [
+        {
+          "round": 1,
+          "question": "Сравни RTH и ETH по range",
+          "barb_type": "query",
+          "time_ms": 1663,
+          "parser_output": {
+            "what": "range comparison",
+            "period": {},
+            "filters": {},
+            "modifiers": {
+              "compare": [
+                "RTH",
+                "ETH"
+              ]
+            },
+            "unclear": [],
+            "summary": "Got it! Comparing RTH vs ETH range across all available data."
+          },
+          "intent_type": "data",
+          "sql_preview": "WITH daily_rth AS (\n    SELECT\n        (CASE\n        WHEN timestamp::time < '17:00:00'::time\n       "
+        }
+      ],
+      "final_type": "data",
+      "success": true,
+      "error": null,
+      "total_time_ms": 1753,
+      "row_count": 2,
+      "columns": [
+        "group_name",
+        "avg_range",
+        "avg_change",
+        "volatility",
+        "count"
+      ],
+      "sql_query": "WITH daily_rth AS (\n    SELECT\n        (CASE\n        WHEN timestamp::time < '17:00:00'::time\n        THEN timestamp::date\n        ELSE timestamp::date + INTERVAL '1 day'\n    END)::date as date,\n        FIRST(open ORDER BY timestamp) as open,\n        MAX(high) as high,\n        MIN(low) as low,\n        LAST(close ORDER BY timestamp) as close,\n        SUM(volume) as volume,\n        ROUND(MAX(high) - MIN(low), 2) as range,\n        ROUND((LAST(close ORDER BY timestamp) - FIRST(open ORDER BY timestamp))\n              / NULLIF(FIRST(open ORDER BY timestamp), 0) * 100, 2) as change_pct\n    FROM ohlcv_1min\n    WHERE symbol = 'NQ'\n      AND timestamp >= (('2008-01-02'::date - INTERVAL '1 day')::date + '18:00:00'::time)\n      AND timestamp < (('2026-01-08'::date - INTERVAL '1 day')::date + '17:00:00'::time)\n      AND timestamp::time BETWEEN '09:30:00' AND '17:00:00'\n      \n    GROUP BY (CASE\n        WHEN timestamp::time < '17:00:00'::time\n        THEN timestamp::date\n        ELSE timestamp::date + INTERVAL '1 day'\n    END)::date\n),\ndaily_eth AS (\n    SELECT\n        (CASE\n        WHEN timestamp::time < '17:00:00'::time\n        THEN timestamp::date\n        ELSE timestamp::date + INTERVAL '1 day'\n    END)::date as date,\n        FIRST(open ORDER BY timestamp) as open,\n        MAX(high) as high,\n        MIN(low) as low,\n        LAST(close ORDER BY timestamp) as close,\n        SUM(volume) as volume,\n        ROUND(MAX(high) - MIN(low), 2) as range,\n        ROUND((LAST(close ORDER BY timestamp) - FIRST(open ORDER BY timestamp))\n              / NULLIF(FIRST(open ORDER BY timestamp), 0) * 100, 2) as change_pct\n    FROM ohlcv_1min\n    WHERE symbol = 'NQ'\n      AND timestamp >= (('2008-01-02'::date - INTERVAL '1 day')::date + '18:00:00'::time)\n      AND timestamp < (('2026-01-08'::date - INTERVAL '1 day')::date + '17:00:00'::time)\n      \n      \n    GROUP BY (CASE\n        WHEN timestamp::time < '17:00:00'::time\n        THEN timestamp::date\n        ELSE timestamp::date + INTERVAL '1 day'\n    END)::date\n)\nSELECT\n    'RTH' as group_name,\n    ROUND(AVG(range), 2) as avg_range,\n    ROUND(AVG(change_pct), 2) as avg_change,\n    ROUND(STDDEV(change_pct), 2) as volatility,\n    COUNT(*) as count\nFROM daily_rth\nUNION ALL\nSELECT\n    'ETH' as group_name,\n    ROUND(AVG(range), 2) as avg_range,\n    ROUND(AVG(change_pct), 2) as avg_change,\n    ROUND(STDDEV(change_pct), 2) as volatility,\n    COUNT(*) as count\nFROM daily_eth",
+      "parser_output": {
+        "what": "range comparison",
+        "period": {},
+        "filters": {},
+        "modifiers": {
+          "compare": [
+            "RTH",
+            "ETH"
+          ]
+        },
+        "unclear": [],
+        "summary": "Got it! Comparing RTH vs ETH range across all available data."
+      },
+      "clarification_options": null
+    },
+    {
+      "original_question": "Привет",
+      "rounds": 1,
+      "round_details": [
+        {
+          "round": 1,
+          "question": "Привет",
+          "barb_type": "greeting",
+          "time_ms": 812,
+          "parser_output": {
+            "what": "greeting",
+            "period": null,
+            "filters": null,
+            "modifiers": null,
+            "unclear": [],
+            "summary": "Привет! Чем я могу помочь вам сегодня с торговыми данными?"
+          }
+        }
+      ],
+      "final_type": "chitchat",
+      "success": true,
+      "error": null,
+      "total_time_ms": 812,
+      "summary": "Привет! Чем я могу помочь вам сегодня с торговыми данными?",
+      "parser_output": {
+        "what": "greeting",
+        "period": null,
+        "filters": null,
+        "modifiers": null,
+        "unclear": [],
+        "summary": "Привет! Чем я могу помочь вам сегодня с торговыми данными?"
+      },
+      "clarification_options": null
+    },
+    {
+      "original_question": "Что такое гэп?",
+      "rounds": 1,
+      "round_details": [
+        {
+          "round": 1,
+          "question": "Что такое гэп?",
+          "barb_type": "concept",
+          "time_ms": 1276,
+          "parser_output": {
+            "what": "explain gap",
+            "period": null,
+            "filters": null,
+            "modifiers": null,
+            "unclear": [],
+            "summary": "Я объясню, что такое гэп в трейдинге."
+          }
+        }
+      ],
+      "final_type": "concept",
+      "success": true,
+      "error": null,
+      "total_time_ms": 1276,
+      "summary": "Я объясню, что такое гэп в трейдинге.",
+      "parser_output": {
+        "what": "explain gap",
+        "period": null,
+        "filters": null,
+        "modifiers": null,
+        "unclear": [],
+        "summary": "Я объясню, что такое гэп в трейдинге."
+      },
+      "clarification_options": null
+    }
+  ]
+}

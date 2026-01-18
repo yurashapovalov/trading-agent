@@ -40,8 +40,8 @@ def test_daily_simple():
         ),
         grouping=Grouping.TOTAL,
         metrics=[
-            MetricSpec(Metric.AVG, "range", "avg_range"),
-            MetricSpec(Metric.COUNT, alias="trading_days"),
+            MetricSpec(metric=Metric.AVG, column="range", alias="avg_range"),
+            MetricSpec(metric=Metric.COUNT, alias="trading_days"),
         ],
     )
 
@@ -68,14 +68,14 @@ def test_daily_filter():
             period_start="2020-01-01",
             period_end="2025-01-01",
             conditions=[
-                Condition("change_pct", "<", -2.0),
+                Condition(column="change_pct", operator="<", value=-2.0),
             ],
         ),
         grouping=Grouping.NONE,
         metrics=[
-            MetricSpec(Metric.OPEN),
-            MetricSpec(Metric.CLOSE),
-            MetricSpec(Metric.CHANGE_PCT),
+            MetricSpec(metric=Metric.OPEN),
+            MetricSpec(metric=Metric.CLOSE),
+            MetricSpec(metric=Metric.CHANGE_PCT),
         ],
     )
 
@@ -100,8 +100,8 @@ def test_daily_by_month():
         ),
         grouping=Grouping.MONTH,
         metrics=[
-            MetricSpec(Metric.AVG, "range", "avg_range"),
-            MetricSpec(Metric.COUNT, alias="trading_days"),
+            MetricSpec(metric=Metric.AVG, column="range", alias="avg_range"),
+            MetricSpec(metric=Metric.COUNT, alias="trading_days"),
         ],
     )
 
@@ -126,8 +126,8 @@ def test_daily_by_weekday():
         ),
         grouping=Grouping.WEEKDAY,
         metrics=[
-            MetricSpec(Metric.AVG, "volume", "avg_volume"),
-            MetricSpec(Metric.COUNT, alias="days"),
+            MetricSpec(metric=Metric.AVG, column="volume", alias="avg_volume"),
+            MetricSpec(metric=Metric.COUNT, alias="days"),
         ],
     )
 
@@ -163,7 +163,7 @@ def test_event_time_high():
     print(sql)
 
     assert "filtered_data" in sql
-    assert "daily_extremes" in sql
+    assert "daily_events" in sql
     assert "distribution" in sql
     assert "ORDER BY high DESC" in sql
     assert "TIME_BUCKET" in sql
@@ -207,8 +207,8 @@ def test_top_n():
         special_op=SpecialOp.TOP_N,
         top_n_spec=TopNSpec(n=10, order_by="range", direction="DESC"),
         metrics=[
-            MetricSpec(Metric.RANGE),
-            MetricSpec(Metric.CHANGE_PCT),
+            MetricSpec(metric=Metric.RANGE),
+            MetricSpec(metric=Metric.CHANGE_PCT),
         ],
     )
 
@@ -231,13 +231,13 @@ def test_daily_with_prev():
             period_start="2024-01-01",
             period_end="2024-02-01",
             conditions=[
-                Condition("gap_pct", ">", 1.0),
+                Condition(column="gap_pct", operator=">", value=1.0),
             ],
         ),
         grouping=Grouping.NONE,
         metrics=[
-            MetricSpec(Metric.GAP_PCT),
-            MetricSpec(Metric.CHANGE_PCT),
+            MetricSpec(metric=Metric.GAP_PCT),
+            MetricSpec(metric=Metric.CHANGE_PCT),
         ],
     )
 
@@ -265,8 +265,8 @@ def test_calendar_filter_years():
         ),
         grouping=Grouping.YEAR,
         metrics=[
-            MetricSpec(Metric.AVG, "range", "avg_range"),
-            MetricSpec(Metric.COUNT, alias="trading_days"),
+            MetricSpec(metric=Metric.AVG, column="range", alias="avg_range"),
+            MetricSpec(metric=Metric.COUNT, alias="trading_days"),
         ],
     )
 
@@ -291,8 +291,8 @@ def test_calendar_filter_months():
         ),
         grouping=Grouping.TOTAL,
         metrics=[
-            MetricSpec(Metric.AVG, "range", "avg_range"),
-            MetricSpec(Metric.COUNT, alias="summer_days"),
+            MetricSpec(metric=Metric.AVG, column="range", alias="avg_range"),
+            MetricSpec(metric=Metric.COUNT, alias="summer_days"),
         ],
     )
 
@@ -317,8 +317,8 @@ def test_calendar_filter_weekdays():
         ),
         grouping=Grouping.WEEKDAY,
         metrics=[
-            MetricSpec(Metric.AVG, "range", "avg_range"),
-            MetricSpec(Metric.COUNT, alias="days"),
+            MetricSpec(metric=Metric.AVG, column="range", alias="avg_range"),
+            MetricSpec(metric=Metric.COUNT, alias="days"),
         ],
     )
 
@@ -345,8 +345,8 @@ def test_calendar_filter_combined():
         ),
         grouping=Grouping.TOTAL,
         metrics=[
-            MetricSpec(Metric.AVG, "range", "avg_range"),
-            MetricSpec(Metric.COUNT, alias="days"),
+            MetricSpec(metric=Metric.AVG, column="range", alias="avg_range"),
+            MetricSpec(metric=Metric.COUNT, alias="days"),
         ],
     )
 
@@ -426,8 +426,8 @@ def test_holiday_filter_exclude_holidays():
         ),
         grouping=Grouping.TOTAL,
         metrics=[
-            MetricSpec(Metric.AVG, "range", "avg_range"),
-            MetricSpec(Metric.COUNT, alias="trading_days"),
+            MetricSpec(metric=Metric.AVG, column="range", alias="avg_range"),
+            MetricSpec(metric=Metric.COUNT, alias="trading_days"),
         ],
     )
 
@@ -455,8 +455,8 @@ def test_holiday_filter_exclude_early_close():
         ),
         grouping=Grouping.TOTAL,
         metrics=[
-            MetricSpec(Metric.AVG, "range", "avg_range"),
-            MetricSpec(Metric.COUNT, alias="trading_days"),
+            MetricSpec(metric=Metric.AVG, column="range", alias="avg_range"),
+            MetricSpec(metric=Metric.COUNT, alias="trading_days"),
         ],
     )
 
@@ -485,8 +485,8 @@ def test_holiday_filter_both():
         ),
         grouping=Grouping.TOTAL,
         metrics=[
-            MetricSpec(Metric.AVG, "range", "avg_range"),
-            MetricSpec(Metric.COUNT, alias="trading_days"),
+            MetricSpec(metric=Metric.AVG, column="range", alias="avg_range"),
+            MetricSpec(metric=Metric.COUNT, alias="trading_days"),
         ],
     )
 
@@ -514,8 +514,8 @@ def test_holiday_filter_only_early_close():
         ),
         grouping=Grouping.NONE,
         metrics=[
-            MetricSpec(Metric.RANGE),
-            MetricSpec(Metric.VOLUME),
+            MetricSpec(metric=Metric.RANGE),
+            MetricSpec(metric=Metric.VOLUME),
         ],
     )
 
@@ -542,8 +542,8 @@ def test_computed_columns():
         ),
         grouping=Grouping.NONE,
         metrics=[
-            MetricSpec(Metric.RANGE),
-            MetricSpec(Metric.CHANGE_PCT),
+            MetricSpec(metric=Metric.RANGE),
+            MetricSpec(metric=Metric.CHANGE_PCT),
         ],
     )
 
@@ -573,15 +573,15 @@ def test_filter_by_close_to_low():
             period_end="2025-01-01",
             weekdays=["Friday"],
             conditions=[
-                Condition("close_to_low", ">=", 200),
+                Condition(column="close_to_low", operator=">=", value=200),
             ],
         ),
         grouping=Grouping.NONE,
         metrics=[
-            MetricSpec(Metric.OPEN),
-            MetricSpec(Metric.CLOSE),
-            MetricSpec(Metric.LOW),
-            MetricSpec(Metric.RANGE),
+            MetricSpec(metric=Metric.OPEN),
+            MetricSpec(metric=Metric.CLOSE),
+            MetricSpec(metric=Metric.LOW),
+            MetricSpec(metric=Metric.RANGE),
         ],
     )
 

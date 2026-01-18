@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from agent.query_builder.types import Filters
 
 from agent.query_builder.sql_utils import safe_sql_time
-from agent.query_builder.instruments import get_session_times
+from agent.market.instruments import get_session_times
 
 
 def build_time_filter_sql(filters: "Filters", symbol: str = "NQ") -> str:

@@ -29,7 +29,7 @@ if TYPE_CHECKING:
     from agent.query_builder.types import Filters
 
 from agent.query_builder.types import HolidayFilter
-from agent.query_builder.holidays import get_holidays_for_year
+from agent.market.holidays import get_holidays_for_year
 
 
 def build_holiday_filter_sql(

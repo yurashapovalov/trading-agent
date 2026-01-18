@@ -16,6 +16,7 @@ from dataclasses import dataclass
 
 from google import genai
 from google.genai import types
+from pydantic import ValidationError
 
 import config
 from agent.prompts.parser import get_parser_prompt
@@ -28,9 +29,51 @@ from agent.composer import (
     GreetingResult,
     NotSupportedResult,
 )
-from agent.query_builder.types import QuerySpec
+from agent.query_builder.types import (
+    QuerySpec,
+    ParsedQuery,
+    ParsedPeriod,
+    ParsedFilters,
+    ParsedModifiers,
+    ClarificationState,
+)
 from agent.pricing import calculate_cost
-from agent.agents.understander import check_dates_for_holidays
+from agent.market.holidays import check_dates_for_holidays
+from agent.market.events import check_dates_for_events
+
+
+def dict_to_parsed_query(data: dict) -> ParsedQuery:
+    """Convert raw LLM dict output to typed ParsedQuery.
+
+    Validates LLM output against Pydantic models.
+    Returns fallback ParsedQuery on validation errors.
+    """
+    try:
+        period_data = data.get("period")
+        period = ParsedPeriod(**period_data) if period_data else None
+
+        filters_data = data.get("filters")
+        filters = ParsedFilters(**filters_data) if filters_data else None
+
+        modifiers_data = data.get("modifiers")
+        modifiers = ParsedModifiers(**modifiers_data) if modifiers_data else None
+
+        return ParsedQuery(
+            what=data.get("what", "greeting"),
+            period=period,
+            filters=filters,
+            modifiers=modifiers,
+            unclear=data.get("unclear", []),
+            summary=data.get("summary", ""),
+        )
+    except ValidationError as e:
+        print(f"[Barb] ParsedQuery validation failed: {e}")
+        # Return fallback — ask for clarification
+        return ParsedQuery(
+            what="unknown",
+            unclear=["question"],
+            summary="I couldn't understand your question. Could you please rephrase it?",
+        )
 
 
 @dataclass
@@ -45,6 +88,7 @@ class BarbResult:
     # For clarification type
     field: str | None = None
     options: list[str] | None = None
+    state: ClarificationState | None = None  # Pass to next ask() call
 
     # For concept type
     concept: str | None = None
@@ -54,6 +98,9 @@ class BarbResult:
 
     # Holiday info (if dates are holidays)
     holiday_info: dict | None = None
+
+    # Event info (if dates have known events like OPEX, NFP)
+    event_info: dict | None = None
 
     # Debug info (for analysis)
     parser_output: dict | None = None  # Raw LLM output
@@ -94,6 +141,7 @@ class Barb:
         question: str,
         chat_history: str = "",
         today: str | None = None,
+        state: ClarificationState | None = None,
     ) -> BarbResult:
         """
         Process a question and return structured result.
@@ -102,24 +150,47 @@ class Barb:
             question: User's question in any language
             chat_history: Previous conversation for context
             today: Today's date (YYYY-MM-DD), defaults to now
+            state: Previous clarification state (pass result.state from previous call)
 
         Returns:
-            BarbResult with type-specific fields
+            BarbResult with type-specific fields.
+            For clarifications, includes state to pass to next call.
         """
         if today is None:
             today = datetime.now().strftime("%Y-%m-%d")
 
-        # Step 1: Parser (LLM) — extract entities
-        parsed, usage = self._parse(question, chat_history, today)
+        # Track original question for state
+        original_question = state.original_question if state else question
 
-        # Step 2: Composer (code) — business decisions
+        # Step 1: Parser (LLM) — extract entities as dict
+        parsed_dict, usage = self._parse(question, chat_history, today)
+
+        # Step 2: Convert to typed ParsedQuery
+        parsed = dict_to_parsed_query(parsed_dict)
+
+        # Step 3: Merge with previous state (deterministic, not LLM-dependent)
+        if state and state.resolved:
+            parsed = state.resolved.merge_with(parsed)
+
+        # Step 4: Composer (code) — business decisions
         result = compose(parsed, symbol=self.symbol)
 
-        # Step 3: Check for holidays in requested dates
+        # Step 5: Check for holidays in requested dates
         holiday_info = self._check_holidays(parsed, result)
 
-        # Step 4: Convert to BarbResult (include parsed for debugging)
-        return self._to_barb_result(result, usage, parsed, holiday_info)
+        # Step 6: Check for events in requested dates (OPEX, NFP, etc.)
+        event_info = self._check_events(parsed)
+
+        # Step 7: Build state for clarification flow
+        next_state = None
+        if result.type == "clarification":
+            next_state = ClarificationState(
+                original_question=original_question,
+                resolved=parsed,
+            )
+
+        # Step 8: Convert to BarbResult
+        return self._to_barb_result(result, usage, parsed_dict, holiday_info, event_info, next_state)
 
     def _parse(
         self,
@@ -169,11 +240,9 @@ class Barb:
 
         return parsed, usage
 
-    def _check_holidays(self, parsed: dict, result: ComposerResult) -> dict | None:
+    def _check_holidays(self, parsed: ParsedQuery, result: ComposerResult) -> dict | None:
         """Check if requested dates fall on holidays."""
-        # Get dates from parser output
-        period = parsed.get("period") or {}
-        dates = period.get("dates") or []
+        dates = parsed.period.dates if parsed.period else []
 
         if not dates:
             return None
@@ -198,13 +267,36 @@ class Barb:
             "count": len(all_dates),
         }
 
-    def _to_barb_result(self, result: ComposerResult, usage: dict, parsed: dict, holiday_info: dict | None = None) -> BarbResult:
+    def _check_events(self, parsed: ParsedQuery) -> dict | None:
+        """Check if requested dates have known events (OPEX, NFP, etc.)."""
+        dates = parsed.period.dates if parsed.period else []
+
+        if not dates:
+            return None
+
+        event_check = check_dates_for_events(dates, self.symbol)
+
+        if not event_check:
+            return None
+
+        return event_check  # {dates, events, high_impact_count}
+
+    def _to_barb_result(
+        self,
+        result: ComposerResult,
+        usage: dict,
+        parsed: dict,
+        holiday_info: dict | None = None,
+        event_info: dict | None = None,
+        state: ClarificationState | None = None,
+    ) -> BarbResult:
         """Convert Composer result to BarbResult."""
         base = {
             "type": result.type,
             "summary": result.summary,
-            "holiday_info": holiday_info,  # Holiday info for Analyst
-            "parser_output": parsed,  # Raw LLM output for debugging
+            "holiday_info": holiday_info,
+            "event_info": event_info,
+            "parser_output": parsed,
             "input_tokens": usage.get("input_tokens", 0),
             "output_tokens": usage.get("output_tokens", 0),
             "cost_usd": usage.get("cost_usd", 0.0),
@@ -214,23 +306,23 @@ class Barb:
         if isinstance(result, QueryWithSummary):
             return BarbResult(**base, spec=result.spec)
 
-        elif isinstance(result, ClarificationResult):
+        if isinstance(result, ClarificationResult):
             return BarbResult(
                 **base,
                 field=result.field,
                 options=result.options,
+                state=state,  # Pass state for next round
             )
 
-        elif isinstance(result, ConceptResult):
+        if isinstance(result, ConceptResult):
             return BarbResult(**base, concept=result.concept)
 
-        elif isinstance(result, GreetingResult):
+        if isinstance(result, GreetingResult):
             return BarbResult(**base)
 
-        elif isinstance(result, NotSupportedResult):
+        if isinstance(result, NotSupportedResult):
             return BarbResult(**base, reason=result.reason)
 
-        # Fallback
         return BarbResult(**base)
 
 
