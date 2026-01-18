@@ -208,20 +208,20 @@ def _resolve_event_filter(
     If error_message is not None, the event filter couldn't be resolved.
     """
     from datetime import date, timedelta
-    from agent.modules.sql import get_data_range
+    from agent.market.instruments import get_instrument
 
     # Get period bounds
     if period and period.start and period.end:
         start_str = period.start
         end_str = period.end
     else:
-        # Use data range as default
-        data_range = get_data_range(symbol)
-        if data_range:
-            start_str = period.start if period and period.start else data_range["start_date"]
-            end_str = period.end if period and period.end else data_range["end_date"]
+        # Use instrument data range as default
+        instrument = get_instrument(symbol)
+        if instrument:
+            start_str = period.start if period and period.start else instrument.get("data_start", "2008-01-01")
+            end_str = period.end if period and period.end else instrument.get("data_end", datetime.now().strftime("%Y-%m-%d"))
         else:
-            start_str = period.start if period and period.start else "2020-01-01"
+            start_str = period.start if period and period.start else "2008-01-01"
             end_str = period.end if period and period.end else datetime.now().strftime("%Y-%m-%d")
 
     try:
@@ -330,7 +330,7 @@ def _determine_source(
 
 def _build_filters(period: ParsedPeriod | None, filters_raw: ParsedFilters | None, symbol: str) -> Filters:
     """Build Filters object from parsed data."""
-    from agent.modules.sql import get_data_range
+    from agent.market.instruments import get_instrument
 
     specific_dates = period.dates if period else None
 
@@ -342,12 +342,12 @@ def _build_filters(period: ParsedPeriod | None, filters_raw: ParsedFilters | Non
         period_start = period.start if period else None
         period_end = period.end if period else None
 
-    # Fill missing period from data range
+    # Fill missing period from instrument data range
     if not period_start or not period_end:
-        data_range = get_data_range(symbol)
-        if data_range:
-            period_start = period_start or data_range["start_date"]
-            period_end = period_end or data_range["end_date"]
+        instrument = get_instrument(symbol)
+        if instrument:
+            period_start = period_start or instrument.get("data_start", "2008-01-01")
+            period_end = period_end or instrument.get("data_end", datetime.now().strftime("%Y-%m-%d"))
         else:
             period_start = period_start or "2008-01-01"
             period_end = period_end or datetime.now().strftime("%Y-%m-%d")

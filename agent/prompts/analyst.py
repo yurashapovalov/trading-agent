@@ -24,9 +24,13 @@ def _format_instrument_context(symbol: str | None) -> str:
         for name, times in sessions.items()
     )
 
+    data_start = instrument.get("data_start", "unknown")
+    data_end = instrument.get("data_end", "unknown")
+
     return f"""<instrument>
 You are analyzing: {symbol} ({instrument['name']})
 Exchange: {instrument['exchange']}
+Available data: {data_start} to {data_end}
 Trading hours: {instrument['trading_day_start']} prev day → {instrument['trading_day_end']} current day (ET)
 Sessions: {session_list}
 Maintenance break: {instrument['maintenance'][0]}-{instrument['maintenance'][1]} ET (no data)

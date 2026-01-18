@@ -13,6 +13,10 @@ INSTRUMENTS = {
         "native_timezone": "CT",
         "data_timezone": "ET",
 
+        # Available data (update when loading new data)
+        "data_start": "2008-01-02",
+        "data_end": "2026-01-07",
+
         # Trading day: 18:00 prev → 17:00 current (CME: 17:00-16:00 CT)
         "trading_day_start": "18:00",
         "trading_day_end": "17:00",
