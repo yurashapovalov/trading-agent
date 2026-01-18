@@ -30,6 +30,8 @@ jobs:
             cd /root/stock
             git pull origin main
             docker compose down
+            # Kill any process holding port 8000 (in case uvicorn was started manually)
+            fuser -k 8000/tcp 2>/dev/null || true
             docker compose up --build -d
             docker compose logs --tail=20
             echo "Deployed successfully!"
