@@ -33,5 +33,22 @@ jobs:
             # Kill any process holding port 8000 (in case uvicorn was started manually)
             fuser -k 8000/tcp 2>/dev/null || true
             docker compose up --build -d
-            docker compose logs --tail=20
-            echo "Deployed successfully!"
+
+            # Health check - wait for service to be ready
+            echo "Waiting for service to start..."
+            sleep 5
+            for i in 1 2 3 4 5; do
+              if curl -sf http://localhost:8000/ > /dev/null; then
+                echo "✓ Health check passed"
+                docker compose logs --tail=30
+                echo "Deployed successfully!"
+                exit 0
+              fi
+              echo "Attempt $i failed, retrying in 5s..."
+              sleep 5
+            done
+
+            # Health check failed
+            echo "✗ Health check failed after 5 attempts"
+            docker compose logs --tail=50
+            exit 1
