@@ -68,16 +68,22 @@ Return JSON:
 
 Examples (note: response language matches question language):
 
-Question: "волатильность по часам"
+Question: "волатильность по часам" (type: query)
+{{
+  "title": "Волатильность NQ по часам",
+  "response": ""
+}}
+
+Question: "show me daily range" (type: query)
+{{
+  "title": "NQ Daily Range",
+  "response": ""
+}}
+
+Question: "волатильность по часам" (type: offer_analysis, 24 rows)
 {{
   "title": "Волатильность NQ по часам",
   "response": "Данные по волатильности NQ готовы (24 строки). Нужен детальный анализ?"
-}}
-
-Question: "show me daily range"
-{{
-  "title": "NQ Daily Range",
-  "response": "I've compiled the daily range data for NQ. Would you like me to analyze it?"
 }}
 </output_format>
 
@@ -90,10 +96,10 @@ For DATA_SUMMARY type:
 - Title: null (data shown inline, no card needed)
 
 For QUERY type:
-- Response: expert context BEFORE data arrives
-  - What patterns to expect
-  - Relevant market context (events, typical behavior)
-  - Keep it 1-3 sentences
+- Response: EMPTY string "" — no text response needed
+  - The data card will show automatically
+  - Text response comes AFTER data loads (from summarize/offer_analysis)
+  - Only generate title, not response text
 
 For CLARIFICATION:
 - Explain what you need and why

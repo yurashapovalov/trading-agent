@@ -174,13 +174,12 @@ class Responder:
             # Parse JSON response
             response_text, data_title = self._parse_response(full_text, result_type)
 
-            # Stream the response text
-            if response_text:
-                # Send title first if query type
-                if data_title:
-                    writer({"type": "data_title", "title": data_title})
+            # Send data_title first (even if response is empty)
+            if data_title:
+                writer({"type": "data_title", "title": data_title})
 
-                # Stream response in chunks
+            # Stream the response text (only if not empty)
+            if response_text:
                 writer({"type": "text_delta", "agent": self.name, "content": response_text})
 
             # Update usage
