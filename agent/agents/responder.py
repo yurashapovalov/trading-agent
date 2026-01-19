@@ -50,7 +50,7 @@ class Responder:
     def __init__(self):
         """Initialize Gemini client."""
         self.client = genai.Client(api_key=config.GOOGLE_API_KEY)
-        self.model = config.GEMINI_LITE_MODEL  # Fast model for quick responses
+        self.model = config.GEMINI_LITE_MODEL  # Fast and cheap
         self._last_usage = UsageStats(
             input_tokens=0,
             output_tokens=0,
@@ -113,7 +113,7 @@ class Responder:
             row_count = intent.get("row_count", 0)
 
         # Build prompt
-        system, user = get_responder_prompt(
+        system_prompt, user_prompt = get_responder_prompt(
             question=question,
             result_type=result_type,
             parsed_entities=parser_output,
@@ -129,8 +129,6 @@ class Responder:
             row_count=row_count,
         )
 
-        prompt = f"{system}\n\n{user}"
-
         # Try streaming
         writer = None
         if HAS_STREAM_WRITER:
@@ -140,13 +138,14 @@ class Responder:
                 pass
 
         if writer:
-            return self._generate_with_streaming(prompt, writer, state, result_type)
+            return self._generate_with_streaming(system_prompt, user_prompt, writer, state, result_type)
         else:
-            return self._generate_batch(prompt, state, result_type)
+            return self._generate_batch(system_prompt, user_prompt, state, result_type)
 
     def _generate_with_streaming(
         self,
-        prompt: str,
+        system_prompt: str,
+        user_prompt: str,
         writer,
         state: AgentState,
         result_type: str,
@@ -159,9 +158,10 @@ class Responder:
         try:
             for chunk in self.client.models.generate_content_stream(
                 model=self.model,
-                contents=prompt,
+                contents=user_prompt,
                 config=types.GenerateContentConfig(
-                    temperature=0.4,  # Slightly creative for natural responses
+                    system_instruction=system_prompt,
+                    temperature=1.0,
                 )
             ):
                 if chunk.usage_metadata:
@@ -184,7 +184,11 @@ class Responder:
                 writer({"type": "text_delta", "agent": self.name, "content": response_text})
 
             # Update usage
-            cost = calculate_cost(total_input, total_output, 0)
+            cost = calculate_cost(
+                input_tokens=total_input,
+                output_tokens=total_output,
+                model=self.model,
+            )
             self._last_usage = UsageStats(
                 input_tokens=total_input,
                 output_tokens=total_output,
@@ -200,7 +204,8 @@ class Responder:
 
     def _generate_batch(
         self,
-        prompt: str,
+        system_prompt: str,
+        user_prompt: str,
         state: AgentState,
         result_type: str,
     ) -> dict:
@@ -208,9 +213,10 @@ class Responder:
         try:
             response_obj = self.client.models.generate_content(
                 model=self.model,
-                contents=prompt,
+                contents=user_prompt,
                 config=types.GenerateContentConfig(
-                    temperature=0.4,
+                    system_instruction=system_prompt,
+                    temperature=1.0,
                     response_mime_type="application/json",
                 )
             )
@@ -240,7 +246,7 @@ class Responder:
             # Try to parse as JSON
             data = json.loads(cleaned)
             response_text = data.get("response", text)
-            data_title = data.get("title") if result_type in ("query", "data") else None
+            data_title = data.get("title") if result_type in ("query", "data", "offer_analysis") else None
             return response_text, data_title
         except json.JSONDecodeError:
             # If not JSON, use raw text
@@ -276,7 +282,13 @@ class Responder:
         if response.usage_metadata:
             input_tokens = response.usage_metadata.prompt_token_count or 0
             output_tokens = response.usage_metadata.candidates_token_count or 0
-            cost = calculate_cost(input_tokens, output_tokens, 0)
+            cached_tokens = getattr(response.usage_metadata, 'cached_content_token_count', 0) or 0
+            cost = calculate_cost(
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                cached_tokens=cached_tokens,
+                model=self.model,
+            )
 
             self._last_usage = UsageStats(
                 input_tokens=input_tokens,

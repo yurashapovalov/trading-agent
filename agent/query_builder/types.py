@@ -46,11 +46,12 @@ class ParsedFilters(BaseModel):
 
 
 class ParsedModifiers(BaseModel):
-    """Query modifiers: grouping, top_n, compare."""
+    """Query modifiers: grouping, top_n, compare, find."""
 
     group_by: str | None = None
     top_n: int | None = None
     compare: list[str] | None = None
+    find: str | None = None  # "max" or "min" - extracted from superlatives
 
 
 class ParsedQuery(BaseModel):

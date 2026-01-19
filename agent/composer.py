@@ -170,6 +170,12 @@ def _build_query(parsed: ParsedQuery, symbol: str) -> ComposerResult:
     filters = _build_filters(period, filters_raw, symbol)
     metrics = _determine_metrics(parsed.what, modifiers)
 
+    # Reconcile metrics with TOP_N order_by
+    # If ordering by aggregate column, ensure aggregate metrics are used
+    if special_op == SpecialOp.TOP_N and op_specs.get("top_n"):
+        top_n_spec = op_specs["top_n"]
+        metrics = _reconcile_metrics_with_order_by(metrics, top_n_spec.order_by)
+
     spec = QuerySpec(
         symbol=symbol,
         source=source,
@@ -515,6 +521,31 @@ def _determine_grouping(
     return Grouping.NONE
 
 
+def _reconcile_metrics_with_order_by(metrics: list[MetricSpec], order_by: str) -> list[MetricSpec]:
+    """Ensure metrics include the order_by column.
+
+    If TOP_N orders by an aggregate column (volatility, avg_range, etc.),
+    we need aggregate metrics, not raw OHLC.
+    """
+    # Aggregate columns that require statistical metrics
+    aggregate_columns = {"volatility", "avg_range", "avg_change", "stddev"}
+
+    if order_by in aggregate_columns:
+        # Check if current metrics already include aggregates
+        metric_aliases = {m.alias for m in metrics if m.alias}
+
+        if order_by not in metric_aliases:
+            # Replace with aggregate metrics
+            return [
+                MetricSpec(metric=Metric.AVG, column="range", alias="avg_range"),
+                MetricSpec(metric=Metric.AVG, column="change_pct", alias="avg_change"),
+                MetricSpec(metric=Metric.STDDEV, column="change_pct", alias="volatility"),
+                MetricSpec(metric=Metric.COUNT, alias="count"),
+            ]
+
+    return metrics
+
+
 def _determine_metrics(what: str, modifiers: ParsedModifiers | None) -> list[MetricSpec]:
     """Determine which metrics to include."""
     what_lower = what.lower()
@@ -564,12 +595,26 @@ def _determine_special_op(what: str, modifiers: ParsedModifiers | None) -> tuple
         specs["compare"] = CompareSpec(items=modifiers.compare)
         return SpecialOp.COMPARE, specs
 
-    # Top N
-    if modifiers and modifiers.top_n:
+    # Get find and top_n from modifiers
+    find = modifiers.find if modifiers else None
+    top_n = modifiers.top_n if modifiers else None
+
+    # find without explicit top_n implies top_n=1
+    if find and not top_n:
+        top_n = 1
+
+    # Top N (explicit or implied from find)
+    if top_n:
         order_by = "range"  # default
         direction = "DESC"  # default: biggest first
 
-        if "gap" in what_lower:
+        # find field takes precedence for direction
+        if find == "min":
+            direction = "ASC"
+        elif find == "max":
+            direction = "DESC"
+        # Fallback to what-based inference if no find
+        elif "gap" in what_lower:
             order_by = "gap_pct"
             # gap down = negative, gap up = positive
             if "down" in what_lower:
@@ -581,8 +626,14 @@ def _determine_special_op(what: str, modifiers: ParsedModifiers | None) -> tuple
             order_by = "change_pct"
             direction = "DESC"  # gains are positive
 
+        # Determine order_by from what (if not already set by gap logic)
+        if "volati" in what_lower:
+            order_by = "volatility"
+        elif "range" in what_lower:
+            order_by = "range"
+
         specs["top_n"] = TopNSpec(
-            n=modifiers.top_n,
+            n=top_n,
             order_by=order_by,
             direction=direction,
         )
@@ -590,10 +641,10 @@ def _determine_special_op(what: str, modifiers: ParsedModifiers | None) -> tuple
 
     # Event time (when is high/low usually)
     if "time of" in what_lower or "when" in what_lower:
-        find = "high"
+        event_find = "high"
         if "low" in what_lower:
-            find = "low"
-        specs["event_time"] = EventTimeSpec(find=find)
+            event_find = "low"
+        specs["event_time"] = EventTimeSpec(find=event_find)
         return SpecialOp.EVENT_TIME, specs
 
     return SpecialOp.NONE, specs

@@ -61,7 +61,8 @@ Extract facts from user's question. Do NOT make decisions — just extract.
   "modifiers": {
     "compare": ["A", "B"] or null,
     "top_n": number or null,
-    "group_by": "month" | "weekday" | "hour" or null
+    "group_by": "month" | "weekday" | "hour" or null,
+    "find": "max" | "min" or null
   },
 
   "unclear": ["what needs clarification"]
@@ -93,6 +94,10 @@ Extract facts from user's question. Do NOT make decisions — just extract.
    - "compare X vs Y" → compare: ["X", "Y"]
    - "top 10" → top_n: 10
    - "by month" → group_by: "month"
+   - Superlatives → find: "max" or "min":
+     * "самый", "наиболее", "most", "highest", "largest", "best" → find: "max"
+     * "наименее", "lowest", "smallest", "worst", "quietest" → find: "min"
+     * Example: "какой час самый волатильный?" → find: "max", group_by: "hour"
 
 5. Unclear — ONLY for missing required info:
    - Date without year → ["year"] (need to know which year)
@@ -236,6 +241,28 @@ Q: "Volatility by month for 2024"
 }
 ```
 
+Q: "Какой час самый волатильный?"
+```json
+{
+  "what": "most volatile hour",
+  "period": {},
+  "filters": {},
+  "modifiers": {"group_by": "hour", "find": "max"},
+  "unclear": []
+}
+```
+
+Q: "Which day had the lowest range in 2024?"
+```json
+{
+  "what": "lowest range day",
+  "period": {"raw": "2024", "start": "2024-01-01", "end": "2024-12-31"},
+  "filters": {},
+  "modifiers": {"find": "min"},
+  "unclear": []
+}
+```
+
 Q: "What is gap?"
 ```json
 {
@@ -318,11 +345,50 @@ USER_PROMPT_WITH_HISTORY = """<today>{today}</today>
 Extract entities. Return JSON only."""
 
 
+def _format_previous_parsed(parsed) -> str:
+    """Format previous ParsedQuery for prompt."""
+    if not parsed:
+        return ""
+
+    parts = [f"what: {parsed.what}"]
+
+    if parsed.period:
+        period_str = parsed.period.raw or f"{parsed.period.start} - {parsed.period.end}"
+        parts.append(f"period: {period_str}")
+
+    if parsed.filters:
+        filters = {}
+        if parsed.filters.weekdays:
+            filters["weekdays"] = parsed.filters.weekdays
+        if parsed.filters.session:
+            filters["session"] = parsed.filters.session
+        if parsed.filters.event_filter:
+            filters["event"] = parsed.filters.event_filter
+        if filters:
+            parts.append(f"filters: {filters}")
+
+    if parsed.modifiers:
+        mods = {}
+        if parsed.modifiers.group_by:
+            mods["group_by"] = parsed.modifiers.group_by
+        if parsed.modifiers.top_n:
+            mods["top_n"] = parsed.modifiers.top_n
+        if parsed.modifiers.compare:
+            mods["compare"] = parsed.modifiers.compare
+        if parsed.modifiers.find:
+            mods["find"] = parsed.modifiers.find
+        if mods:
+            parts.append(f"modifiers: {mods}")
+
+    return "\n".join(parts)
+
+
 def get_parser_prompt(
     question: str,
     chat_history: str = "",
     today: str = "",
     symbol: str = "NQ",
+    previous_parsed=None,
 ) -> tuple[str, str]:
     """
     Build Parser prompt with instrument context.
@@ -332,6 +398,7 @@ def get_parser_prompt(
         chat_history: Previous conversation
         today: Today's date (YYYY-MM-DD)
         symbol: Instrument symbol for context
+        previous_parsed: Previous ParsedQuery for follow-up context
 
     Returns:
         Tuple of (system_prompt, user_prompt)
@@ -339,16 +406,38 @@ def get_parser_prompt(
     instrument_context = _format_instrument_context(symbol)
     system = SYSTEM_PROMPT + "\n\n" + instrument_context + "\n\n" + EXAMPLES
 
+    # Build user prompt with optional previous_parsed
+    previous_section = ""
+    if previous_parsed:
+        formatted = _format_previous_parsed(previous_parsed)
+        previous_section = f"""<previous_parsed>
+{formatted}
+</previous_parsed>
+
+If the current question modifies or refines the previous query, update it.
+If it's a new unrelated question, ignore previous and extract fresh.
+
+"""
+
     if chat_history:
-        user = USER_PROMPT_WITH_HISTORY.format(
-            today=today,
-            chat_history=chat_history,
-            question=question,
-        )
+        user = f"""<today>{today}</today>
+
+{previous_section}<history>
+{chat_history}
+</history>
+
+<question>
+{question}
+</question>
+
+Extract entities. Return JSON only."""
     else:
-        user = USER_PROMPT.format(
-            today=today,
-            question=question,
-        )
+        user = f"""<today>{today}</today>
+
+{previous_section}<question>
+{question}
+</question>
+
+Extract entities. Return JSON only."""
 
     return system, user
