@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useEffect, useCallback, useRef } from "react"
+import { useParams, useRouter, usePathname } from "next/navigation"
 import { useAuth } from "@/providers"
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
@@ -21,10 +22,15 @@ export type ChatSession = {
 
 export function useChats() {
   const { session } = useAuth()
+  const router = useRouter()
+  const params = useParams()
+  const pathname = usePathname()
   const [chats, setChats] = useState<ChatSession[]>([])
-  const [currentChatId, setCurrentChatId] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const initialChatCreated = useRef(false)
+
+  // Get chatId from URL params (/chat/[id]) or null if on root
+  const currentChatId = (params?.id as string) || null
 
   // Generate next "New Chat N" title based on current chats
   const getNextNewChatTitle = useCallback((chatList: ChatSession[]) => {
@@ -57,10 +63,10 @@ export function useChats() {
         const chatList: ChatSession[] = Array.isArray(data) ? data : []
         setChats(chatList)
 
-        // Auto-select first chat or create one if empty
+        // Auto-redirect to first chat if on root and we have chats
         if (chatList.length > 0) {
-          if (!currentChatId) {
-            setCurrentChatId(chatList[0].id)
+          if (!currentChatId && pathname === "/") {
+            router.replace(`/chat/${chatList[0].id}`)
           }
         } else if (!initialChatCreated.current) {
           // Create first chat automatically (only once)
@@ -84,7 +90,7 @@ export function useChats() {
               updated_at: new Date().toISOString(),
             }
             setChats([newChat])
-            setCurrentChatId(newChat.id)
+            router.replace(`/chat/${newChat.id}`)
           }
         }
       }
@@ -93,7 +99,7 @@ export function useChats() {
     } finally {
       setIsLoading(false)
     }
-  }, [session?.access_token, currentChatId])
+  }, [session?.access_token, currentChatId, pathname, router])
 
   useEffect(() => {
     fetchChats()
@@ -124,14 +130,14 @@ export function useChats() {
           updated_at: new Date().toISOString(),
         }
         setChats((prev) => [newChat, ...prev])
-        setCurrentChatId(newChat.id)
+        router.push(`/chat/${newChat.id}`)
         return newChat.id
       }
     } catch (e) {
       console.error("Failed to create chat:", e)
     }
     return null
-  }, [session?.access_token, chats, getNextNewChatTitle])
+  }, [session?.access_token, chats, getNextNewChatTitle, router])
 
   const deleteChat = useCallback(async (chatId: string) => {
     if (!session?.access_token) return
@@ -145,22 +151,23 @@ export function useChats() {
         const remainingChats = chats.filter((c) => c.id !== chatId)
         setChats(remainingChats)
 
+        // Navigate to another chat if we deleted the current one
         if (currentChatId === chatId) {
           if (remainingChats.length > 0) {
-            setCurrentChatId(remainingChats[0].id)
+            router.replace(`/chat/${remainingChats[0].id}`)
           } else {
-            setCurrentChatId(null)
+            router.replace("/")
           }
         }
       }
     } catch (e) {
       console.error("Failed to delete chat:", e)
     }
-  }, [session?.access_token, currentChatId, chats])
+  }, [session?.access_token, currentChatId, chats, router])
 
   const selectChat = useCallback((chatId: string) => {
-    setCurrentChatId(chatId)
-  }, [])
+    router.push(`/chat/${chatId}`)
+  }, [router])
 
   const updateChatTitle = useCallback((chatId: string, title: string) => {
     setChats((prev) =>

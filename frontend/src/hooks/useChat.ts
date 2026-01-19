@@ -73,6 +73,51 @@ function tracesToAgentSteps(traces: any[]): AgentStep[] {
   })
 }
 
+// Extract data_card and preview from traces for history loading
+function extractDataFromTraces(traces: any[]): { dataCard?: DataCard; preview?: string } {
+  if (!traces || traces.length === 0) return {}
+
+  let dataCard: DataCard | undefined
+  let preview: string | undefined
+  let dataTitle: string | undefined
+
+  for (const trace of traces) {
+    const outputData =
+      typeof trace.output_data === "string"
+        ? JSON.parse(trace.output_data)
+        : trace.output_data
+
+    if (!outputData) continue
+
+    // Find responder trace with data_title (this is the preview)
+    if (trace.agent_name === "responder" && outputData.data_title) {
+      dataTitle = outputData.data_title
+      preview = outputData.response
+    }
+
+    // Find data_fetcher trace with full_data
+    if (trace.agent_name === "data_fetcher" && outputData.full_data) {
+      const fullData = outputData.full_data
+      dataCard = {
+        title: fullData.title || dataTitle || "",
+        row_count: fullData.row_count || 0,
+        data: fullData,
+      }
+    }
+  }
+
+  // If we have data_title but no data_card yet, create minimal card
+  if (dataTitle && !dataCard) {
+    dataCard = {
+      title: dataTitle,
+      row_count: 0,
+      data: {},
+    }
+  }
+
+  return { dataCard, preview }
+}
+
 type UseChatOptions = {
   chatId: string | null
   onChatCreated?: (chatId: string) => void
@@ -115,25 +160,32 @@ export function useChat({ chatId, onChatCreated, onTitleUpdated }: UseChatOption
           // API returns array directly, not {messages: [...]}
           const messages = Array.isArray(data) ? data : []
           const loadedMessages: ChatMessage[] = messages
-            .map((item: any) => [
-              { role: "user" as const, content: item.question },
-              {
-                role: "assistant" as const,
-                content: item.response,
-                request_id: item.request_id,
-                tools_used: [],
-                agent_steps: tracesToAgentSteps(item.traces || []),
-                route: item.route,
-                validation_passed: item.validation_passed,
-                usage: {
-                  input_tokens: item.input_tokens,
-                  output_tokens: item.output_tokens,
-                  thinking_tokens: item.thinking_tokens,
-                  cost: parseFloat(item.cost_usd) || 0,
+            .map((item: any) => {
+              const traces = item.traces || []
+              const { dataCard, preview } = extractDataFromTraces(traces)
+
+              return [
+                { role: "user" as const, content: item.question },
+                {
+                  role: "assistant" as const,
+                  content: item.response,
+                  preview: dataCard ? preview : undefined, // Only include preview if there's data
+                  request_id: item.request_id,
+                  tools_used: [],
+                  agent_steps: tracesToAgentSteps(traces),
+                  route: item.route,
+                  validation_passed: item.validation_passed,
+                  usage: {
+                    input_tokens: item.input_tokens,
+                    output_tokens: item.output_tokens,
+                    thinking_tokens: item.thinking_tokens,
+                    cost: parseFloat(item.cost_usd) || 0,
+                  },
+                  feedback: item.feedback,
+                  data_card: dataCard,
                 },
-                feedback: item.feedback,
-              },
-            ])
+              ]
+            })
             .flat()
           setMessages(loadedMessages)
         } else {

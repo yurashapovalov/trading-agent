@@ -636,6 +636,11 @@ async def chat_stream(request: ChatRequest, user_id: str = Depends(require_auth)
                 elif event_type == "text_delta":
                     final_text += event.get("content", "")
 
+                elif event_type == "data_ready":
+                    # Add separator between preview and summary for proper markdown rendering
+                    if final_text and not final_text.endswith("\n\n"):
+                        final_text += "\n\n"
+
                 elif event_type == "validation":
                     validation_attempts += 1
                     validation_passed = event.get("status") == "ok"

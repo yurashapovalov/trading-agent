@@ -315,7 +315,7 @@ export const MessageResponse = memo(
         "[&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
         className
       )}
-      controls={{ table: false, code: true, mermaid: true }}
+      controls={{ table: true, code: true, mermaid: true }}
       {...props}
     />
   ),
