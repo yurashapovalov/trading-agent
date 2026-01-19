@@ -92,7 +92,9 @@ ComposerResult = QueryWithSummary | ClarificationResult | ConceptResult | Greeti
 def compose(parsed: ParsedQuery, symbol: str = "NQ") -> ComposerResult:
     """Convert ParsedQuery to QuerySpec or clarification."""
 
-    if parsed.what == "greeting":
+    # Chitchat: greeting, thanks, acknowledgment, etc.
+    chitchat_keywords = {"greeting", "acknowledgment", "thanks", "thank you", "bye", "goodbye"}
+    if parsed.what.lower() in chitchat_keywords:
         return GreetingResult(type="greeting", summary=parsed.summary)
 
     if parsed.what.startswith("explain"):
