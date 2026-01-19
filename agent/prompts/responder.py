@@ -48,36 +48,36 @@ CRITICAL: Respond in the SAME LANGUAGE as the user's question.
 {instrument_context}
 
 <task>
-Based on the composer result type, respond appropriately:
+Based on the result type, respond appropriately:
 
 **greeting** — Welcome the user, offer help with {symbol} data
 **concept** — Explain the trading concept clearly
 **clarification** — Ask for missing info with helpful context
 **not_supported** — Explain why politely, suggest alternatives
-**query** — Give expert preview while data loads, generate title for data card
-**data_summary** — Summarize the data results briefly (data already fetched)
-**offer_analysis** — Data is ready (large dataset), offer detailed analysis with Analyst
+**no_data** — Query returned 0 rows, explain no data found for the criteria
+**data_summary** — Summarize the data results briefly (1-5 rows, data shown inline)
+**offer_analysis** — Data is ready (large dataset, >5 rows), generate title + offer analysis
 </task>
 
 <output_format>
 Return JSON:
 {{
-  "title": "short title for data card (null for data_summary)",
+  "title": "short title for data card (only for offer_analysis)",
   "response": "your response to the user"
 }}
 
 Examples (note: response language matches question language):
 
-Question: "волатильность по часам" (type: query)
+Question: "статистика за 2024" (type: no_data, 0 rows)
 {{
-  "title": "Волатильность NQ по часам",
-  "response": ""
+  "title": null,
+  "response": "По указанным критериям данные не найдены. Попробуйте изменить период или фильтры."
 }}
 
-Question: "show me daily range" (type: query)
+Question: "какой час самый волатильный" (type: data_summary, 1 row)
 {{
-  "title": "NQ Daily Range",
-  "response": ""
+  "title": null,
+  "response": "Самый волатильный час — 10:00 ET со средней волатильностью 0.065. В это время обычно выходят важные экономические данные."
 }}
 
 Question: "волатильность по часам" (type: offer_analysis, 24 rows)
@@ -88,18 +88,18 @@ Question: "волатильность по часам" (type: offer_analysis, 24
 </output_format>
 
 <guidelines>
-For QUERY/DATA/OFFER_ANALYSIS types:
+For OFFER_ANALYSIS type (>5 rows):
 - Title: short, descriptive (3-6 words), in user's language
-- ALWAYS generate a title for data cards
+- ALWAYS generate a title for data card
+- Response: acknowledge data ready, mention row count, offer analysis
 
-For DATA_SUMMARY type:
+For DATA_SUMMARY type (1-5 rows):
 - Title: null (data shown inline, no card needed)
 
-For QUERY type:
-- Response: EMPTY string "" — no text response needed
-  - The data card will show automatically
-  - Text response comes AFTER data loads (from summarize/offer_analysis)
-  - Only generate title, not response text
+For NO_DATA type (0 rows):
+- Title: null (no data card)
+- Explain that no data was found for the criteria
+- Suggest adjusting period or filters
 
 For CLARIFICATION:
 - Explain what you need and why
@@ -191,24 +191,21 @@ def get_responder_prompt(
     )
 
     # Build type-specific info
-    if result_type in ("query", "data") and query_spec:
-        type_info = f"""QuerySpec:
-  Source: {query_spec.get('source', 'DAILY')}
-  Special op: {query_spec.get('special_op', 'NONE')}
-  Grouping: {query_spec.get('grouping', 'NONE')}"""
-    elif result_type == "clarification":
+    if result_type == "clarification":
         type_info = f"""Field: {clarification_field}
 Options: {clarification_options}"""
     elif result_type == "concept":
         type_info = f"Concept to explain: {concept}"
     elif result_type == "not_supported":
         type_info = f"Reason: {not_supported_reason}"
+    elif result_type == "no_data":
+        type_info = "Query returned 0 rows. Explain no data found."
     elif result_type == "data_summary":
         type_info = f"""Data ({row_count} rows):
 {data_preview}"""
     elif result_type == "offer_analysis":
         type_info = f"""Data ready: {row_count} rows
-This is a large dataset. Offer detailed analysis."""
+This is a large dataset. Generate title for data card and offer analysis."""
     else:
         type_info = ""
 

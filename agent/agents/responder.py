@@ -106,6 +106,8 @@ class Responder:
             result_type = "not_supported"
         elif result_type == "chitchat":
             result_type = "greeting"
+        elif result_type == "no_data":
+            row_count = 0
         elif result_type == "data_summary":
             data_preview = intent.get("data_preview", "")
             row_count = intent.get("row_count", 0)
@@ -245,7 +247,8 @@ class Responder:
             # Try to parse as JSON
             data = json.loads(cleaned)
             response_text = data.get("response", text)
-            data_title = data.get("title") if result_type in ("query", "data", "offer_analysis") else None
+            # Title only for offer_analysis (>5 rows with DataCard)
+            data_title = data.get("title") if result_type == "offer_analysis" else None
             return response_text, data_title
         except json.JSONDecodeError:
             # If not JSON, use raw text

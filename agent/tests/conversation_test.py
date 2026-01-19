@@ -435,8 +435,20 @@ class TestRunner:
                         columns = data.get("columns", [])
 
                         # Determine response type based on row count (same as graph.py)
+                        # 0 rows → no_data, 1-5 rows → data_summary, >5 rows → offer_analysis
                         AUTO_SUMMARIZE_THRESHOLD = 5
-                        if row_count <= AUTO_SUMMARIZE_THRESHOLD:
+                        if row_count == 0:
+                            # No data found
+                            responder_state = {
+                                "messages": [{"role": "user", "content": question}],
+                                "intent": {
+                                    "type": "no_data",
+                                    "parser_output": parser_result.raw_output,
+                                    "symbol": "NQ",
+                                    "row_count": 0,
+                                },
+                            }
+                        elif row_count <= AUTO_SUMMARIZE_THRESHOLD:
                             # Small dataset: data_summary with table
                             data_preview = ""
                             if rows and columns:
