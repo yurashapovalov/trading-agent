@@ -71,6 +71,7 @@ class ParserResult:
     # Usage stats
     input_tokens: int = 0
     output_tokens: int = 0
+    thinking_tokens: int = 0
     cached_tokens: int = 0
     cost_usd: float = 0.0
     parse_time_ms: int = 0
@@ -156,16 +157,19 @@ class Parser:
         # Track usage
         input_tokens = 0
         output_tokens = 0
+        thinking_tokens = 0
         cached_tokens = 0
         cost_usd = 0.0
 
         if response.usage_metadata:
             input_tokens = response.usage_metadata.prompt_token_count or 0
             output_tokens = response.usage_metadata.candidates_token_count or 0
+            thinking_tokens = getattr(response.usage_metadata, 'thoughts_token_count', 0) or 0
             cached_tokens = getattr(response.usage_metadata, 'cached_content_token_count', 0) or 0
             cost_usd = calculate_cost(
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
+                thinking_tokens=thinking_tokens,
                 cached_tokens=cached_tokens,
                 model=self.model,
             )
@@ -175,6 +179,7 @@ class Parser:
             raw_output=raw_output,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
+            thinking_tokens=thinking_tokens,
             cached_tokens=cached_tokens,
             cost_usd=cost_usd,
             parse_time_ms=parse_time_ms,

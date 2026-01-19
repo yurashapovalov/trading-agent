@@ -49,6 +49,7 @@ from agent.pricing import calculate_cost
 class TokenUsage:
     input: int = 0
     output: int = 0
+    thinking: int = 0
     cached: int = 0
     model: str = ""
 
@@ -57,6 +58,7 @@ class TokenUsage:
         return calculate_cost(
             input_tokens=self.input,
             output_tokens=self.output,
+            thinking_tokens=self.thinking,
             cached_tokens=self.cached,
             model=self.model,
         )
@@ -386,6 +388,7 @@ class TestRunner:
             result.parser_tokens = TokenUsage(
                 input=parser_result.input_tokens,
                 output=parser_result.output_tokens,
+                thinking=parser_result.thinking_tokens,
                 cached=parser_result.cached_tokens,
                 model=self.parser.model,
             )
@@ -699,6 +702,7 @@ def _step_to_dict(step: StepResult) -> dict:
             "tokens": {
                 "input": step.parser_tokens.input,
                 "output": step.parser_tokens.output,
+                "thinking": step.parser_tokens.thinking,
                 "cached": step.parser_tokens.cached,
                 "cost_usd": step.parser_tokens.cost,
             },
