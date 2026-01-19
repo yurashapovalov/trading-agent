@@ -382,8 +382,8 @@ class TestRunner:
             # Format chat_history like graph.py does (with limit)
             history_str = ""
             if chat_history:
-                # Use same limit as graph.py: config.CHAT_HISTORY_LIMIT = 10
-                for msg in chat_history[-10:]:
+                # Use same limit as graph.py
+                for msg in chat_history[-config.CHAT_HISTORY_LIMIT:]:
                     role = "User" if msg.get("role") == "user" else "Assistant"
                     history_str += f"{role}: {msg.get('content', '')}\n"
 

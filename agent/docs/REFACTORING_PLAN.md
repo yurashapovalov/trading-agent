@@ -13,156 +13,72 @@
 
 ### 17. Intent в Parser — routing ДО Composer
 
+**Статус:** ✅ DONE (2026-01-19)
+
+**Сделано:**
+- Добавлен `intent: "data" | "chitchat" | "concept"` в ParsedQuery
+- Добавлена функция `after_parser()` в graph.py для routing по intent
+- chitchat/concept → сразу в Responder (минуя Composer)
+- Убраны `chitchat_keywords` и хардкоды из Composer
+- Добавлены chitchat subtypes в Responder: greeting, thanks, goodbye, feedback, insult
+- Исправлен conversation_test: передаёт chat_history как graph.py
+- Добавлена валидация для chitchat/concept в тестах
+
+---
+
+### 19. Gemini Context Caching — оптимизация стоимости
+
 **Статус:** PLANNED
 
-**Проблема:** Сейчас Parser возвращает `what` как свободный текст, Composer пытается угадать intent по строкам:
+**Проблема:** System prompt (правила, схема, примеры) повторяется в каждом запросе. Это ~3000 токенов на каждый вызов Parser/Responder.
+
+**Текущая ситуация:**
+```python
+# config.py
+CHAT_HISTORY_LIMIT = 10  # Только 10 сообщений в контекст LLM
+
+# Gemini автоматически кэширует, но мы не создаём кэш явно
+cached_tokens = response.usage_metadata.cached_content_token_count  # Tracking only
+```
+
+**Решение — Explicit Context Caching:**
 
 ```python
-# composer.py — костыль с магическими строками
-chitchat_keywords = {"greeting", "acknowledgment", "thanks", ...}
-if parsed.what.lower() in chitchat_keywords:
-    return GreetingResult(...)
-```
+from google import genai
+from google.genai import types
 
-Когда Parser возвращает `what: "acknowledgment"` (для "спасибо"), Composer не понимал что это chitchat и шёл в `_build_query()`.
+# 1. Создать кэш при старте приложения
+cache = client.caches.create(
+    model="gemini-2.5-flash-lite",
+    contents=[system_prompt],  # Parser system prompt + examples
+    config=types.CreateCachedContentConfig(
+        display_name="parser_system_prompt",
+        ttl="3600s",  # 1 hour
+    ),
+)
 
-**Текущая архитектура:**
-```
-START → parser → composer → [routing by composer result]
-                                │
-            ┌───────────────────┼───────────────────┐
-            ↓                   ↓                   ↓
-         query              greeting           concept
-            ↓                   ↓                   ↓
-      query_builder        responder          responder
-```
-
-Composer делает две вещи:
-1. Определяет intent (chitchat? concept? data query?)
-2. Строит QuerySpec для data queries
-
-**Предлагаемая архитектура:**
-
-Parser возвращает явный `intent`:
-```python
-{
-    "intent": "data" | "chitchat" | "concept",  # HIGH-LEVEL
-    "what": "volatility statistics",  # Детали (для data intent)
-    "period": {...},
-    "filters": {...},
-    "modifiers": {...},
-    "unclear": [...],
-}
-```
-
-Routing происходит **ДО** Composer:
-```
-START → parser → [routing by intent]
-                       │
-    ┌──────────────────┼────────────────────┐
-    ↓                  ↓                    ↓
-  chitchat          concept              data
-    │                  │                    │
-    ↓                  ↓                    ↓
- responder         responder            composer
-    │                  │                    │
-    ↓                  ↓                    ↓
-   END                END              [routing]
-                                           │
-                          ┌────────────────┼────────────────┐
-                          ↓                ↓                ↓
-                    clarification    not_supported       query
-                          ↓                ↓                ↓
-                      responder        responder      query_builder
-```
-
-**Разделение ответственности:**
-
-| Компонент | Ответственность |
-|-----------|-----------------|
-| Parser | Понимает intent (chitchat/concept/data) + извлекает entities |
-| Composer | Бизнес-логика ТОЛЬКО для data: source, grouping, special_op, clarification, not_supported |
-| Responder | User-facing communication для ВСЕХ типов |
-
-**Что остаётся в Composer (только для intent=data):**
-- Определить source (DAILY, MINUTES, DAILY_WITH_PREV)
-- Определить grouping
-- Определить special_op
-- Проверить unclear → clarification
-- Проверить business rules → not_supported
-- Построить QuerySpec → query
-
-**Что уходит из Composer:**
-- Определение chitchat (greeting, thanks, bye)
-- Определение concept (explain X)
-
-**Изменения в Parser prompt:**
-
-Добавить правило:
-```
-6. Intent — высокоуровневый тип запроса:
-   - "chitchat" — приветствие, благодарность, прощание, эмоции
-     * привет, здравствуй, спасибо, пока, bye, thanks, hello
-   - "concept" — объяснение термина/концепции
-     * что такое X?, объясни X, explain X
-   - "data" — запрос данных (всё остальное)
-```
-
-**Изменения в ParsedQuery:**
-
-```python
-class ParsedQuery(BaseModel):
-    intent: Literal["data", "chitchat", "concept"]  # NEW
-    what: str
-    period: ParsedPeriod | None = None
-    filters: ParsedFilters | None = None
-    modifiers: ParsedModifiers | None = None
-    unclear: list[str] = Field(default_factory=list)
-```
-
-**Изменения в graph.py:**
-
-```python
-def after_parser(state: AgentState) -> Literal["responder", "composer"]:
-    """Route after Parser based on intent."""
-    parsed = state.get("parsed_query")
-    if parsed and parsed.intent in ("chitchat", "concept"):
-        return "responder"
-    return "composer"
-
-# Flow
-graph.add_edge(START, "parser")
-graph.add_conditional_edges(
-    "parser",
-    after_parser,
-    {
-        "responder": "responder",
-        "composer": "composer",
-    }
+# 2. Использовать кэш в запросах
+response = client.models.generate_content(
+    model="gemini-2.5-flash-lite",
+    contents=user_prompt,
+    config=types.GenerateContentConfig(
+        cached_content=cache.name,  # Использовать кэш
+    ),
 )
 ```
 
-**Удалить из Composer:**
-- `chitchat_keywords` set
-- Проверку `parsed.what.lower() in chitchat_keywords`
-- Проверку `parsed.what.startswith("explain")`
+**Выгода:**
+- Input tokens с кэша стоят в 4x дешевле
+- Parser system prompt ~3000 токенов × 4x = экономия ~75% на input
 
-**Тесты:**
-- `{"q": "привет", "expect": {"intent": "chitchat"}}`
-- `{"q": "спасибо", "expect": {"intent": "chitchat"}}`
-- `{"q": "что такое RTH?", "expect": {"intent": "concept"}}`
-- `{"q": "волатильность по часам", "expect": {"intent": "data"}}`
+**Что нужно:**
+1. Создать кэш для Parser system prompt при старте
+2. Создать кэш для Responder system prompt при старте
+3. Хранить cache.name в памяти/config
+4. Обновлять кэш при изменении промптов (TTL или manual)
 
-**Риски:**
-- Parser может ошибаться в определении intent (но LLM понимает лучше чем хардкод)
-- Нужно обновить все тесты
-- Нужно обновить промпт Parser
-
-**Преимущества:**
-- Чистое разделение ответственности
-- Нет магических строк в Composer
-- Routing на основе явного поля, а не угадывания
-- Parser (LLM) умнее в понимании intent чем хардкод
+**Связанное:**
+- Увеличить `CHAT_HISTORY_LIMIT` с 10 до 20 (Gemini справится, история важна для follow-up)
 
 ---
 
@@ -693,3 +609,5 @@ START → parser → composer → responder → [routing by type]
 - 2026-01-19: **#16 DONE** — Созданы `parser.py`, `composer_agent.py`, обновлен `graph.py` (START → parser → composer → responder), SSE events для отдельного логирования
 - 2026-01-19: **#17 Intent в Parser** — добавлена задача для явного intent_type в Parser output
 - 2026-01-19: **#18 Убрать хардкоды из Composer** — анализ всех хардкодов, план расширения Parser output
+- 2026-01-19: **#17 DONE** — intent routing, chitchat subtypes, тесты с chat_history
+- 2026-01-19: **#19 Context Caching** — добавлена задача, увеличен CHAT_HISTORY_LIMIT до 20

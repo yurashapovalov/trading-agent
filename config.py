@@ -43,7 +43,7 @@ _default_origins = "https://askbar.ai,https://www.askbar.ai,http://localhost:300
 ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", _default_origins).split(",")
 
 # Chat settings
-CHAT_HISTORY_LIMIT = 10  # Max recent messages to include in LLM context (sliding window)
+CHAT_HISTORY_LIMIT = 20  # Max recent messages to include in LLM context (Gemini handles 1M tokens)
 
 # Feature flags
 USE_BARB = os.getenv("USE_BARB", "true").lower() == "true"  # Parser+Composer flow (default)
