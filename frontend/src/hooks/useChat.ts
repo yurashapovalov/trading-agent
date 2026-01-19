@@ -130,7 +130,9 @@ export function useChat({ chatId, onChatCreated, onTitleUpdated }: UseChatOption
   const [isLoading, setIsLoading] = useState(false)
   const [isLoadingHistory, setIsLoadingHistory] = useState(false)
   const [currentSteps, setCurrentSteps] = useState<AgentStep[]>([])
+  const [streamingPreview, setStreamingPreview] = useState("")
   const [streamingText, setStreamingText] = useState("")
+  const [streamingDataCard, setStreamingDataCard] = useState<DataCard | null>(null)
   const [suggestions, setSuggestions] = useState<string[]>(DEFAULT_SUGGESTIONS)
   const abortControllerRef = useRef<AbortController | null>(null)
 
@@ -210,7 +212,9 @@ export function useChat({ chatId, onChatCreated, onTitleUpdated }: UseChatOption
       setMessages((prev) => [...prev, { role: "user", content: text }])
       setIsLoading(true)
       setCurrentSteps([])
+      setStreamingPreview("")
       setStreamingText("")
+      setStreamingDataCard(null)
 
       abortControllerRef.current = new AbortController()
 
@@ -336,13 +340,15 @@ export function useChat({ chatId, onChatCreated, onTitleUpdated }: UseChatOption
                     previewText = ""
                     summaryText = ""
                     isAfterDataReady = false
+                    setStreamingPreview("")
                     setStreamingText("")
+                    setStreamingDataCard(null)
                   }
                 } else if (event.type === "text_delta") {
                   // Route text to preview or summary based on data state
                   if (!isAfterDataReady) {
                     previewText += event.content
-                    setStreamingText(previewText)
+                    setStreamingPreview(previewText)
                   } else {
                     summaryText += event.content
                     setStreamingText(summaryText)
@@ -354,6 +360,7 @@ export function useChat({ chatId, onChatCreated, onTitleUpdated }: UseChatOption
                 } else if (event.type === "data_title") {
                   // Save data title for data card
                   dataCard = { title: event.title, row_count: 0, data: {} }
+                  setStreamingDataCard({ title: event.title, row_count: 0, data: {} })
                 } else if (event.type === "data_ready") {
                   // Data is ready - switch to summary mode
                   dataCard = {
@@ -361,9 +368,8 @@ export function useChat({ chatId, onChatCreated, onTitleUpdated }: UseChatOption
                     row_count: event.row_count,
                     data: event.data,
                   }
+                  setStreamingDataCard(dataCard)
                   isAfterDataReady = true
-                  // Clear streaming for summary
-                  setStreamingText("")
                 } else if (event.type === "offer_analysis") {
                   // Large dataset - offer analysis button
                   offerAnalysis = true
@@ -409,13 +415,18 @@ export function useChat({ chatId, onChatCreated, onTitleUpdated }: UseChatOption
                     },
                   ])
                   setCurrentSteps([])
+                  setStreamingPreview("")
                   setStreamingText("")
+                  setStreamingDataCard(null)
                 } else if (event.type === "error") {
                   setMessages((prev) => [
                     ...prev,
                     { role: "assistant", content: `Ошибка: ${event.message}` },
                   ])
                   setCurrentSteps([])
+                  setStreamingPreview("")
+                  setStreamingText("")
+                  setStreamingDataCard(null)
                 }
               } catch (e) {
                 console.error("Failed to parse SSE event:", e)
@@ -430,7 +441,9 @@ export function useChat({ chatId, onChatCreated, onTitleUpdated }: UseChatOption
           { role: "assistant", content: "Ошибка подключения к серверу" },
         ])
         setCurrentSteps([])
+        setStreamingPreview("")
         setStreamingText("")
+        setStreamingDataCard(null)
       } finally {
         setIsLoading(false)
         abortControllerRef.current = null
@@ -446,7 +459,9 @@ export function useChat({ chatId, onChatCreated, onTitleUpdated }: UseChatOption
     }
     setIsLoading(false)
     setCurrentSteps([])
+    setStreamingPreview("")
     setStreamingText("")
+    setStreamingDataCard(null)
     setMessages((prev) => [
       ...prev,
       { role: "assistant", content: "Остановлено пользователем" },
@@ -491,7 +506,9 @@ export function useChat({ chatId, onChatCreated, onTitleUpdated }: UseChatOption
     isLoading,
     isLoadingHistory,
     currentSteps,
+    streamingPreview,
     streamingText,
+    streamingDataCard,
     suggestions,
     sendMessage,
     stopGeneration,

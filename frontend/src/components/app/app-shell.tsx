@@ -46,7 +46,9 @@ function AppShellContent() {
     isLoading,
     isLoadingHistory,
     currentSteps,
+    streamingPreview,
     streamingText,
+    streamingDataCard,
     suggestions,
     sendMessage,
     stopGeneration,
@@ -110,7 +112,9 @@ function AppShellContent() {
         isLoading={isLoading}
         isLoadingHistory={isLoadingHistory}
         currentSteps={currentSteps}
+        streamingPreview={streamingPreview}
         streamingText={streamingText}
+        streamingDataCard={streamingDataCard}
         suggestions={suggestions}
         inputText={inputText}
         onInputChange={setInputText}

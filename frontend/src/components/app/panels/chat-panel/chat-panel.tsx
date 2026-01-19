@@ -46,7 +46,7 @@ import { Actions, Action } from "@/components/ai/actions"
 import { Processed } from "@/components/app/processed/processed"
 import { DataCard } from "@/components/ai/data-card"
 import { Skeleton } from "@/components/ui/skeleton"
-import type { ChatMessage, AgentStep } from "@/types/chat"
+import type { ChatMessage, AgentStep, DataCard as DataCardType } from "@/types/chat"
 
 type FeedbackModal = {
   open: boolean
@@ -61,7 +61,9 @@ type ChatPanelProps = {
   isLoading: boolean
   isLoadingHistory: boolean
   currentSteps: AgentStep[]
+  streamingPreview: string
   streamingText: string
+  streamingDataCard: DataCardType | null
   suggestions: string[]
   inputText: string
   // Data callbacks
@@ -84,7 +86,9 @@ export function ChatPanel({
   isLoading,
   isLoadingHistory,
   currentSteps,
+  streamingPreview,
   streamingText,
+  streamingDataCard,
   suggestions,
   inputText,
   onInputChange,
@@ -273,15 +277,33 @@ export function ChatPanel({
             </Message>
           )}
 
-          {streamingText && (
+          {/* Streaming content - shows preview, data card, and summary separately */}
+          {(streamingPreview || streamingDataCard || streamingText) && (
             <Message from="assistant" className="">
-              <MessageContent>
-                <MessageResponse>{streamingText}</MessageResponse>
-              </MessageContent>
+              <div>
+                {/* Preview text (before data) */}
+                {streamingPreview && (
+                  <MessageContent className="mb-2">
+                    <MessageResponse>{streamingPreview}</MessageResponse>
+                  </MessageContent>
+                )}
+
+                {/* Data card (when data arrives) */}
+                {streamingDataCard && (
+                  <DataCard data={streamingDataCard} onClick={onOpenContextPanel} />
+                )}
+
+                {/* Summary text (after data) */}
+                {streamingText && (
+                  <MessageContent>
+                    <MessageResponse>{streamingText}</MessageResponse>
+                  </MessageContent>
+                )}
+              </div>
             </Message>
           )}
 
-          {isLoading && currentSteps.length === 0 && !streamingText && (
+          {isLoading && currentSteps.length === 0 && !streamingPreview && !streamingText && (
             <Message from="assistant" className="">
               <div>
                 <Processed steps={[]} isLoading={true} />

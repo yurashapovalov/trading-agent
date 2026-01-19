@@ -12,7 +12,7 @@
 
 import { usePanels } from "../panels-provider"
 import { ChatPanel } from "./chat-panel"
-import type { ChatMessage, AgentStep } from "@/types/chat"
+import type { ChatMessage, AgentStep, DataCard } from "@/types/chat"
 
 type ChatPanelContainerProps = {
   title?: string
@@ -20,7 +20,9 @@ type ChatPanelContainerProps = {
   isLoading: boolean
   isLoadingHistory: boolean
   currentSteps: AgentStep[]
+  streamingPreview: string
   streamingText: string
+  streamingDataCard: DataCard | null
   suggestions: string[]
   inputText: string
   onInputChange: (text: string) => void
