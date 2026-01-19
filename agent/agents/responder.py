@@ -105,7 +105,18 @@ class Responder:
             not_supported_reason = intent.get("response_text", "")
             result_type = "not_supported"
         elif result_type == "chitchat":
-            result_type = "greeting"
+            # Map chitchat subtypes based on parser's "what" field
+            what = parser_output.get("what", "greeting").lower()
+            if "insult" in what or "негатив" in what:
+                result_type = "insult"
+            elif "feedback" in what or "correction" in what or "error" in what:
+                result_type = "feedback"
+            elif "thank" in what or "спасибо" in what:
+                result_type = "thanks"
+            elif "bye" in what or "goodbye" in what or "пока" in what:
+                result_type = "goodbye"
+            else:
+                result_type = "greeting"
         elif result_type == "no_data":
             row_count = 0
         elif result_type == "data_summary":

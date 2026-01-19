@@ -90,23 +90,16 @@ ComposerResult = QueryWithSummary | ClarificationResult | ConceptResult | Greeti
 # =============================================================================
 
 def compose(parsed: ParsedQuery, symbol: str = "NQ") -> ComposerResult:
-    """Convert ParsedQuery to QuerySpec or clarification."""
+    """Convert ParsedQuery to QuerySpec or clarification.
 
-    # Chitchat: greeting, thanks, acknowledgment, etc.
-    chitchat_keywords = {"greeting", "acknowledgment", "thanks", "thank you", "bye", "goodbye"}
-    if parsed.what.lower() in chitchat_keywords:
-        return GreetingResult(type="greeting", summary=parsed.summary)
-
-    if parsed.what.startswith("explain"):
-        concept = parsed.what.replace("explain ", "").replace("explain", "").strip()
-        # If concept is generic "session" and filters has specific session, use that
-        if concept == "session" and parsed.filters and parsed.filters.session:
-            concept = f"{parsed.filters.session} session"
-        return ConceptResult(type="concept", summary=parsed.summary, concept=concept or "trading")
-
+    NOTE: chitchat and concept intents are handled by Parser → Responder flow.
+    Composer only handles data intent (queries that need QuerySpec).
+    """
+    # Handle unclear fields → clarification
     if parsed.unclear:
         return _handle_unclear(parsed, symbol)
 
+    # Build query
     return _build_query(parsed, symbol)
 
 

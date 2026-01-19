@@ -303,6 +303,7 @@ class TestRunner:
         start_time = datetime.now()
         steps: list[StepResult] = []
         previous_parsed = None
+        chat_history: list[dict] = []  # Track Q&A history like graph.py
         total_input = 0
         total_output = 0
 
@@ -312,15 +313,21 @@ class TestRunner:
                 question=step_spec["q"],
                 expected=step_spec.get("expect"),
                 previous_parsed=previous_parsed,
+                chat_history=chat_history,
             )
             steps.append(step_result)
 
             total_input += step_result.parser_tokens.input
             total_output += step_result.parser_tokens.output
 
-            # Update context for next step
+            # Update context for next step (like graph.py)
             if parsed_query:
                 previous_parsed = parsed_query
+
+            # Add to chat history for next step
+            chat_history.append({"role": "user", "content": step_spec["q"]})
+            if step_result.responder_text:
+                chat_history.append({"role": "assistant", "content": step_result.responder_text})
 
             if step_result.error:
                 break
@@ -359,6 +366,7 @@ class TestRunner:
         question: str,
         expected: dict | None,
         previous_parsed,
+        chat_history: list[dict] | None = None,
     ) -> tuple[StepResult, Any]:
         """Run single step through the pipeline. Returns (StepResult, parsed_query)."""
         step_start = datetime.now()
@@ -371,14 +379,24 @@ class TestRunner:
 
         try:
             # === PARSER ===
+            # Format chat_history like graph.py does (with limit)
+            history_str = ""
+            if chat_history:
+                # Use same limit as graph.py: config.CHAT_HISTORY_LIMIT = 10
+                for msg in chat_history[-10:]:
+                    role = "User" if msg.get("role") == "user" else "Assistant"
+                    history_str += f"{role}: {msg.get('content', '')}\n"
+
             parser_result = self.parser.parse(
                 question,
+                chat_history=history_str,
                 previous_parsed=previous_parsed,
             )
             parsed_query = parser_result.parsed_query
 
             result.parser_input = {
                 "question": question,
+                "chat_history": history_str,
                 "previous_parsed": self._serialize_parsed(previous_parsed),
             }
             result.parser_output = {
@@ -393,7 +411,44 @@ class TestRunner:
                 model=self.parser.model,
             )
 
-            # === COMPOSER ===
+            # === ROUTING BY INTENT (mirrors graph.py after_parser) ===
+            # chitchat/concept → skip Composer, go to Responder
+            if parsed_query.intent in ("chitchat", "concept"):
+                # Store the intent type (matches graph.py respond_to_user)
+                result.composer_type = parsed_query.intent  # "chitchat" or "concept"
+                result.composer_summary = ""
+
+                # Build intent for Responder (exactly like graph.py respond_to_user)
+                responder_state = {
+                    "messages": [{"role": "user", "content": question}],
+                    "intent": {
+                        "type": parsed_query.intent,  # "chitchat" or "concept"
+                        "parser_output": parser_result.raw_output,
+                        "symbol": "NQ",
+                    },
+                }
+                if parsed_query.intent == "concept":
+                    responder_state["intent"]["concept"] = parsed_query.what
+
+                # Call Responder
+                try:
+                    responder_result = self.responder(responder_state)
+                    result.responder_text = responder_result.get("response", "")
+                    result.responder_title = responder_result.get("data_title")
+                except Exception as e:
+                    result.responder_text = f"Responder error: {e}"
+                    result.responder_title = None
+
+                # === VALIDATION for chitchat/concept ===
+                if expected:
+                    result.validation = self._validate_non_data(
+                        parsed_query.intent, expected
+                    )
+
+                result.time_ms = int((datetime.now() - step_start).total_seconds() * 1000)
+                return result, parsed_query
+
+            # === COMPOSER (only for data intent) ===
             composer_result = self.composer.compose(
                 parsed_query,
                 original_question=question,
@@ -532,6 +587,29 @@ class TestRunner:
             result.time_ms = int((datetime.now() - step_start).total_seconds() * 1000)
 
         return result, parsed_query
+
+    def _validate_non_data(self, intent: str, expected: dict) -> ValidationResult:
+        """Validate chitchat/concept intent against expected."""
+        checks = []
+
+        for key, expected_value in expected.items():
+            if key == "type":
+                # Map intent to expected type
+                # "chitchat" → expect "greeting" or "chitchat"
+                # "concept" → expect "concept"
+                actual = "greeting" if intent == "chitchat" else intent
+                passed = actual == expected_value or intent == expected_value
+                checks.append(ValidationCheck(
+                    key=key,
+                    expected=expected_value,
+                    actual=actual,
+                    passed=passed,
+                ))
+
+        return ValidationResult(
+            passed=all(c.passed for c in checks),
+            checks=checks,
+        )
 
     def _serialize_parsed(self, parsed) -> dict | None:
         """Serialize ParsedQuery to dict for JSON."""

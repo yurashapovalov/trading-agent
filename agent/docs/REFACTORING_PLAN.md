@@ -11,6 +11,262 @@
 
 ## Активная работа
 
+### 17. Intent в Parser — routing ДО Composer
+
+**Статус:** PLANNED
+
+**Проблема:** Сейчас Parser возвращает `what` как свободный текст, Composer пытается угадать intent по строкам:
+
+```python
+# composer.py — костыль с магическими строками
+chitchat_keywords = {"greeting", "acknowledgment", "thanks", ...}
+if parsed.what.lower() in chitchat_keywords:
+    return GreetingResult(...)
+```
+
+Когда Parser возвращает `what: "acknowledgment"` (для "спасибо"), Composer не понимал что это chitchat и шёл в `_build_query()`.
+
+**Текущая архитектура:**
+```
+START → parser → composer → [routing by composer result]
+                                │
+            ┌───────────────────┼───────────────────┐
+            ↓                   ↓                   ↓
+         query              greeting           concept
+            ↓                   ↓                   ↓
+      query_builder        responder          responder
+```
+
+Composer делает две вещи:
+1. Определяет intent (chitchat? concept? data query?)
+2. Строит QuerySpec для data queries
+
+**Предлагаемая архитектура:**
+
+Parser возвращает явный `intent`:
+```python
+{
+    "intent": "data" | "chitchat" | "concept",  # HIGH-LEVEL
+    "what": "volatility statistics",  # Детали (для data intent)
+    "period": {...},
+    "filters": {...},
+    "modifiers": {...},
+    "unclear": [...],
+}
+```
+
+Routing происходит **ДО** Composer:
+```
+START → parser → [routing by intent]
+                       │
+    ┌──────────────────┼────────────────────┐
+    ↓                  ↓                    ↓
+  chitchat          concept              data
+    │                  │                    │
+    ↓                  ↓                    ↓
+ responder         responder            composer
+    │                  │                    │
+    ↓                  ↓                    ↓
+   END                END              [routing]
+                                           │
+                          ┌────────────────┼────────────────┐
+                          ↓                ↓                ↓
+                    clarification    not_supported       query
+                          ↓                ↓                ↓
+                      responder        responder      query_builder
+```
+
+**Разделение ответственности:**
+
+| Компонент | Ответственность |
+|-----------|-----------------|
+| Parser | Понимает intent (chitchat/concept/data) + извлекает entities |
+| Composer | Бизнес-логика ТОЛЬКО для data: source, grouping, special_op, clarification, not_supported |
+| Responder | User-facing communication для ВСЕХ типов |
+
+**Что остаётся в Composer (только для intent=data):**
+- Определить source (DAILY, MINUTES, DAILY_WITH_PREV)
+- Определить grouping
+- Определить special_op
+- Проверить unclear → clarification
+- Проверить business rules → not_supported
+- Построить QuerySpec → query
+
+**Что уходит из Composer:**
+- Определение chitchat (greeting, thanks, bye)
+- Определение concept (explain X)
+
+**Изменения в Parser prompt:**
+
+Добавить правило:
+```
+6. Intent — высокоуровневый тип запроса:
+   - "chitchat" — приветствие, благодарность, прощание, эмоции
+     * привет, здравствуй, спасибо, пока, bye, thanks, hello
+   - "concept" — объяснение термина/концепции
+     * что такое X?, объясни X, explain X
+   - "data" — запрос данных (всё остальное)
+```
+
+**Изменения в ParsedQuery:**
+
+```python
+class ParsedQuery(BaseModel):
+    intent: Literal["data", "chitchat", "concept"]  # NEW
+    what: str
+    period: ParsedPeriod | None = None
+    filters: ParsedFilters | None = None
+    modifiers: ParsedModifiers | None = None
+    unclear: list[str] = Field(default_factory=list)
+```
+
+**Изменения в graph.py:**
+
+```python
+def after_parser(state: AgentState) -> Literal["responder", "composer"]:
+    """Route after Parser based on intent."""
+    parsed = state.get("parsed_query")
+    if parsed and parsed.intent in ("chitchat", "concept"):
+        return "responder"
+    return "composer"
+
+# Flow
+graph.add_edge(START, "parser")
+graph.add_conditional_edges(
+    "parser",
+    after_parser,
+    {
+        "responder": "responder",
+        "composer": "composer",
+    }
+)
+```
+
+**Удалить из Composer:**
+- `chitchat_keywords` set
+- Проверку `parsed.what.lower() in chitchat_keywords`
+- Проверку `parsed.what.startswith("explain")`
+
+**Тесты:**
+- `{"q": "привет", "expect": {"intent": "chitchat"}}`
+- `{"q": "спасибо", "expect": {"intent": "chitchat"}}`
+- `{"q": "что такое RTH?", "expect": {"intent": "concept"}}`
+- `{"q": "волатильность по часам", "expect": {"intent": "data"}}`
+
+**Риски:**
+- Parser может ошибаться в определении intent (но LLM понимает лучше чем хардкод)
+- Нужно обновить все тесты
+- Нужно обновить промпт Parser
+
+**Преимущества:**
+- Чистое разделение ответственности
+- Нет магических строк в Composer
+- Routing на основе явного поля, а не угадывания
+- Parser (LLM) умнее в понимании intent чем хардкод
+
+---
+
+### 18. Убрать хардкоды из Composer — Parser возвращает больше структуры
+
+**Статус:** FUTURE (после #17)
+
+**Проблема:** Composer содержит много хардкодов для интерпретации `what`:
+
+```python
+# _determine_grouping() — fallback когда modifiers.group_by не указан
+if "statistic" in what_lower: return TOTAL
+if "time" in what_lower: return HOUR
+
+# _determine_metrics() — fallback когда метрики не указаны
+if "statistic" in what_lower: return [AVG, STDDEV, COUNT]
+if "correlation" in what_lower: return [AVG_GAP, AVG_RANGE]
+
+# _determine_special_op() — fallback когда modifiers не указаны
+if "volati" in what_lower: order_by = "volatility"
+if "when" in what_lower: return EVENT_TIME
+```
+
+**Анализ хардкодов:**
+
+| Функция | Хардкод | Зачем | Решение |
+|---------|---------|-------|---------|
+| `_determine_grouping()` | "statistic" → TOTAL | Fallback когда group_by null | Parser явно возвращает grouping |
+| `_determine_grouping()` | "time", "when" → HOUR | Угадывание | Parser понимает контекст |
+| `_determine_metrics()` | "statistic" → [AVG, STDDEV] | Fallback | Parser возвращает metric_type |
+| `_determine_metrics()` | "correlation" → [GAP, RANGE] | Специфика | Parser возвращает metric_type |
+| `_determine_special_op()` | "volati" → order_by: volatility | Угадывание order_by | Parser возвращает order_by |
+| `_determine_special_op()` | "when" → EVENT_TIME | Угадывание op | Parser возвращает special_op hint |
+| `_check_not_supported()` | "next day", "streak" | Business rules | Оставить в Composer |
+| `_needs_prev_day()` | "gap" in what | Определение source | Parser возвращает needs_gap: true |
+
+**Предлагаемые изменения в Parser output:**
+
+```python
+{
+    "intent": "data",
+    "what": "volatility statistics",
+
+    # NEW — hints для Composer
+    "hints": {
+        "grouping": "hour" | "total" | null,      # Явная группировка
+        "metric_type": "statistics" | "ohlc" | "count" | null,
+        "order_by": "volatility" | "range" | "volume" | null,
+        "needs_gap": true | false,                 # Для gap анализа
+        "special_op": "event_time" | "top_n" | "compare" | null,
+    },
+
+    "period": {...},
+    "filters": {...},
+    "modifiers": {...},
+    "unclear": [...],
+}
+```
+
+**Или расширить modifiers:**
+
+```python
+{
+    "modifiers": {
+        "group_by": "hour",
+        "top_n": 10,
+        "compare": ["RTH", "ETH"],
+        "find": "max",
+        # NEW
+        "order_by": "volatility",    # Для TOP_N
+        "metric_type": "statistics", # AVG, STDDEV, COUNT
+    }
+}
+```
+
+**Что останется в Composer:**
+- `_check_not_supported()` — business rules (chain queries, streaks)
+- `_build_filters()` — структурирование фильтров
+- `_determine_source()` — выбор DAILY/MINUTES (зависит от grouping, session, dates)
+- Валидация QuerySpec
+
+**Что уйдёт из Composer:**
+- Угадывание grouping по словам в what
+- Угадывание metrics по словам в what
+- Угадывание order_by по словам в what
+- Угадывание special_op по словам в what
+
+**Порядок выполнения:**
+1. **#17** — Intent в Parser (chitchat, concept, data)
+2. **#18** — Расширить modifiers (order_by, metric_type)
+3. Постепенно убирать fallbacks из Composer
+
+**Риски:**
+- Сложнее промпт Parser
+- Больше полей = больше шансов ошибки LLM
+- Нужно много тестов
+
+**Преимущества:**
+- Composer становится чистой бизнес-логикой без угадывания
+- Легче дебажить (видно что Parser извлёк)
+- Меньше magic strings
+
+---
+
 ### 16. Разделить Barb node на Parser + Composer nodes
 
 **Статус:** ✅ DONE (2026-01-19)
@@ -435,3 +691,5 @@ START → parser → composer → responder → [routing by type]
 - 2026-01-19: **#15 Streaming structured outputs** — добавлена задача для response_json_schema
 - 2026-01-19: **#16 Разделить Barb на Parser + Composer nodes** — задача для отдельного логирования (исправлен ложный checkbox)
 - 2026-01-19: **#16 DONE** — Созданы `parser.py`, `composer_agent.py`, обновлен `graph.py` (START → parser → composer → responder), SSE events для отдельного логирования
+- 2026-01-19: **#17 Intent в Parser** — добавлена задача для явного intent_type в Parser output
+- 2026-01-19: **#18 Убрать хардкоды из Composer** — анализ всех хардкодов, план расширения Parser output

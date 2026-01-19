@@ -62,7 +62,8 @@ class ParsedQuery(BaseModel):
     Parser fills this, Composer validates and converts to QuerySpec.
     """
 
-    what: str  # "statistics", "day data", "range comparison", "explain gap", "greeting"
+    intent: Literal["data", "chitchat", "concept"] = "data"  # High-level intent
+    what: str  # "statistics", "day data", "range comparison", "gap", "RTH"
     period: ParsedPeriod | None = None
     filters: ParsedFilters | None = None
     modifiers: ParsedModifiers | None = None

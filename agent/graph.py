@@ -235,20 +235,56 @@ def respond_to_user(state: AgentState) -> dict:
     Responder node — handles non-query user communication.
 
     Uses Responder agent (LLM) for natural, expert responses.
-    Only called for: greeting, concept, clarification, not_supported.
+    Called for: chitchat, concept (from Parser), clarification, not_supported (from Composer).
     Query types bypass this and go directly to query_builder.
     """
+    # Check if we came from Parser (chitchat/concept) or Composer
+    parsed = state.get("parsed_query")
+    intent = state.get("intent")
+
+    # If no intent from Composer, build it from Parser output
+    if not intent and parsed:
+        parser_output = state.get("parser_raw_output")
+        if parsed.intent == "chitchat":
+            intent = {
+                "type": "chitchat",
+                "parser_output": parser_output,
+                "symbol": "NQ",
+            }
+        elif parsed.intent == "concept":
+            intent = {
+                "type": "concept",
+                "concept": parsed.what,  # "gap", "RTH", etc.
+                "parser_output": parser_output,
+                "symbol": "NQ",
+            }
+        # Update state with intent for Responder
+        state = {**state, "intent": intent}
+
     # Call Responder agent
     result = responder_agent(state)
     return result
 
 
+def after_parser(state: AgentState) -> Literal["responder", "composer"]:
+    """
+    Route after Parser based on intent.
+
+    - chitchat/concept → responder (skip Composer entirely)
+    - data → composer (build QuerySpec)
+    """
+    parsed = state.get("parsed_query")
+    if parsed and parsed.intent in ("chitchat", "concept"):
+        return "responder"
+    return "composer"
+
+
 def after_composer(state: AgentState) -> Literal["responder", "query_builder"]:
     """
-    Route after Composer based on intent type.
+    Route after Composer based on result type.
 
     - query/data → query_builder (skip Responder, generate title after data)
-    - others → responder (greeting, concept, clarification, not_supported)
+    - clarification/not_supported → responder
     """
     intent = state.get("intent") or {}
     intent_type = intent.get("type", "chitchat")
@@ -457,13 +493,24 @@ def build_graph() -> StateGraph:
     graph.add_node("analyst", analyze_data)
     graph.add_node("validator", validate_response)
 
-    # Flow: START → parser → composer → [routing]
+    # Flow: START → parser → [routing by intent]
     graph.add_edge(START, "parser")
-    graph.add_edge("parser", "composer")
 
-    # After composer: route based on intent type
+    # After parser: route by intent
+    # - chitchat/concept → responder (skip Composer entirely)
+    # - data → composer (build QuerySpec)
+    graph.add_conditional_edges(
+        "parser",
+        after_parser,
+        {
+            "responder": "responder",
+            "composer": "composer",
+        }
+    )
+
+    # After composer: route based on result type
     # - query/data → query_builder (skip responder, title generated after data)
-    # - others → responder (greeting, concept, clarification, not_supported)
+    # - clarification/not_supported → responder
     graph.add_conditional_edges(
         "composer",
         after_composer,

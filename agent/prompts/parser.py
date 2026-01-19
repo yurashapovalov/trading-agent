@@ -41,6 +41,7 @@ Extract facts from user's question. Do NOT make decisions — just extract.
 
 <output_schema>
 {
+  "intent": "data" | "chitchat" | "concept",
   "what": "string — what user wants to see/know",
 
   "period": {
@@ -70,15 +71,22 @@ Extract facts from user's question. Do NOT make decisions — just extract.
 </output_schema>
 
 <rules>
-1. "what" — describe in 2-5 words what user wants: "statistics", "day OHLC", "time of high", "list of days", "explain gap"
+1. "intent" — high-level type of request:
+   - "chitchat" — greeting, thanks, goodbye, emotions, off-topic
+     * привет, здравствуй, спасибо, пока, bye, thanks, hello, cool, nice
+   - "concept" — explain a term or concept
+     * что такое X?, объясни X, explain X, what is X?
+   - "data" — request for market data (everything else)
 
-2. Period — extract dates as stated:
+2. "what" — describe in 2-5 words what user wants: "statistics", "day OHLC", "time of high", "list of days", "gap"
+
+3. Period — extract dates as stated:
    - "2024" → start: "2024-01-01", end: "2024-12-31"
    - "May 16, 2024" → dates: ["2024-05-16"]
    - "May 16" (no year) → dates: null (year unknown, need clarification)
    - Nothing mentioned → all null (means "all data")
 
-3. Filters — only what user explicitly said:
+4. Filters — only what user explicitly said:
    - Weekdays in English: ["Monday", "Friday"]
    - Session ONLY if named: "RTH", "ETH", "OVERNIGHT"
    - Conditions as raw text: ["range > 300", "close - low >= 200"]
@@ -90,7 +98,7 @@ Extract facts from user's question. Do NOT make decisions — just extract.
      * "FOMC", "ставка", "rate decision" → "fomc"
      * "CPI", "инфляция" → "cpi"
 
-4. Modifiers — special requests:
+5. Modifiers — special requests:
    - "compare X vs Y" → compare: ["X", "Y"]
    - "top 10" → top_n: 10
    - "by year", "год", "по годам" → group_by: "year"
@@ -103,7 +111,7 @@ Extract facts from user's question. Do NOT make decisions — just extract.
      * "наименее", "lowest", "smallest", "worst", "quietest" → find: "min"
      * Example: "какой час самый волатильный?" → find: "max", group_by: "hour"
 
-5. Unclear — ONLY for missing required info:
+6. Unclear — ONLY for missing required info:
    - Date without year → ["year"] (need to know which year)
    - Specific date WITH year but without session → ["session"] (need to know RTH/ETH/full day)
    - Do NOT mark subjective terms (huge, volatile, crazy, etc.) as unclear — interpret as top_n instead
@@ -127,6 +135,7 @@ EXAMPLES = """
 Q: "Statistics for Fridays 2020-2025 where close - low >= 200"
 ```json
 {
+  "intent": "data",
   "what": "statistics",
   "period": {"raw": "2020-2025", "start": "2020-01-01", "end": "2025-12-31"},
   "filters": {"weekdays": ["Friday"], "conditions": ["close - low >= 200"]},
@@ -138,6 +147,7 @@ Q: "Statistics for Fridays 2020-2025 where close - low >= 200"
 Q: "What happened on May 16, 2024?"
 ```json
 {
+  "intent": "data",
   "what": "day data",
   "period": {"raw": "May 16, 2024", "dates": ["2024-05-16"]},
   "filters": {},
@@ -149,6 +159,7 @@ Q: "What happened on May 16, 2024?"
 Q: "What happened May 16?"
 ```json
 {
+  "intent": "data",
   "what": "day data",
   "period": {"raw": "May 16"},
   "filters": {},
@@ -160,6 +171,7 @@ Q: "What happened May 16?"
 Q: "When is high usually formed?"
 ```json
 {
+  "intent": "data",
   "what": "time of high",
   "period": {},
   "filters": {},
@@ -171,6 +183,7 @@ Q: "When is high usually formed?"
 Q: "Top 10 volatile days in 2024"
 ```json
 {
+  "intent": "data",
   "what": "volatile days",
   "period": {"raw": "2024", "start": "2024-01-01", "end": "2024-12-31"},
   "filters": {},
@@ -182,6 +195,7 @@ Q: "Top 10 volatile days in 2024"
 Q: "Find me days with huge moves last year"
 ```json
 {
+  "intent": "data",
   "what": "huge moves days",
   "period": {"raw": "last year", "start": "2025-01-01", "end": "2025-12-31"},
   "filters": {},
@@ -193,6 +207,7 @@ Q: "Find me days with huge moves last year"
 Q: "RTH vs ETH range"
 ```json
 {
+  "intent": "data",
   "what": "range comparison",
   "period": {},
   "filters": {},
@@ -204,6 +219,7 @@ Q: "RTH vs ETH range"
 Q: "Show me OPEX days for 2024"
 ```json
 {
+  "intent": "data",
   "what": "OPEX days",
   "period": {"raw": "2024", "start": "2024-01-01", "end": "2024-12-31"},
   "filters": {"event_filter": "opex"},
@@ -215,6 +231,7 @@ Q: "Show me OPEX days for 2024"
 Q: "NFP statistics for 2023-2024"
 ```json
 {
+  "intent": "data",
   "what": "NFP statistics",
   "period": {"raw": "2023-2024", "start": "2023-01-01", "end": "2024-12-31"},
   "filters": {"event_filter": "nfp"},
@@ -226,6 +243,7 @@ Q: "NFP statistics for 2023-2024"
 Q: "Статистика по дням экспирации"
 ```json
 {
+  "intent": "data",
   "what": "expiration statistics",
   "period": {},
   "filters": {"event_filter": "opex"},
@@ -237,6 +255,7 @@ Q: "Статистика по дням экспирации"
 Q: "Volatility by month for 2024"
 ```json
 {
+  "intent": "data",
   "what": "volatility",
   "period": {"raw": "2024", "start": "2024-01-01", "end": "2024-12-31"},
   "filters": {},
@@ -248,6 +267,7 @@ Q: "Volatility by month for 2024"
 Q: "Какой час самый волатильный?"
 ```json
 {
+  "intent": "data",
   "what": "most volatile hour",
   "period": {},
   "filters": {},
@@ -259,6 +279,7 @@ Q: "Какой час самый волатильный?"
 Q: "Which day had the lowest range in 2024?"
 ```json
 {
+  "intent": "data",
   "what": "lowest range day",
   "period": {"raw": "2024", "start": "2024-01-01", "end": "2024-12-31"},
   "filters": {},
@@ -270,7 +291,8 @@ Q: "Which day had the lowest range in 2024?"
 Q: "What is gap?"
 ```json
 {
-  "what": "explain gap",
+  "intent": "concept",
+  "what": "gap",
   "period": null,
   "filters": null,
   "modifiers": null,
@@ -281,7 +303,20 @@ Q: "What is gap?"
 Q: "Hello"
 ```json
 {
+  "intent": "chitchat",
   "what": "greeting",
+  "period": null,
+  "filters": null,
+  "modifiers": null,
+  "unclear": []
+}
+```
+
+Q: "Спасибо за анализ!"
+```json
+{
+  "intent": "chitchat",
+  "what": "thanks",
   "period": null,
   "filters": null,
   "modifiers": null,
@@ -293,6 +328,7 @@ History: "User: what was jan 10\\nAssistant: Which year?"
 Q: "2024"
 ```json
 {
+  "intent": "data",
   "what": "day data",
   "period": {"raw": "jan 10 2024", "dates": ["2024-01-10"]},
   "filters": {},
@@ -305,6 +341,7 @@ History: "User: 2024\\nAssistant: Looking at January 10, 2024. Which session —
 Q: "RTH"
 ```json
 {
+  "intent": "data",
   "what": "day data",
   "period": {"raw": "January 10, 2024", "dates": ["2024-01-10"]},
   "filters": {"session": "RTH"},
@@ -317,6 +354,7 @@ History: "User: What was May 16, 2024?\\nAssistant: Which session — RTH or ful
 Q: "Calendar day"
 ```json
 {
+  "intent": "data",
   "what": "day data",
   "period": {"raw": "May 16, 2024", "dates": ["2024-05-16"]},
   "filters": {"time_start": "00:00", "time_end": "23:59"},

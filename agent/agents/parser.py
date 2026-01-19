@@ -44,7 +44,13 @@ def dict_to_parsed_query(data: dict) -> ParsedQuery:
         modifiers_data = data.get("modifiers")
         modifiers = ParsedModifiers(**modifiers_data) if modifiers_data else None
 
+        # Parse intent with fallback to "data"
+        intent = data.get("intent", "data")
+        if intent not in ("data", "chitchat", "concept"):
+            intent = "data"
+
         return ParsedQuery(
+            intent=intent,
             what=data.get("what", "greeting"),
             period=period,
             filters=filters,
@@ -56,6 +62,7 @@ def dict_to_parsed_query(data: dict) -> ParsedQuery:
         print(f"[Parser] ParsedQuery validation failed: {e}")
         # Return fallback — ask for clarification
         return ParsedQuery(
+            intent="data",
             what="unknown",
             unclear=["question"],
             summary="I couldn't understand your question. Could you please rephrase it?",
