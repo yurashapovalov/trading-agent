@@ -37,6 +37,7 @@ export type Feedback = {
 export type ChatMessage = {
   role: "user" | "assistant"
   content: string
+  preview?: string              // Expert context before data (from responder)
   request_id?: string
   tools_used?: ToolUsage[]
   agent_steps?: AgentStep[]

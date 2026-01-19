@@ -44,6 +44,7 @@ import {
 import { Suggestions, Suggestion } from "@/components/ai/suggestion"
 import { Actions, Action } from "@/components/ai/actions"
 import { Processed } from "@/components/app/processed/processed"
+import { DataCard } from "@/components/ai/data-card"
 import { Skeleton } from "@/components/ui/skeleton"
 import type { ChatMessage, AgentStep } from "@/types/chat"
 
@@ -208,6 +209,27 @@ export function ChatPanel({
                       <Processed steps={message.agent_steps} isLoading={false} />
                     </div>
                   )}
+
+                  {/* Preview text (expert context before data) */}
+                  {message.role === "assistant" && message.preview && (
+                    <MessageContent className="mb-2">
+                      <MessageResponse>{message.preview}</MessageResponse>
+                    </MessageContent>
+                  )}
+
+                  {/* Data card (between preview and summary) */}
+                  {message.role === "assistant" && message.data_card && (
+                    <DataCard
+                      data={message.data_card}
+                      showAnalyzeButton={message.offer_analysis}
+                      onAnalyze={() => {
+                        // TODO: trigger analysis
+                        console.log("Analyze clicked")
+                      }}
+                    />
+                  )}
+
+                  {/* Main content (summary or full response) */}
                   <MessageContent>
                     <MessageResponse>{message.content}</MessageResponse>
                   </MessageContent>

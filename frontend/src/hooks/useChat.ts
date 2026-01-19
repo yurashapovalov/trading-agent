@@ -185,7 +185,9 @@ export function useChat({ chatId, onChatCreated, onTitleUpdated }: UseChatOption
         let buffer = ""
         const stepsCollected: AgentStep[] = []
         let currentAgentName: string | null = null
-        let finalText = ""
+        let previewText = ""      // Expert context before data
+        let summaryText = ""      // Summary after data
+        let isAfterDataReady = false
         let usageData: Usage | undefined
         let route: string | undefined
         let validationPassed: boolean | undefined
@@ -279,12 +281,20 @@ export function useChat({ chatId, onChatCreated, onTitleUpdated }: UseChatOption
                   validationPassed = event.status === "ok"
                   // Reset text on rewrite to avoid concatenating multiple attempts
                   if (event.status === "rewrite") {
-                    finalText = ""
+                    previewText = ""
+                    summaryText = ""
+                    isAfterDataReady = false
                     setStreamingText("")
                   }
                 } else if (event.type === "text_delta") {
-                  finalText += event.content
-                  setStreamingText((prev) => prev + event.content)
+                  // Route text to preview or summary based on data state
+                  if (!isAfterDataReady) {
+                    previewText += event.content
+                    setStreamingText(previewText)
+                  } else {
+                    summaryText += event.content
+                    setStreamingText(summaryText)
+                  }
                 } else if (event.type === "suggestions") {
                   if (event.suggestions && event.suggestions.length > 0) {
                     setSuggestions(event.suggestions)
@@ -293,20 +303,21 @@ export function useChat({ chatId, onChatCreated, onTitleUpdated }: UseChatOption
                   // Save data title for data card
                   dataCard = { title: event.title, row_count: 0, data: {} }
                 } else if (event.type === "data_ready") {
-                  // Data is ready - save it and clear preview text for summary
+                  // Data is ready - switch to summary mode
                   dataCard = {
                     title: dataCard?.title || "",
                     row_count: event.row_count,
                     data: event.data,
                   }
-                  // Clear preview text - summary will replace it
-                  finalText = ""
+                  isAfterDataReady = true
+                  // Clear streaming for summary
                   setStreamingText("")
                 } else if (event.type === "offer_analysis") {
                   // Large dataset - offer analysis button
                   offerAnalysis = true
-                  // Clear preview, use offer message as final text
-                  finalText = event.message
+                  isAfterDataReady = true
+                  // Use offer message as summary
+                  summaryText = event.message
                   setStreamingText(event.message)
                 } else if (event.type === "usage") {
                   usageData = {
@@ -326,11 +337,16 @@ export function useChat({ chatId, onChatCreated, onTitleUpdated }: UseChatOption
                     onTitleUpdated(event.chat_id, event.title)
                   }
                 } else if (event.type === "done") {
+                  // Determine content: summary if we got data, otherwise preview
+                  const content = summaryText || previewText
+                  const preview = dataCard ? previewText : undefined // Only include preview if there's a data card
+
                   setMessages((prev) => [
                     ...prev,
                     {
                       role: "assistant",
-                      content: stripSuggestions(finalText),
+                      content: stripSuggestions(content),
+                      preview: preview ? stripSuggestions(preview) : undefined,
                       request_id: event.request_id,
                       agent_steps: [...stepsCollected],
                       route,
