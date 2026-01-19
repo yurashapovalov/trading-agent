@@ -162,4 +162,26 @@ FOLLOW_UP_CHAINS = [
             {"q": "сравни понедельник и пятницу", "expect": {"special_op": "COMPARE"}},
         ],
     },
+
+    # =========================================================================
+    # Category F: Find extremum follow-ups (ambiguous "which is most X")
+    # =========================================================================
+    {
+        "name": "F1_find_most_volatile_implicit",
+        "description": "Find most volatile from hourly data — implicit grouping from context",
+        "chain": [
+            {"q": "волатильность по часам", "expect": {"grouping": "HOUR"}},
+            # "какой самый волатильный" без указания "час" — Parser должен понять из контекста
+            {"q": "какой самый волатильный", "expect": {"grouping": "HOUR", "top_n": 1}},
+        ],
+    },
+    {
+        "name": "F2_find_most_volatile_with_clarification",
+        "description": "Ambiguous question then user clarifies they meant hour",
+        "chain": [
+            {"q": "волатильность по часам", "expect": {"grouping": "HOUR"}},
+            {"q": "какой самый волатильный", "expect": {"grouping": "HOUR", "top_n": 1}},
+            {"q": "я имею в виду час", "expect": {"grouping": "HOUR", "top_n": 1}},
+        ],
+    },
 ]

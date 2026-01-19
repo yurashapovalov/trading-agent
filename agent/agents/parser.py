@@ -131,13 +131,14 @@ class Parser:
 
         start = datetime.now()
 
-        # Call LLM
+        # Call LLM with thinking enabled for better reasoning
         response = self.client.models.generate_content(
             model=self.model,
             contents=full_prompt,
             config=types.GenerateContentConfig(
                 temperature=0,
                 response_mime_type="application/json",
+                thinking_config=types.ThinkingConfig(thinking_budget=512),
             ),
         )
 
