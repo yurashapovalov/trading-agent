@@ -219,7 +219,7 @@ export function ChatPanel({
 
                   {/* Data card (between preview and summary) */}
                   {message.role === "assistant" && message.data_card && (
-                    <DataCard data={message.data_card} />
+                    <DataCard data={message.data_card} onClick={onOpenContextPanel} />
                   )}
 
                   {/* Main content (summary or full response) */}
