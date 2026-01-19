@@ -11,7 +11,40 @@
 
 ## Активная работа
 
+### 15. Streaming structured outputs
+
+**Проблема:** Сейчас стриминг не использует `response_json_schema`, поэтому Gemini может отдавать невалидный JSON или прерываться в середине структуры.
+
+**Решение (из документации Gemini):**
+```python
+# Вместо текущего
+model.generate_content(contents, stream=True)
+
+# Использовать schema
+from google.genai.types import GenerateContentConfig
+
+model.generate_content(
+    contents,
+    config=GenerateContentConfig(
+        response_mime_type="application/json",
+        response_schema=ResponderOutput,  # Pydantic model
+    ),
+    stream=True,
+)
+```
+
+**Задачи:**
+- [ ] Добавить Pydantic models для structured output (ResponderOutput, AnalystOutput)
+- [ ] Использовать `response_schema` в streaming режиме
+- [ ] Тестирование: проверить что JSON всегда валидный
+
+**Ссылка:** https://ai.google.dev/gemini-api/docs/structured-output
+
+---
+
 ### 14. Responder-centric flow
+
+**Статус:** ✅ Backend готов (2026-01-18), ожидаем frontend
 
 **Проблема:** Сейчас Parser отвечает пользователю шаблонно ("Got it!"), потом тишина, потом Analyst. Две точки коммуникации, разрыв в UX, роботизированное общение.
 
@@ -184,14 +217,16 @@ Analyst: [глубокий анализ данных]
 - [ ] Кнопка "[Проанализировать]" — вызывает Analyst
 - [ ] Кнопка анализа исчезает после нового сообщения
 - [ ] Кнопки кларификации (интерактивные chips)
+- [ ] **BUG:** Два ответа склеиваются (preview + summary) — нужно показывать только финальный
+- [ ] **BUG:** Markdown таблицы не рендерятся — нужен markdown renderer
 
 **Требования к бэкенду:**
-- [ ] Разделить Barb на Parser (node) и Composer (node)
-- [ ] Новый агент Responder между Parser и Composer
-- [ ] Responder получает: question, parsed entities, instrument context, events, holidays
-- [ ] Parser убрать summary из output
+- [x] Разделить Barb на Parser (node) и Composer (node)
+- [x] Новый агент Responder между Parser и Composer
+- [x] Responder получает: question, parsed entities, instrument context, events, holidays
+- [x] Parser убрать summary из output
 - [ ] Analyst вызывается только по trigger (кнопка или слово "проанализируй")
-- [ ] Новый SSE event type для interactive elements
+- [x] Новый SSE event type для interactive elements
 
 **LangGraph реализация:**
 ```python
@@ -247,19 +282,19 @@ START → parser → composer → responder → [routing by type]
 
 **SSE events (новые):**
 ```javascript
-// Responder генерит title для карточки
+// ✅ Responder генерит title для карточки
 {type: "data_title", title: "Почасовая волатильность NQ"}
 
-// Responder стримит expert preview
+// ✅ Responder стримит expert preview
 {type: "text_delta", content: "Обычно пики на открытии..."}
 
-// DataFetcher закончил
+// ✅ DataFetcher закончил
 {type: "data_ready", row_count: 4800, request_id: "xxx"}
 
-// UI показывает кнопку анализа
-{type: "action_button", action: "analyze", label: "Проанализировать"}
+// ✅ Предлагает анализ (для >5 rows)
+{type: "offer_analysis", data: true}
 
-// Кнопки кларификации
+// TODO: Кнопки кларификации (ждём frontend)
 {type: "clarification", field: "year", options: ["2024", "2023", "Все года"]}
 ```
 
@@ -337,3 +372,5 @@ START → parser → composer → responder → [routing by type]
 - 2026-01-18: Trading day centralization, Events integration
 - 2026-01-18: instruments.py как единый источник (data_start/data_end)
 - 2026-01-18: **#14 Responder-centric flow** — новая архитектура с Responder агентом
+- 2026-01-18: **#14 Backend готов** — Parser→Composer→Responder flow, data_title, offer_analysis, data_summary, 100% tests (36/36)
+- 2026-01-19: **#15 Streaming structured outputs** — добавлена задача для response_json_schema

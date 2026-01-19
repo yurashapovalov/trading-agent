@@ -633,6 +633,13 @@ class TradingGraph:
                     full_data = updates.get("full_data") or {}
                     row_count = full_data.get("row_count", data_result.get("row_count", 0))
 
+                    # Get data_title from responder (ran earlier)
+                    data_title = accumulated_state.get("data_title")
+
+                    # Add title to full_data for logging
+                    if data_title:
+                        full_data = {**full_data, "title": data_title}
+
                     yield {
                         "type": "step_end",
                         "agent": node_name,
@@ -648,13 +655,13 @@ class TradingGraph:
                         },
                         "output": {
                             "summary": data_result,   # Top-N for Analyst
-                            "full_data": full_data,   # All rows (saved to logs + UI)
+                            "full_data": full_data,   # All rows + title (saved to logs + UI)
                         },
                     }
                     accumulated_state["data"] = data_result
                     accumulated_state["full_data"] = full_data
 
-                    # Signal that data is ready for UI
+                    # Signal that data is ready for UI (with title)
                     yield {
                         "type": "data_ready",
                         "row_count": row_count,
@@ -737,6 +744,10 @@ class TradingGraph:
                             "suggestions": suggestions,
                         }
                     }
+
+                    # Save data_title for data_fetcher to include in full_data
+                    if data_title:
+                        accumulated_state["data_title"] = data_title
 
                     # Accumulate usage from responder
                     if usage:
