@@ -767,12 +767,8 @@ class TradingGraph:
                     accumulated_state["data"] = data_result
                     accumulated_state["full_data"] = full_data
 
-                    # Signal that data is ready for UI (with title)
-                    yield {
-                        "type": "data_ready",
-                        "row_count": row_count,
-                        "data": full_data,
-                    }
+                    # NOTE: data_ready event is sent from offer_analysis node
+                    # (only for >5 rows when DataCard should be shown)
 
                 elif node_name == "analyst":
                     response = updates.get("response") or ""
