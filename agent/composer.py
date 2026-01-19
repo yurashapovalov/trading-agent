@@ -167,14 +167,26 @@ def _build_query(parsed: ParsedQuery, symbol: str) -> ComposerResult:
 
     source = _determine_source(special_op, session, specific_dates, needs_prev_day, grouping)
 
+    # Check for excessive data volume (MINUTES + NONE grouping + long period)
+    volume_issue = _check_data_volume(source, grouping, period, symbol)
+    if volume_issue:
+        return volume_issue
+
     filters = _build_filters(period, filters_raw, symbol)
     metrics = _determine_metrics(parsed.what, modifiers)
 
     # Reconcile metrics with TOP_N order_by
-    # If ordering by aggregate column, ensure aggregate metrics are used
+    # If grouping or ordering by aggregate column, ensure aggregate metrics are used
     if special_op == SpecialOp.TOP_N and op_specs.get("top_n"):
         top_n_spec = op_specs["top_n"]
-        metrics = _reconcile_metrics_with_order_by(metrics, top_n_spec.order_by)
+        metrics, new_order_by = _reconcile_metrics_with_order_by(metrics, top_n_spec.order_by, grouping)
+        # Update TopNSpec if order_by changed
+        if new_order_by != top_n_spec.order_by:
+            op_specs["top_n"] = TopNSpec(
+                n=top_n_spec.n,
+                order_by=new_order_by,
+                direction=top_n_spec.direction,
+            )
 
     spec = QuerySpec(
         symbol=symbol,
@@ -317,6 +329,10 @@ def _determine_source(
     if grouping.is_time_based():
         return Source.MINUTES
 
+    # SESSION grouping needs minute data to classify RTH/ETH by time
+    if grouping == Grouping.SESSION:
+        return Source.MINUTES
+
     # With session filter:
     if session:
         # Specific dates (single day query) - aggregate in daily CTE with session
@@ -324,6 +340,9 @@ def _determine_source(
             return Source.DAILY
         # TOP_N with session - rank daily bars with session filter in aggregation
         if special_op == SpecialOp.TOP_N:
+            return Source.DAILY
+        # TOTAL grouping with session - daily stats filtered by session
+        if grouping == Grouping.TOTAL:
             return Source.DAILY
         # Multi-day range with session - need minute-level for time filtering
         return Source.MINUTES
@@ -499,6 +518,7 @@ def _determine_grouping(
             "weekday": Grouping.WEEKDAY,
             "day": Grouping.DAY,
             "hour": Grouping.HOUR,
+            "session": Grouping.SESSION,
         }
         return mapping.get(group_by, Grouping.NONE)
 
@@ -521,29 +541,61 @@ def _determine_grouping(
     return Grouping.NONE
 
 
-def _reconcile_metrics_with_order_by(metrics: list[MetricSpec], order_by: str) -> list[MetricSpec]:
+def _reconcile_metrics_with_order_by(
+    metrics: list[MetricSpec],
+    order_by: str,
+    grouping: Grouping = Grouping.NONE,
+) -> tuple[list[MetricSpec], str]:
     """Ensure metrics include the order_by column.
 
-    If TOP_N orders by an aggregate column (volatility, avg_range, etc.),
-    we need aggregate metrics, not raw OHLC.
+    Rules:
+    1. If grouping != NONE, we're aggregating rows → need aggregate metrics
+    2. If ordering by aggregate column (volatility, avg_range), need aggregate metrics
+
+    Args:
+        metrics: Current metrics from _determine_metrics
+        order_by: Column to order by (from TopNSpec)
+        grouping: Query grouping type
+
+    Returns:
+        Tuple of (metrics, updated_order_by)
     """
-    # Aggregate columns that require statistical metrics
-    aggregate_columns = {"volatility", "avg_range", "avg_change", "stddev"}
+    aggregate_metrics = [
+        MetricSpec(metric=Metric.AVG, column="range", alias="avg_range"),
+        MetricSpec(metric=Metric.AVG, column="change_pct", alias="avg_change"),
+        MetricSpec(metric=Metric.STDDEV, column="change_pct", alias="volatility"),
+        MetricSpec(metric=Metric.SUM, column="volume", alias="total_volume"),
+        MetricSpec(metric=Metric.COUNT, alias="count"),
+    ]
 
-    if order_by in aggregate_columns:
-        # Check if current metrics already include aggregates
+    # Map raw columns to aggregate aliases
+    column_to_aggregate = {
+        "range": "avg_range",
+        "change_pct": "avg_change",
+        "volume": "total_volume",
+    }
+
+    # Rule 1: Grouping requires aggregate metrics
+    # (each row = aggregation of multiple days/hours/etc)
+    if grouping not in (Grouping.NONE,):
+        # Always map order_by to aggregate column when grouping
+        new_order_by = column_to_aggregate.get(order_by, order_by)
+
+        # Check if current metrics are already aggregates
         metric_aliases = {m.alias for m in metrics if m.alias}
+        if "volatility" in metric_aliases or "avg_range" in metric_aliases:
+            return metrics, new_order_by  # Already aggregate, but still map order_by
 
+        return aggregate_metrics, new_order_by
+
+    # Rule 2: Aggregate order_by column requires aggregate metrics
+    aggregate_columns = {"volatility", "avg_range", "avg_change", "stddev"}
+    if order_by in aggregate_columns:
+        metric_aliases = {m.alias for m in metrics if m.alias}
         if order_by not in metric_aliases:
-            # Replace with aggregate metrics
-            return [
-                MetricSpec(metric=Metric.AVG, column="range", alias="avg_range"),
-                MetricSpec(metric=Metric.AVG, column="change_pct", alias="avg_change"),
-                MetricSpec(metric=Metric.STDDEV, column="change_pct", alias="volatility"),
-                MetricSpec(metric=Metric.COUNT, alias="count"),
-            ]
+            return aggregate_metrics, order_by
 
-    return metrics
+    return metrics, order_by
 
 
 def _determine_metrics(what: str, modifiers: ParsedModifiers | None) -> list[MetricSpec]:
@@ -626,9 +678,13 @@ def _determine_special_op(what: str, modifiers: ParsedModifiers | None) -> tuple
             order_by = "change_pct"
             direction = "DESC"  # gains are positive
 
-        # Determine order_by from what (if not already set by gap logic)
+        # Determine order_by from what
         if "volati" in what_lower:
             order_by = "volatility"
+        elif "volume" in what_lower or "объём" in what_lower:
+            order_by = "volume"
+        elif "change" in what_lower or "изменен" in what_lower:
+            order_by = "change_pct"
         elif "range" in what_lower:
             order_by = "range"
 
@@ -675,5 +731,64 @@ def _check_not_supported(what: str, filters_raw: ParsedFilters | None, _modifier
     # Option expiration
     if "expiration" in conditions or "экспирац" in conditions:
         return "Option expiration calendar not available"
+
+    return None
+
+
+def _calculate_period_days(period: ParsedPeriod | None, symbol: str) -> int:
+    """Calculate number of days in the period."""
+    from agent.market.instruments import get_instrument
+
+    if not period:
+        # No period = all data, use instrument range
+        instrument = get_instrument(symbol)
+        if instrument:
+            start = instrument.get("data_start", "2008-01-01")
+            end = instrument.get("data_end", datetime.now().strftime("%Y-%m-%d"))
+        else:
+            start = "2008-01-01"
+            end = datetime.now().strftime("%Y-%m-%d")
+    else:
+        start = period.start
+        end = period.end
+
+    if not start or not end:
+        return 365 * 10  # Assume large period if unknown
+
+    try:
+        start_dt = datetime.strptime(start, "%Y-%m-%d")
+        end_dt = datetime.strptime(end, "%Y-%m-%d")
+        return (end_dt - start_dt).days
+    except ValueError:
+        return 365 * 10  # Assume large period on error
+
+
+def _check_data_volume(
+    source: Source,
+    grouping: Grouping,
+    period: ParsedPeriod | None,
+    symbol: str,
+) -> ClarificationResult | None:
+    """Check if query would return too much data.
+
+    Returns ClarificationResult if user should narrow down the query.
+    """
+    # Only check MINUTES source with no grouping
+    if source != Source.MINUTES:
+        return None
+
+    if grouping != Grouping.NONE:
+        return None  # Grouping aggregates data, OK
+
+    period_days = _calculate_period_days(period, symbol)
+
+    # Threshold: 30 days of minute data is manageable (~40k rows max)
+    if period_days > 30:
+        return ClarificationResult(
+            type="clarification",
+            summary="Слишком много минутных данных для отображения.",
+            field="grouping",
+            options=["по часам", "по дням недели", "сократить период"],
+        )
 
     return None

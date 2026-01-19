@@ -93,7 +93,11 @@ Extract facts from user's question. Do NOT make decisions — just extract.
 4. Modifiers — special requests:
    - "compare X vs Y" → compare: ["X", "Y"]
    - "top 10" → top_n: 10
-   - "by month" → group_by: "month"
+   - "by year", "год", "по годам" → group_by: "year"
+   - "by month", "месяц", "по месяцам" → group_by: "month"
+   - "by weekday", "день недели", "по дням недели" → group_by: "weekday"
+   - "by hour", "час", "по часам" → group_by: "hour"
+   - "by session", "сессия", "по сессиям" → group_by: "session"
    - Superlatives → find: "max" or "min":
      * "самый", "наиболее", "most", "highest", "largest", "best" → find: "max"
      * "наименее", "lowest", "smallest", "worst", "quietest" → find: "min"

@@ -55,6 +55,7 @@ from .non_data import (
     HOLIDAYS,
 )
 from .follow_up import FOLLOW_UP_CHAINS
+from .capabilities import FIND_CAPABILITY
 
 
 # =============================================================================
@@ -99,6 +100,9 @@ SCENARIOS = {
 
     # Follow-up chains
     "follow_up": FOLLOW_UP_CHAINS,
+
+    # Capability tests (atomic testing of Parser → Composer → QueryBuilder)
+    "capability_find": FIND_CAPABILITY,
 
     # === Combined groups ===
     "all_source": SOURCE_DAILY + SOURCE_MINUTES + SOURCE_DAILY_WITH_PREV,

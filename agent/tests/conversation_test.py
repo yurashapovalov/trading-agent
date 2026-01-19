@@ -150,7 +150,7 @@ class SingleResult:
 class Validator:
     """Validates test results against expected values."""
 
-    def validate(self, parser_result, composer_result, expected: dict) -> ValidationResult:
+    def validate(self, parser_result, composer_result, expected: dict, data_result: dict | None = None) -> ValidationResult:
         """Validate result against expected dict."""
         if not expected:
             return ValidationResult(passed=True)
@@ -160,8 +160,8 @@ class Validator:
         spec = composer_result.spec if composer_result else None
 
         for key, expected_value in expected.items():
-            actual = self._extract_value(key, parsed, spec, composer_result)
-            passed = self._values_match(actual, expected_value)
+            actual = self._extract_value(key, parsed, spec, composer_result, data_result)
+            passed = self._values_match(actual, expected_value, key)
             checks.append(ValidationCheck(
                 key=key,
                 expected=expected_value,
@@ -174,8 +174,15 @@ class Validator:
             checks=checks,
         )
 
-    def _extract_value(self, key: str, parsed, spec, composer_result) -> Any:
+    def _extract_value(self, key: str, parsed, spec, composer_result, data_result: dict | None = None) -> Any:
         """Extract actual value for validation key."""
+        # Data result checks
+        if data_result:
+            if key == "rows":
+                return data_result.get("row_count")
+            if key == "has_columns":
+                return data_result.get("columns", [])
+
         # Type checks
         if key == "type":
             return composer_result.type if composer_result else None
@@ -245,16 +252,23 @@ class Validator:
 
         return None
 
-    def _values_match(self, actual: Any, expected: Any) -> bool:
+    def _values_match(self, actual: Any, expected: Any, key: str = "") -> bool:
         """Check if actual value matches expected."""
         if actual is None:
             return expected is None
+
+        # has_columns: check all expected columns are present (subset check)
+        if key == "has_columns":
+            if not isinstance(actual, list) or not isinstance(expected, list):
+                return False
+            actual_lower = set(str(x).lower() for x in actual)
+            return all(str(col).lower() in actual_lower for col in expected)
 
         # String comparison (case-insensitive)
         if isinstance(actual, str) and isinstance(expected, str):
             return actual.upper() == expected.upper()
 
-        # List comparison (order-independent)
+        # List comparison (order-independent, exact match)
         if isinstance(expected, list):
             if not isinstance(actual, list):
                 return False
@@ -482,10 +496,18 @@ class TestRunner:
 
             # === VALIDATION ===
             if expected:
+                # Build data_result for validation
+                data_result = None
+                if result.data_row_count is not None:
+                    data_result = {
+                        "row_count": result.data_row_count,
+                        "columns": result.data_columns or [],
+                    }
                 result.validation = self.validator.validate(
                     parser_result,
                     composer_result,
                     expected,
+                    data_result,
                 )
 
             result.time_ms = int((datetime.now() - step_start).total_seconds() * 1000)
