@@ -3,76 +3,95 @@
 Prices are per 1 million tokens. Update when provider pricing changes.
 
 Supported models:
-- Gemini 3 Flash Preview (current default)
-- Gemini 2.0/2.5 Flash
-- Claude Haiku/Sonnet
+- Gemini 3 Flash Preview (gemini-3-flash-preview)
+- Gemini 2.5 Flash Lite Preview (gemini-2.5-flash-lite-preview-09-2025)
 
 Example:
-    cost = calculate_cost(input_tokens=1000, output_tokens=500)
+    cost = calculate_cost(input_tokens=1000, output_tokens=500, model="gemini-2.5-flash-lite-preview-09-2025")
 """
+
+# =============================================================================
+# Pricing per model ($/1M tokens)
+# =============================================================================
 
 # Gemini 3 Flash Preview
 GEMINI_3_FLASH = {
-    "input": 0.50,      # $/1M tokens (text/image/video)
-    "output": 3.00,     # $/1M tokens (includes thinking)
-    "audio_input": 1.00,  # $/1M tokens
-    "cached_input": 0.05,  # $/1M tokens
+    "input": 0.50,
+    "output": 3.00,
+    "cached_input": 0.05,  # 90% discount
 }
 
-# Gemini 2.0 Flash
-GEMINI_2_FLASH = {
-    "input": 0.10,      # $/1M tokens
-    "output": 0.40,     # $/1M tokens
-}
-
-# Gemini 2.5 Flash Lite (cheapest option)
+# Gemini 2.5 Flash Lite Preview
 GEMINI_2_5_FLASH_LITE = {
-    "input": 0.10,      # $/1M tokens (text/image/video)
-    "output": 0.40,     # $/1M tokens (including thinking)
+    "input": 0.10,
+    "output": 0.40,
+    "cached_input": 0.01,  # 90% discount
 }
 
-# Claude Haiku 4.5
-CLAUDE_HAIKU = {
-    "input": 1.00,      # $/1M tokens
-    "output": 5.00,     # $/1M tokens
+# =============================================================================
+# Model -> Pricing mapping
+# =============================================================================
+
+MODEL_PRICING = {
+    "gemini-3-flash": GEMINI_3_FLASH,
+    "gemini-2.5-flash-lite": GEMINI_2_5_FLASH_LITE,  # matches gemini-2.5-flash-lite-preview-09-2025
 }
 
-# Claude Sonnet 4.5
-CLAUDE_SONNET = {
-    "input": 3.00,      # $/1M tokens
-    "output": 15.00,    # $/1M tokens
-}
+# Default fallback
+DEFAULT_PRICING = GEMINI_3_FLASH
 
-# Default pricing (used by current model)
-CURRENT_MODEL_PRICING = GEMINI_3_FLASH
+
+def get_pricing(model: str | None) -> dict:
+    """Get pricing dict for model name (partial match).
+
+    Args:
+        model: Model name (e.g., "gemini-2.5-flash-lite", "gemini-3-flash-preview")
+
+    Returns:
+        Pricing dict with input/output/cached_input rates
+    """
+    if not model:
+        return DEFAULT_PRICING
+
+    model_lower = model.lower()
+    for key, pricing in MODEL_PRICING.items():
+        if key in model_lower:
+            return pricing
+
+    return DEFAULT_PRICING
 
 
 def calculate_cost(
     input_tokens: int,
     output_tokens: int,
     thinking_tokens: int = 0,
-    pricing: dict = None
+    cached_tokens: int = 0,
+    model: str | None = None,
 ) -> float:
     """Calculate cost in USD for a request.
 
     Args:
-        input_tokens: Number of input/prompt tokens
+        input_tokens: Number of input/prompt tokens (total, including cached)
         output_tokens: Number of output/completion tokens
-        thinking_tokens: Number of thinking tokens (Gemini 3)
-        pricing: Pricing dict (defaults to CURRENT_MODEL_PRICING)
+        thinking_tokens: Number of thinking tokens (billed as output)
+        cached_tokens: Number of tokens served from cache (subset of input_tokens)
+        model: Model name for pricing lookup
 
     Returns:
         Cost in USD
     """
-    if pricing is None:
-        pricing = CURRENT_MODEL_PRICING
+    pricing = get_pricing(model)
+
+    # Cached tokens are billed at reduced rate
+    # input_tokens includes cached, so we subtract cached and add at cached rate
+    non_cached_input = input_tokens - cached_tokens
+    cached_input_cost = cached_tokens * pricing.get("cached_input", pricing["input"])
+    regular_input_cost = non_cached_input * pricing["input"]
 
     # Thinking tokens are billed as output
     total_output = output_tokens + thinking_tokens
+    output_cost = total_output * pricing["output"]
 
-    cost = (
-        input_tokens * pricing["input"] +
-        total_output * pricing["output"]
-    ) / 1_000_000
+    cost = (regular_input_cost + cached_input_cost + output_cost) / 1_000_000
 
     return cost

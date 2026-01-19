@@ -2,18 +2,19 @@
 LangGraph v3 — Responder-centric Flow
 
 Flow:
-Question ─► Barb ─► Responder ─┬─ greeting/concept/clarification/not_supported ─► END
-                               │
-                               └─ query ─► QueryBuilder ─► DataFetcher ─► [routing]
-                                                                │
-                                           ┌────────────────────┴────────────────────┐
-                                           ↓                                         ↓
-                                    [row_count ≤ 5]                           [row_count > 5]
-                                           ↓                                         ↓
-                                    Responder_summary ─► END            UI: button ─► Analyst ─► END
+Question ─► Parser ─► Composer ─► Responder ─┬─ greeting/concept/clarification/not_supported ─► END
+                                             │
+                                             └─ query ─► QueryBuilder ─► DataFetcher ─► [routing]
+                                                                              │
+                                                     ┌────────────────────────┴────────────────────────┐
+                                                     ↓                                                 ↓
+                                              [row_count ≤ 5]                                   [row_count > 5]
+                                                     ↓                                                 ↓
+                                              Responder_summary ─► END                  UI: button ─► Analyst ─► END
 
 Agents:
-- Barb: Parser (LLM) + Composer (code) — extracts entities, builds QuerySpec
+- Parser: LLM extracts entities from question (what, period, filters, modifiers)
+- Composer: Code logic determines type (query/greeting/concept/clarification/not_supported), builds QuerySpec
 - Responder: User-facing communication — expert preview, clarifications, summaries
 - QueryBuilder: Deterministic SQL generation
 - DataFetcher: Execute SQL
@@ -30,9 +31,10 @@ from agent.agents.data_fetcher import DataFetcher
 from agent.agents.analyst import Analyst
 from agent.agents.validator import Validator
 from agent.agents.responder import Responder
+from agent.agents.parser import Parser
+from agent.agents.composer_agent import ComposerAgent
 from agent.query_builder import QueryBuilder
 from agent.checkpointer import get_checkpointer
-from agent.agents.barb import Barb
 import config
 
 
@@ -40,7 +42,8 @@ import config
 # Initialize agents (singletons)
 # =============================================================================
 
-barb = Barb()
+parser_agent = Parser()
+composer_agent = ComposerAgent()
 responder_agent = Responder()
 query_builder = QueryBuilder()
 data_fetcher = DataFetcher()
@@ -52,61 +55,88 @@ validator = Validator()
 # Node Functions
 # =============================================================================
 
-def ask_barb(state: AgentState) -> dict:
+def parse_question(state: AgentState) -> dict:
     """
-    Barb node — Parser + Composer flow.
+    Parser node — extract entities from question using LLM.
 
-    - Parser (LLM) extracts entities only
-    - Composer (code) makes all business decisions
-    - Always routes to Responder (Responder handles user communication)
-
-    Output:
-    - intent: type, parser_output, query_spec (if query), etc.
-    - query_spec_obj: QuerySpec object for QueryBuilder
+    Input: question, chat_history, previous parsed_query
+    Output: parsed_query (ParsedQuery), parser_usage
     """
     question = get_current_question(state)
     chat_history = get_chat_history(state)
     history_str = _format_chat_history(chat_history)
 
-    result = barb.ask(question, chat_history=history_str)
+    # Get previous parsed_query for follow-up context
+    previous_parsed = state.get("parsed_query")
 
-    # Build update dict
-    update = {
+    result = parser_agent.parse(
+        question,
+        chat_history=history_str,
+        previous_parsed=previous_parsed,
+    )
+
+    return {
+        "parsed_query": result.parsed_query,
+        "parser_raw_output": result.raw_output,
         "usage": {
             "input_tokens": result.input_tokens,
             "output_tokens": result.output_tokens,
             "cost_usd": result.cost_usd,
         },
-        "agents_used": ["barb"],
+        "agents_used": ["parser"],
         "step_number": state.get("step_number", 0) + 1,
     }
 
-    # Common debug info
-    parser_output = result.parser_output
+
+def compose_query(state: AgentState) -> dict:
+    """
+    Composer node — business logic to determine type + build QuerySpec.
+
+    Input: parsed_query (from Parser)
+    Output: intent, query_spec_obj (if query)
+    """
+    parsed_query = state.get("parsed_query")
+    if parsed_query is None:
+        # Fallback: treat as greeting
+        return {
+            "intent": {"type": "chitchat", "symbol": "NQ"},
+            "agents_used": ["composer"],
+            "step_number": state.get("step_number", 0) + 1,
+        }
+
+    question = get_current_question(state)
+    result = composer_agent.compose(parsed_query, original_question=question)
+
+    # Build update dict
+    update = {
+        "agents_used": ["composer"],
+        "step_number": state.get("step_number", 0) + 1,
+    }
+
+    # Get parser output for debug
+    parser_output = state.get("parser_raw_output")
 
     if result.type == "query":
-        # Pass QuerySpec directly — no dict conversion!
         update["intent"] = {
             "type": "data",
             "parser_output": parser_output,
-            "symbol": result.spec.symbol,  # Instrument for Responder/Analyst context
-            "holiday_info": result.holiday_info,  # Holiday info
-            "event_info": result.event_info,  # Event info (OPEX, NFP, etc.)
-            # Dict version for SSE streaming / tests
+            "symbol": result.spec.symbol if result.spec else "NQ",
+            "holiday_info": result.holiday_info,
+            "event_info": result.event_info,
             "query_spec": {
                 "special_op": result.spec.special_op.value if result.spec else None,
                 "source": result.spec.source.value if result.spec else None,
                 "grouping": result.spec.grouping.value if result.spec else None,
             },
         }
-        update["query_spec_obj"] = result.spec  # QuerySpec object directly
+        update["query_spec_obj"] = result.spec
 
     elif result.type == "clarification":
         update["intent"] = {
             "type": "clarification",
             "field": result.field,
             "suggestions": result.options or [],
-            "response_text": result.summary or "",  # For year/text clarifications
+            "response_text": result.summary or "",
             "parser_output": parser_output,
             "symbol": "NQ",
         }
@@ -141,7 +171,6 @@ def ask_barb(state: AgentState) -> dict:
             "symbol": "NQ",
         }
 
-    # Always go to Responder (Responder handles all user communication)
     return update
 
 
@@ -366,11 +395,11 @@ def build_graph() -> StateGraph:
     Build agent graph with Responder-centric flow.
 
     Flow:
-    Question ─► Barb ─► Responder ─┬─ greeting/concept/clarification ─► END
-                                   │
-                                   └─ query ─► QueryBuilder ─► DataFetcher ─┬─ ≤5 rows ─► Summarize ─► END
-                                                                            │
-                                                                            └─ >5 rows ─► END (+ Analyze button)
+    Question ─► Parser ─► Composer ─► Responder ─┬─ greeting/concept/clarification ─► END
+                                                 │
+                                                 └─ query ─► QueryBuilder ─► DataFetcher ─┬─ ≤5 rows ─► Summarize ─► END
+                                                                                          │
+                                                                                          └─ >5 rows ─► END (+ Analyze button)
 
     Analyst is on-demand (triggered via button/separate request).
     """
@@ -378,7 +407,8 @@ def build_graph() -> StateGraph:
     graph = StateGraph(AgentState)
 
     # Nodes
-    graph.add_node("barb", ask_barb)
+    graph.add_node("parser", parse_question)
+    graph.add_node("composer", compose_query)
     graph.add_node("responder", respond_to_user)
     graph.add_node("query_builder", build_query)
     graph.add_node("data_fetcher", fetch_data)
@@ -388,9 +418,10 @@ def build_graph() -> StateGraph:
     graph.add_node("analyst", analyze_data)
     graph.add_node("validator", validate_response)
 
-    # Flow: START → barb → responder → [routing via Command]
-    graph.add_edge(START, "barb")
-    graph.add_edge("barb", "responder")
+    # Flow: START → parser → composer → responder → [routing via Command]
+    graph.add_edge(START, "parser")
+    graph.add_edge("parser", "composer")
+    graph.add_edge("composer", "responder")
 
     # responder uses Command API for routing:
     # - data/query → query_builder
@@ -548,11 +579,11 @@ class TradingGraph:
             "cost_usd": 0.0,
         }
 
-        # Сразу отправить step_start для barb — моментальный фидбек
+        # Сразу отправить step_start для parser — моментальный фидбек
         yield {
             "type": "step_start",
-            "agent": "barb",
-            "message": self._get_agent_message("barb")
+            "agent": "parser",
+            "message": self._get_agent_message("parser")
         }
 
         for event in self.app.stream(initial_input, config, stream_mode=["updates", "custom"]):
@@ -569,8 +600,8 @@ class TradingGraph:
                 step_duration_ms = int((current_time - last_step_time) * 1000)
                 last_step_time = current_time
 
-                # step_start (skip barb — already sent before stream)
-                if node_name != "barb":
+                # step_start (skip parser — already sent before stream)
+                if node_name != "parser":
                     yield {
                         "type": "step_start",
                         "agent": node_name,
@@ -578,8 +609,9 @@ class TradingGraph:
                     }
 
                 # Handle by node type
-                if node_name == "barb":
-                    intent = updates.get("intent") or {}
+                if node_name == "parser":
+                    # Parser extracts entities — no intent yet
+                    parsed_query = updates.get("parsed_query")
                     usage = updates.get("usage") or {}
 
                     yield {
@@ -590,22 +622,43 @@ class TradingGraph:
                             "question": accumulated_state.get("question"),
                         },
                         "result": {
-                            "type": intent.get("type"),
-                            "symbol": intent.get("symbol", "NQ"),
+                            "what": parsed_query.what if parsed_query else None,
+                            "has_period": parsed_query.period is not None if parsed_query else False,
                         },
                         "output": {
-                            "intent": intent,
+                            "parsed_query": updates.get("parser_raw_output"),
                             "usage": usage,
                         }
                     }
-                    accumulated_state["intent"] = intent
+                    accumulated_state["parsed_query"] = parsed_query
 
-                    # Accumulate usage from barb
+                    # Accumulate usage from parser (LLM call)
                     if usage:
                         accumulated_usage["input_tokens"] += usage.get("input_tokens", 0)
                         accumulated_usage["output_tokens"] += usage.get("output_tokens", 0)
                         accumulated_usage["thinking_tokens"] += usage.get("thinking_tokens", 0)
                         accumulated_usage["cost_usd"] += usage.get("cost_usd", 0.0)
+
+                elif node_name == "composer":
+                    # Composer determines type + builds QuerySpec
+                    intent = updates.get("intent") or {}
+
+                    yield {
+                        "type": "step_end",
+                        "agent": node_name,
+                        "duration_ms": step_duration_ms,
+                        "input": {
+                            "parsed_query": accumulated_state.get("parsed_query"),
+                        },
+                        "result": {
+                            "type": intent.get("type"),
+                            "symbol": intent.get("symbol", "NQ"),
+                        },
+                        "output": {
+                            "intent": intent,
+                        }
+                    }
+                    accumulated_state["intent"] = intent
 
                 elif node_name == "query_builder":
                     sql_query = updates.get("sql_query")
@@ -828,7 +881,8 @@ class TradingGraph:
     def _get_agent_message(self, agent: str) -> str:
         """Return status message for agent."""
         messages = {
-            "barb": "Understanding question...",
+            "parser": "Understanding question...",
+            "composer": "Building query...",
             "responder": "Preparing response...",
             "query_builder": "Building SQL query...",
             "data_fetcher": "Fetching data...",

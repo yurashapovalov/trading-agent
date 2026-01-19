@@ -162,7 +162,11 @@ class Analyst:
                     full_text += chunk.text
 
             # Update usage stats
-            cost = calculate_cost(total_input, total_output, 0)
+            cost = calculate_cost(
+                input_tokens=total_input,
+                output_tokens=total_output,
+                model=self.model,
+            )
             self._last_usage = UsageStats(
                 input_tokens=total_input,
                 output_tokens=total_output,
@@ -304,7 +308,11 @@ class Analyst:
                 full_text += chunk.text
 
         # Update usage
-        cost = calculate_cost(total_input, total_output, 0)
+        cost = calculate_cost(
+            input_tokens=total_input,
+            output_tokens=total_output,
+            model=self.model,
+        )
         self._last_usage = UsageStats(
             input_tokens=total_input,
             output_tokens=total_output,
@@ -328,7 +336,14 @@ class Analyst:
             input_tokens = response.usage_metadata.prompt_token_count or 0
             output_tokens = response.usage_metadata.candidates_token_count or 0
             thinking_tokens = getattr(response.usage_metadata, 'thoughts_token_count', 0) or 0
-            cost = calculate_cost(input_tokens, output_tokens, thinking_tokens)
+            cached_tokens = getattr(response.usage_metadata, 'cached_content_token_count', 0) or 0
+            cost = calculate_cost(
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                thinking_tokens=thinking_tokens,
+                cached_tokens=cached_tokens,
+                model=self.model,
+            )
 
             self._last_usage = UsageStats(
                 input_tokens=input_tokens,

@@ -11,6 +11,65 @@
 
 ## Активная работа
 
+### 16. Разделить Barb node на Parser + Composer nodes
+
+**Статус:** ✅ DONE (2026-01-19)
+
+**Проблема:** В REFACTORING_PLAN отмечено `[x] Разделить Barb на Parser (node) и Composer (node)`, но фактически в коде это НЕ сделано:
+- `barb.py` содержит класс `Barb` который внутри вызывает и Parser (LLM) и Composer (code)
+- `graph.py` имеет один node `barb` который вызывает `barb.ask()`
+- SSE events показывают только `barb` как agent name
+- В Supabase traces логируется только `barb`, нельзя отдельно дебажить Parser vs Composer
+
+**Текущий flow в коде:**
+```
+START → barb (Parser+Composer внутри) → responder → ...
+```
+
+**Целевой flow:**
+```
+START → parser → composer → responder → ...
+```
+
+**Задачи:**
+- [ ] Создать `agent/agents/parser.py` — отдельный агент с LLM вызовом
+- [ ] Создать `agent/agents/composer.py` — отдельный агент (code only, no LLM)
+- [ ] В `graph.py` добавить два отдельных node: `parser` и `composer`
+- [ ] SSE events будут показывать `step_start/step_end` для каждого отдельно
+- [ ] Supabase traces будет логировать Parser и Composer отдельно
+- [ ] Удалить `barb.py` после миграции (или deprecate)
+
+**Важно:**
+- НЕ трогать Responder
+- Parser → Composer — sequential flow (Composer зависит от Parser output)
+- Сохранить все существующие типы: query, clarification, concept, greeting, not_supported
+- Сохранить holiday_info, event_info проверки (можно перенести в Composer или отдельный node)
+
+**State между nodes:**
+```python
+# После parser node:
+state["parsed_query"] = ParsedQuery(...)  # Typed entities from LLM
+state["parser_usage"] = {...}  # Tokens, cost
+
+# После composer node:
+state["intent"] = {...}  # type, query_spec, etc.
+state["query_spec_obj"] = QuerySpec(...)  # For query_builder
+```
+
+**SSE events после изменения:**
+```javascript
+{type: "step_start", agent: "parser", message: "Understanding question..."}
+{type: "step_end", agent: "parser", result: {what: "stats", period: {...}}}
+
+{type: "step_start", agent: "composer", message: "Building query..."}
+{type: "step_end", agent: "composer", result: {type: "query", source: "DAILY"}}
+
+{type: "step_start", agent: "responder", message: "Preparing response..."}
+...
+```
+
+---
+
 ### 15. Streaming structured outputs
 
 **Проблема:** Сейчас стриминг не использует `response_json_schema`, поэтому Gemini может отдавать невалидный JSON или прерываться в середине структуры.
@@ -221,8 +280,8 @@ Analyst: [глубокий анализ данных]
 - [ ] **BUG:** Markdown таблицы не рендерятся — нужен markdown renderer
 
 **Требования к бэкенду:**
-- [x] Разделить Barb на Parser (node) и Composer (node)
-- [x] Новый агент Responder между Parser и Composer
+- [x] Разделить Barb на Parser (node) и Composer (node) — см. **#16** ✅
+- [x] Новый агент Responder между Barb и QueryBuilder
 - [x] Responder получает: question, parsed entities, instrument context, events, holidays
 - [x] Parser убрать summary из output
 - [ ] Analyst вызывается только по trigger (кнопка или слово "проанализируй")
@@ -374,3 +433,5 @@ START → parser → composer → responder → [routing by type]
 - 2026-01-18: **#14 Responder-centric flow** — новая архитектура с Responder агентом
 - 2026-01-18: **#14 Backend готов** — Parser→Composer→Responder flow, data_title, offer_analysis, data_summary, 100% tests (36/36)
 - 2026-01-19: **#15 Streaming structured outputs** — добавлена задача для response_json_schema
+- 2026-01-19: **#16 Разделить Barb на Parser + Composer nodes** — задача для отдельного логирования (исправлен ложный checkbox)
+- 2026-01-19: **#16 DONE** — Созданы `parser.py`, `composer_agent.py`, обновлен `graph.py` (START → parser → composer → responder), SSE events для отдельного логирования

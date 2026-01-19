@@ -1,0 +1,295 @@
+{
+  "meta": {
+    "scenario": "greetings",
+    "timestamp": "2026-01-19T12:42:42.371811",
+    "total_items": 5,
+    "successful": 5,
+    "failed": 0,
+    "total_time_ms": 2537,
+    "total_input_tokens": 13701,
+    "total_output_tokens": 195,
+    "total_cost_usd": 0.0014481000000000003
+  },
+  "results": [
+    {
+      "question": "Hello",
+      "success": true,
+      "total_time_ms": 499,
+      "total_input_tokens": 2740,
+      "total_output_tokens": 39,
+      "total_cost_usd": 0.00028960000000000005,
+      "step": {
+        "step": 1,
+        "question": "Hello",
+        "time_ms": 499,
+        "success": true,
+        "parser": {
+          "input": {
+            "question": "Hello",
+            "previous_parsed": null
+          },
+          "output": {
+            "parsed_query": {
+              "what": "greeting",
+              "period": null,
+              "filters": null,
+              "modifiers": null
+            },
+            "raw": {
+              "what": "greeting",
+              "period": null,
+              "filters": null,
+              "modifiers": null,
+              "unclear": []
+            }
+          },
+          "tokens": {
+            "input": 2740,
+            "output": 39,
+            "cached": 0,
+            "cost_usd": 0.00028960000000000005
+          }
+        },
+        "composer": {
+          "type": "greeting",
+          "summary": ""
+        },
+        "validation": {
+          "passed": true,
+          "checks": [
+            {
+              "key": "type",
+              "expected": "greeting",
+              "actual": "greeting",
+              "passed": true
+            }
+          ]
+        }
+      }
+    },
+    {
+      "question": "Hi there",
+      "success": true,
+      "total_time_ms": 433,
+      "total_input_tokens": 2741,
+      "total_output_tokens": 39,
+      "total_cost_usd": 0.00028970000000000005,
+      "step": {
+        "step": 1,
+        "question": "Hi there",
+        "time_ms": 433,
+        "success": true,
+        "parser": {
+          "input": {
+            "question": "Hi there",
+            "previous_parsed": null
+          },
+          "output": {
+            "parsed_query": {
+              "what": "greeting",
+              "period": null,
+              "filters": null,
+              "modifiers": null
+            },
+            "raw": {
+              "what": "greeting",
+              "period": null,
+              "filters": null,
+              "modifiers": null,
+              "unclear": []
+            }
+          },
+          "tokens": {
+            "input": 2741,
+            "output": 39,
+            "cached": 0,
+            "cost_usd": 0.00028970000000000005
+          }
+        },
+        "composer": {
+          "type": "greeting",
+          "summary": ""
+        },
+        "validation": {
+          "passed": true,
+          "checks": [
+            {
+              "key": "type",
+              "expected": "greeting",
+              "actual": "greeting",
+              "passed": true
+            }
+          ]
+        }
+      }
+    },
+    {
+      "question": "Привет",
+      "success": true,
+      "total_time_ms": 580,
+      "total_input_tokens": 2740,
+      "total_output_tokens": 39,
+      "total_cost_usd": 0.00028960000000000005,
+      "step": {
+        "step": 1,
+        "question": "Привет",
+        "time_ms": 580,
+        "success": true,
+        "parser": {
+          "input": {
+            "question": "Привет",
+            "previous_parsed": null
+          },
+          "output": {
+            "parsed_query": {
+              "what": "greeting",
+              "period": null,
+              "filters": null,
+              "modifiers": null
+            },
+            "raw": {
+              "what": "greeting",
+              "period": null,
+              "filters": null,
+              "modifiers": null,
+              "unclear": []
+            }
+          },
+          "tokens": {
+            "input": 2740,
+            "output": 39,
+            "cached": 0,
+            "cost_usd": 0.00028960000000000005
+          }
+        },
+        "composer": {
+          "type": "greeting",
+          "summary": ""
+        },
+        "validation": {
+          "passed": true,
+          "checks": [
+            {
+              "key": "type",
+              "expected": "greeting",
+              "actual": "greeting",
+              "passed": true
+            }
+          ]
+        }
+      }
+    },
+    {
+      "question": "Thanks",
+      "success": true,
+      "total_time_ms": 416,
+      "total_input_tokens": 2740,
+      "total_output_tokens": 39,
+      "total_cost_usd": 0.00028960000000000005,
+      "step": {
+        "step": 1,
+        "question": "Thanks",
+        "time_ms": 416,
+        "success": true,
+        "parser": {
+          "input": {
+            "question": "Thanks",
+            "previous_parsed": null
+          },
+          "output": {
+            "parsed_query": {
+              "what": "greeting",
+              "period": null,
+              "filters": null,
+              "modifiers": null
+            },
+            "raw": {
+              "what": "greeting",
+              "period": null,
+              "filters": null,
+              "modifiers": null,
+              "unclear": []
+            }
+          },
+          "tokens": {
+            "input": 2740,
+            "output": 39,
+            "cached": 0,
+            "cost_usd": 0.00028960000000000005
+          }
+        },
+        "composer": {
+          "type": "greeting",
+          "summary": ""
+        },
+        "validation": {
+          "passed": true,
+          "checks": [
+            {
+              "key": "type",
+              "expected": "greeting",
+              "actual": "greeting",
+              "passed": true
+            }
+          ]
+        }
+      }
+    },
+    {
+      "question": "Спасибо",
+      "success": true,
+      "total_time_ms": 607,
+      "total_input_tokens": 2740,
+      "total_output_tokens": 39,
+      "total_cost_usd": 0.00028960000000000005,
+      "step": {
+        "step": 1,
+        "question": "Спасибо",
+        "time_ms": 607,
+        "success": true,
+        "parser": {
+          "input": {
+            "question": "Спасибо",
+            "previous_parsed": null
+          },
+          "output": {
+            "parsed_query": {
+              "what": "greeting",
+              "period": null,
+              "filters": null,
+              "modifiers": null
+            },
+            "raw": {
+              "what": "greeting",
+              "period": null,
+              "filters": null,
+              "modifiers": null,
+              "unclear": []
+            }
+          },
+          "tokens": {
+            "input": 2740,
+            "output": 39,
+            "cached": 0,
+            "cost_usd": 0.00028960000000000005
+          }
+        },
+        "composer": {
+          "type": "greeting",
+          "summary": ""
+        },
+        "validation": {
+          "passed": true,
+          "checks": [
+            {
+              "key": "type",
+              "expected": "greeting",
+              "actual": "greeting",
+              "passed": true
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

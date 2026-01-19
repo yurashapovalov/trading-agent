@@ -163,11 +163,15 @@ class TradingState(MessagesState, total=False):
     # Use messages[:-1] for chat history
     # Checkpointer manages message persistence automatically
 
-    # Understander output
+    # Parser output
+    parsed_query: object | None   # ParsedQuery from Parser (typed entities)
+    parser_raw_output: dict | None  # Raw LLM output for debugging
+
+    # Composer output
     intent: Intent | None
 
-    # Barb output (direct QuerySpec, avoids dict↔object conversion)
-    query_spec_obj: object | None  # QuerySpec from Barb (None for Understander path)
+    # QuerySpec (direct object, avoids dict↔object conversion)
+    query_spec_obj: object | None  # QuerySpec from Composer
 
     # QueryBuilder output
     sql_query: str | None         # Generated SQL from QueryBuilder (deterministic)
