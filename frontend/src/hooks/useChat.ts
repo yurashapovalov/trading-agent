@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback } from "react"
 import { useAuth } from "@/providers"
-import type { ChatMessage, AgentStep, ToolUsage, Usage, SSEEvent } from "@/types/chat"
+import type { ChatMessage, AgentStep, ToolUsage, Usage, SSEEvent, DataCard } from "@/types/chat"
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
 
@@ -189,6 +189,8 @@ export function useChat({ chatId, onChatCreated, onTitleUpdated }: UseChatOption
         let usageData: Usage | undefined
         let route: string | undefined
         let validationPassed: boolean | undefined
+        let dataCard: DataCard | undefined
+        let offerAnalysis = false
 
         while (true) {
           const { done, value } = await reader.read()
@@ -287,6 +289,25 @@ export function useChat({ chatId, onChatCreated, onTitleUpdated }: UseChatOption
                   if (event.suggestions && event.suggestions.length > 0) {
                     setSuggestions(event.suggestions)
                   }
+                } else if (event.type === "data_title") {
+                  // Save data title for data card
+                  dataCard = { title: event.title, row_count: 0, data: {} }
+                } else if (event.type === "data_ready") {
+                  // Data is ready - save it and clear preview text for summary
+                  dataCard = {
+                    title: dataCard?.title || "",
+                    row_count: event.row_count,
+                    data: event.data,
+                  }
+                  // Clear preview text - summary will replace it
+                  finalText = ""
+                  setStreamingText("")
+                } else if (event.type === "offer_analysis") {
+                  // Large dataset - offer analysis button
+                  offerAnalysis = true
+                  // Clear preview, use offer message as final text
+                  finalText = event.message
+                  setStreamingText(event.message)
                 } else if (event.type === "usage") {
                   usageData = {
                     input_tokens: event.input_tokens,
@@ -315,6 +336,8 @@ export function useChat({ chatId, onChatCreated, onTitleUpdated }: UseChatOption
                       route,
                       validation_passed: validationPassed,
                       usage: usageData,
+                      data_card: dataCard,
+                      offer_analysis: offerAnalysis,
                     },
                   ])
                   setCurrentSteps([])
