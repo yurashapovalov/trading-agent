@@ -716,12 +716,8 @@ class TradingGraph:
                     intent = updates.get("intent") or accumulated_state.get("intent", {})
                     suggestions = intent.get("suggestions") or []
 
-                    # Send data_title if present (for query types)
-                    if data_title:
-                        yield {
-                            "type": "data_title",
-                            "title": data_title
-                        }
+                    # NOTE: data_title is sent via custom event from responder agent
+                    # (during streaming), so we don't emit it here to avoid duplicates
 
                     # Send suggestions for clarification
                     if suggestions:
