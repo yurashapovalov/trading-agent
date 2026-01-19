@@ -34,10 +34,16 @@ export function ContextPanel({
   isMobile,
   data,
 }: ContextPanelProps) {
+  // Debug: log incoming data structure
+  console.log("[ContextPanel] data:", data)
+  console.log("[ContextPanel] data.data:", data?.data)
+
   // Extract rows and columns from data
   const dataObj = data?.data as { rows?: Record<string, unknown>[]; columns?: string[] } | undefined
   const rows = dataObj?.rows || []
   const columns = dataObj?.columns || (rows.length > 0 ? Object.keys(rows[0]) : [])
+
+  console.log("[ContextPanel] rows:", rows.length, "columns:", columns)
 
   return (
     <div
