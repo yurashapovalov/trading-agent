@@ -140,12 +140,14 @@ class Parser:
         start = datetime.now()
 
         # Call LLM with thinking enabled for better reasoning
+        # Use response_schema to enforce valid JSON structure
         response = self.client.models.generate_content(
             model=self.model,
             contents=full_prompt,
             config=types.GenerateContentConfig(
                 temperature=0,
                 response_mime_type="application/json",
+                response_schema=ParsedQuery,  # Enforce JSON schema
                 thinking_config=types.ThinkingConfig(thinking_budget=512),
             ),
         )

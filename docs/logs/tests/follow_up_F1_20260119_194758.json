@@ -1,14 +1,14 @@
 {
   "meta": {
     "scenario": "follow_up",
-    "timestamp": "2026-01-19T18:01:35.874207",
+    "timestamp": "2026-01-19T19:47:58.688806",
     "total_items": 1,
     "successful": 1,
     "failed": 0,
-    "total_time_ms": 3232,
-    "total_input_tokens": 6348,
-    "total_output_tokens": 163,
-    "total_cost_usd": 0.00020089,
+    "total_time_ms": 4634,
+    "total_input_tokens": 10677,
+    "total_output_tokens": 174,
+    "total_cost_usd": 0.0012045,
     "filter": "F1"
   },
   "results": [
@@ -16,10 +16,10 @@
       "name": "F1_find_most_volatile_implicit",
       "description": "Find most volatile from hourly data — implicit grouping from context",
       "success": true,
-      "total_time_ms": 3232,
-      "total_input_tokens": 6348,
-      "total_output_tokens": 163,
-      "total_cost_usd": 0.00020089,
+      "total_time_ms": 4634,
+      "total_input_tokens": 10677,
+      "total_output_tokens": 174,
+      "total_cost_usd": 0.0012045,
       "conversation": [
         {
           "role": "user",
@@ -27,8 +27,8 @@
         },
         {
           "role": "assistant",
-          "content": "Статистика волатильности NQ по часам готова (24 строки). Нужен детальный анализ этих данных?",
-          "data_title": "Статистика волатильности NQ по часам"
+          "content": "Данные по волатильности NQ сгруппированные по часам готовы (24 строки). Нужен детальный анализ этих результатов?",
+          "data_title": "Волатильность NQ по часам"
         },
         {
           "role": "user",
@@ -36,28 +36,33 @@
         },
         {
           "role": "assistant",
-          "content": "В 10:00 по времени ET средний диапазон торгов NQ составлял 6.6 пунктов с нулевым средним изменением и объемом торгов около 298 миллионов контрактов за выбранный период."
+          "content": "Самый волатильный час — 10:00 ET со средней волатильностью 0.0654. Это часто связано с началом активной торговли в США."
+        },
+        {
+          "role": "user",
+          "content": "спасибо"
+        },
+        {
+          "role": "assistant",
+          "content": "Пожалуйста! Если у вас возникнут еще вопросы по данным NQ, обращайтесь."
         }
       ],
       "steps": [
         {
           "step": 1,
           "question": "волатильность по часам",
-          "time_ms": 2008,
+          "time_ms": 1872,
           "success": true,
           "parser": {
             "input": {
               "question": "волатильность по часам",
+              "chat_history": "",
               "previous_parsed": null
             },
             "output": {
               "parsed_query": {
-                "what": "volatility statistics",
-                "period": {
-                  "raw": null,
-                  "start": null,
-                  "end": null
-                },
+                "what": "volatility",
+                "period": null,
                 "filters": null,
                 "modifiers": {
                   "group_by": "hour",
@@ -67,29 +72,22 @@
                 }
               },
               "raw": {
-                "what": "volatility statistics",
-                "period": {
-                  "raw": null,
-                  "start": null,
-                  "end": null,
-                  "dates": null
-                },
+                "intent": "data",
+                "what": "volatility",
+                "period": {},
                 "filters": {},
                 "modifiers": {
-                  "compare": null,
-                  "top_n": null,
-                  "group_by": "hour",
-                  "find": null
+                  "group_by": "hour"
                 },
                 "unclear": []
               }
             },
             "tokens": {
-              "input": 3141,
-              "output": 103,
-              "thinking": 50,
-              "cached": 2979,
-              "cost_usd": 0.00010719
+              "input": 3467,
+              "output": 58,
+              "thinking": 43,
+              "cached": 0,
+              "cost_usd": 0.00038710000000000003
             }
           },
           "composer": {
@@ -187,8 +185,8 @@
             ]
           },
           "responder": {
-            "text": "Статистика волатильности NQ по часам готова (24 строки). Нужен детальный анализ этих данных?",
-            "title": "Статистика волатильности NQ по часам"
+            "text": "Данные по волатильности NQ сгруппированные по часам готовы (24 строки). Нужен детальный анализ этих результатов?",
+            "title": "Волатильность NQ по часам"
           },
           "validation": {
             "passed": true,
@@ -205,18 +203,15 @@
         {
           "step": 2,
           "question": "какой самый волатильный",
-          "time_ms": 1223,
+          "time_ms": 1437,
           "success": true,
           "parser": {
             "input": {
               "question": "какой самый волатильный",
+              "chat_history": "User: волатильность по часам\nAssistant: Данные по волатильности NQ сгруппированные по часам готовы (24 строки). Нужен детальный анализ этих результатов?\n",
               "previous_parsed": {
-                "what": "volatility statistics",
-                "period": {
-                  "raw": null,
-                  "start": null,
-                  "end": null
-                },
+                "what": "volatility",
+                "period": null,
                 "filters": null,
                 "modifiers": {
                   "group_by": "hour",
@@ -228,7 +223,7 @@
             },
             "output": {
               "parsed_query": {
-                "what": "most volatile",
+                "what": "most volatile hour",
                 "period": null,
                 "filters": null,
                 "modifiers": {
@@ -239,9 +234,10 @@
                 }
               },
               "raw": {
-                "what": "most volatile",
-                "period": null,
-                "filters": null,
+                "intent": "data",
+                "what": "most volatile hour",
+                "period": {},
+                "filters": {},
                 "modifiers": {
                   "group_by": "hour",
                   "find": "max"
@@ -250,11 +246,11 @@
               }
             },
             "tokens": {
-              "input": 3207,
-              "output": 60,
-              "thinking": 43,
-              "cached": 2980,
-              "cost_usd": 9.37e-05
+              "input": 3577,
+              "output": 67,
+              "thinking": 47,
+              "cached": 0,
+              "cost_usd": 0.00040330000000000005
             }
           },
           "composer": {
@@ -291,7 +287,7 @@
             ]
           },
           "responder": {
-            "text": "В 10:00 по времени ET средний диапазон торгов NQ составлял 6.6 пунктов с нулевым средним изменением и объемом торгов около 298 миллионов контрактов за выбранный период.",
+            "text": "Самый волатильный час — 10:00 ET со средней волатильностью 0.0654. Это часто связано с началом активной торговли в США.",
             "title": null
           },
           "validation": {
@@ -307,6 +303,71 @@
                 "key": "top_n",
                 "expected": 1,
                 "actual": 1,
+                "passed": true
+              }
+            ]
+          }
+        },
+        {
+          "step": 3,
+          "question": "спасибо",
+          "time_ms": 1325,
+          "success": true,
+          "parser": {
+            "input": {
+              "question": "спасибо",
+              "chat_history": "User: волатильность по часам\nAssistant: Данные по волатильности NQ сгруппированные по часам готовы (24 строки). Нужен детальный анализ этих результатов?\nUser: какой самый волатильный\nAssistant: Самый волатильный час — 10:00 ET со средней волатильностью 0.0654. Это часто связано с началом активной торговли в США.\n",
+              "previous_parsed": {
+                "what": "most volatile hour",
+                "period": null,
+                "filters": null,
+                "modifiers": {
+                  "group_by": "hour",
+                  "top_n": null,
+                  "compare": null,
+                  "find": "max"
+                }
+              }
+            },
+            "output": {
+              "parsed_query": {
+                "what": "thanks",
+                "period": null,
+                "filters": null,
+                "modifiers": null
+              },
+              "raw": {
+                "intent": "chitchat",
+                "what": "thanks",
+                "period": null,
+                "filters": null,
+                "modifiers": null,
+                "unclear": []
+              }
+            },
+            "tokens": {
+              "input": 3633,
+              "output": 49,
+              "thinking": 78,
+              "cached": 0,
+              "cost_usd": 0.00041410000000000004
+            }
+          },
+          "composer": {
+            "type": "chitchat",
+            "summary": ""
+          },
+          "responder": {
+            "text": "Пожалуйста! Если у вас возникнут еще вопросы по данным NQ, обращайтесь.",
+            "title": null
+          },
+          "validation": {
+            "passed": true,
+            "checks": [
+              {
+                "key": "type",
+                "expected": "greeting",
+                "actual": "greeting",
                 "passed": true
               }
             ]

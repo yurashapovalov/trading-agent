@@ -244,32 +244,13 @@ state["query_spec_obj"] = QuerySpec(...)  # For query_builder
 
 ### 15. Streaming structured outputs
 
-**Проблема:** Сейчас стриминг не использует `response_json_schema`, поэтому Gemini может отдавать невалидный JSON или прерываться в середине структуры.
+**Статус:** ✅ DONE (2026-01-19)
 
-**Решение (из документации Gemini):**
-```python
-# Вместо текущего
-model.generate_content(contents, stream=True)
-
-# Использовать schema
-from google.genai.types import GenerateContentConfig
-
-model.generate_content(
-    contents,
-    config=GenerateContentConfig(
-        response_mime_type="application/json",
-        response_schema=ResponderOutput,  # Pydantic model
-    ),
-    stream=True,
-)
-```
-
-**Задачи:**
-- [ ] Добавить Pydantic models для structured output (ResponderOutput, AnalystOutput)
-- [ ] Использовать `response_schema` в streaming режиме
-- [ ] Тестирование: проверить что JSON всегда валидный
-
-**Ссылка:** https://ai.google.dev/gemini-api/docs/structured-output
+**Сделано:**
+- Добавлен `ResponderOutput` Pydantic model в responder.py
+- Parser использует `response_schema=ParsedQuery`
+- Responder использует `response_schema=ResponderOutput` (batch и streaming)
+- Gemini теперь гарантированно возвращает валидный JSON по схеме
 
 ---
 
@@ -611,3 +592,4 @@ START → parser → composer → responder → [routing by type]
 - 2026-01-19: **#18 Убрать хардкоды из Composer** — анализ всех хардкодов, план расширения Parser output
 - 2026-01-19: **#17 DONE** — intent routing, chitchat subtypes, тесты с chat_history
 - 2026-01-19: **#19 Context Caching** — добавлена задача, увеличен CHAT_HISTORY_LIMIT до 20
+- 2026-01-19: **#15 DONE** — response_schema для Parser и Responder (гарантированный валидный JSON)

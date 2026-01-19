@@ -14,12 +14,27 @@ Generates data card title for query results.
 import json
 from google import genai
 from google.genai import types
+from pydantic import BaseModel, Field
 
 import config
 from agent.state import AgentState, UsageStats, get_current_question
 from agent.prompts.responder import get_responder_prompt
 from agent.pricing import calculate_cost
 from langchain_core.messages import AIMessage
+
+
+class ResponderOutput(BaseModel):
+    """Structured output schema for Responder.
+
+    Gemini will always return JSON matching this schema.
+    """
+    title: str | None = Field(
+        default=None,
+        description="Short title for data card (3-6 words). Only for offer_analysis type."
+    )
+    response: str = Field(
+        description="Response text to show the user."
+    )
 
 # LangGraph streaming support
 try:
@@ -163,7 +178,7 @@ class Responder:
         state: AgentState,
         result_type: str,
     ) -> dict:
-        """Generate with real-time streaming."""
+        """Generate with real-time streaming and structured output schema."""
         full_text = ""
         total_input = 0
         total_output = 0
@@ -175,6 +190,8 @@ class Responder:
                 config=types.GenerateContentConfig(
                     system_instruction=system_prompt,
                     temperature=1.0,
+                    response_mime_type="application/json",
+                    response_schema=ResponderOutput,  # Enforce JSON schema
                 )
             ):
                 if chunk.usage_metadata:
@@ -221,7 +238,7 @@ class Responder:
         state: AgentState,
         result_type: str,
     ) -> dict:
-        """Generate in batch mode."""
+        """Generate in batch mode with structured output schema."""
         try:
             response_obj = self.client.models.generate_content(
                 model=self.model,
@@ -230,6 +247,7 @@ class Responder:
                     system_instruction=system_prompt,
                     temperature=1.0,
                     response_mime_type="application/json",
+                    response_schema=ResponderOutput,  # Enforce JSON schema
                 )
             )
 
