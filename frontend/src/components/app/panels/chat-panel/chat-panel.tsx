@@ -219,14 +219,7 @@ export function ChatPanel({
 
                   {/* Data card (between preview and summary) */}
                   {message.role === "assistant" && message.data_card && (
-                    <DataCard
-                      data={message.data_card}
-                      showAnalyzeButton={message.offer_analysis}
-                      onAnalyze={() => {
-                        // TODO: trigger analysis
-                        console.log("Analyze clicked")
-                      }}
-                    />
+                    <DataCard data={message.data_card} />
                   )}
 
                   {/* Main content (summary or full response) */}
