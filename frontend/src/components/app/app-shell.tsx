@@ -10,10 +10,11 @@
 import { useState, useCallback, useMemo } from "react"
 import { useChatsContext, useAuth } from "@/providers"
 import { useChat } from "@/hooks/useChat"
-import { PanelsProvider } from "@/components/app/panels/panels-provider"
+import { PanelsProvider, usePanels } from "@/components/app/panels/panels-provider"
 import { SidebarContainer } from "@/components/app/panels/sidebar/sidebar.container"
 import { ChatPanelContainer } from "@/components/app/panels/chat-panel/chat-panel.container"
 import { ContextPanelContainer } from "@/components/app/panels/context-panel/context-panel.container"
+import type { DataCard } from "@/types/chat"
 
 export function AppShell() {
   return (
@@ -25,6 +26,7 @@ export function AppShell() {
 
 function AppShellContent() {
   const { signOut } = useAuth()
+  const { setRightOpen } = usePanels()
   const {
     chats,
     currentChatId,
@@ -35,11 +37,17 @@ function AppShellContent() {
     updateChatTitle,
   } = useChatsContext()
   const [inputText, setInputText] = useState("")
+  const [contextData, setContextData] = useState<DataCard | null>(null)
 
   const handleChatCreated = useCallback((chatId: string) => {
     selectChat(chatId)
     refreshChats()
   }, [selectChat, refreshChats])
+
+  const handleOpenContextPanel = useCallback((data: DataCard) => {
+    setContextData(data)
+    setRightOpen(true)
+  }, [setRightOpen])
 
   const {
     messages,
@@ -122,8 +130,9 @@ function AppShellContent() {
         onStop={stopGeneration}
         onSuggestionClick={handleSuggestionClick}
         onFeedback={updateFeedback}
+        onOpenContextPanel={handleOpenContextPanel}
       />
-      <ContextPanelContainer />
+      <ContextPanelContainer data={contextData} />
     </div>
   )
 }

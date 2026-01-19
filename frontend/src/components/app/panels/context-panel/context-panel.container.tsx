@@ -15,8 +15,13 @@ import { useEffect } from "react"
 import { usePanels, COOKIE_RIGHT_PERCENT } from "../panels-provider"
 import { usePercentResize } from "@/hooks/use-percent-resize"
 import { ContextPanel } from "./context-panel"
+import type { DataCard } from "@/types/chat"
 
-export function ContextPanelContainer() {
+type ContextPanelContainerProps = {
+  data: DataCard | null
+}
+
+export function ContextPanelContainer({ data }: ContextPanelContainerProps) {
   const {
     rightOpen,
     setRightOpen,
@@ -54,6 +59,7 @@ export function ContextPanelContainer() {
       onResizeMouseDown={isMobile ? undefined : handleMouseDown}
       onClose={() => setRightOpen(false)}
       isMobile={isMobile}
+      data={data}
     />
   )
 }

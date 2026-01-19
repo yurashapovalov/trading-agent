@@ -8,7 +8,7 @@
  */
 
 import { useState, useRef, useEffect } from "react"
-import { PanelLeft, PanelRight, ThumbsUpIcon, ThumbsDownIcon } from "lucide-react"
+import { PanelLeft, ThumbsUpIcon, ThumbsDownIcon } from "lucide-react"
 import {
   PageHeader,
   PageHeaderLeft,
@@ -74,10 +74,9 @@ type ChatPanelProps = {
   onFeedback: (requestId: string, type: "positive" | "negative", text: string) => void
   // UI state
   sidebarOpen: boolean
-  contextPanelOpen: boolean
   // UI callbacks
   onOpenSidebar: () => void
-  onOpenContextPanel: () => void
+  onOpenContextPanel: (data: DataCardType) => void
 }
 
 export function ChatPanel({
@@ -97,7 +96,6 @@ export function ChatPanel({
   onSuggestionClick,
   onFeedback,
   sidebarOpen,
-  contextPanelOpen,
   onOpenSidebar,
   onOpenContextPanel,
 }: ChatPanelProps) {
@@ -153,16 +151,7 @@ export function ChatPanel({
           <span className="text-sm font-medium">{title ?? "New Chat"}</span>
         </PageHeaderLeft>
         <PageHeaderRight>
-          {!contextPanelOpen && (
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              onClick={onOpenContextPanel}
-              aria-label="Open context panel"
-            >
-              <PanelRight />
-            </Button>
-          )}
+          {/* Context panel opens via DataCard click */}
         </PageHeaderRight>
       </PageHeader>
 
@@ -223,7 +212,7 @@ export function ChatPanel({
 
                   {/* Data card (between preview and summary) */}
                   {message.role === "assistant" && message.data_card && (
-                    <DataCard data={message.data_card} onClick={onOpenContextPanel} />
+                    <DataCard data={message.data_card} onClick={() => onOpenContextPanel(message.data_card!)} />
                   )}
 
                   {/* Main content (summary or full response) */}
@@ -290,7 +279,7 @@ export function ChatPanel({
 
                 {/* Data card (when data arrives) */}
                 {streamingDataCard && (
-                  <DataCard data={streamingDataCard} onClick={onOpenContextPanel} />
+                  <DataCard data={streamingDataCard} onClick={() => onOpenContextPanel(streamingDataCard)} />
                 )}
 
                 {/* Summary text (after data) */}

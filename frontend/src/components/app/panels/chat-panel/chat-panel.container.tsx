@@ -30,10 +30,11 @@ type ChatPanelContainerProps = {
   onStop: () => void
   onSuggestionClick: (suggestion: string) => void
   onFeedback: (requestId: string, type: "positive" | "negative", text: string) => void
+  onOpenContextPanel: (data: DataCard) => void
 }
 
 export function ChatPanelContainer(props: ChatPanelContainerProps) {
-  const { showMainContent, leftOpen, rightOpen, setLeftOpen, setRightOpen } = usePanels()
+  const { showMainContent, leftOpen, setLeftOpen } = usePanels()
 
   if (!showMainContent) return null
 
@@ -41,9 +42,7 @@ export function ChatPanelContainer(props: ChatPanelContainerProps) {
     <ChatPanel
       {...props}
       sidebarOpen={leftOpen}
-      contextPanelOpen={rightOpen}
       onOpenSidebar={() => setLeftOpen(true)}
-      onOpenContextPanel={() => setRightOpen(true)}
     />
   )
 }
