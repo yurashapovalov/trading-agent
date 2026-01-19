@@ -363,11 +363,14 @@ export function useChat({ chatId, onChatCreated, onTitleUpdated }: UseChatOption
                   setStreamingDataCard({ title: event.title, row_count: 0, data: {} })
                 } else if (event.type === "data_ready") {
                   // Data is ready - switch to summary mode
+                  console.log("[useChat] data_ready event:", event)
+                  console.log("[useChat] event.data rows:", (event.data as any)?.rows?.length)
                   dataCard = {
                     title: dataCard?.title || "",
                     row_count: event.row_count,
                     data: event.data,
                   }
+                  console.log("[useChat] dataCard after data_ready:", dataCard)
                   setStreamingDataCard(dataCard)
                   isAfterDataReady = true
                 } else if (event.type === "offer_analysis") {
@@ -399,6 +402,7 @@ export function useChat({ chatId, onChatCreated, onTitleUpdated }: UseChatOption
                   const content = summaryText || previewText
                   const preview = dataCard ? previewText : undefined // Only include preview if there's a data card
 
+                  console.log("[useChat] done - saving dataCard:", dataCard)
                   setMessages((prev) => [
                     ...prev,
                     {
