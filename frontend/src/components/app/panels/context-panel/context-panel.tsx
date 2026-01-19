@@ -4,27 +4,29 @@
  * ContextPanel — presentational component.
  *
  * Receives all data via props. No logic, no context access.
- * Container handles resize, AppShell provides data.
+ * Container handles resize and data loading.
  */
 
-import { X, TableIcon } from "lucide-react"
+import { X, TableIcon, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   PageHeader,
   PageHeaderLeft,
   PageHeaderRight,
 } from "@/components/app/page-header/page-header"
-import type { DataCard } from "@/types/chat"
 
 type ContextPanelProps = {
   /** Width in percent (0-100) */
   widthPercent: number
   onResizeMouseDown?: (e: React.MouseEvent) => void
-  // Actions
   onClose: () => void
   isMobile?: boolean
   // Data
-  data: DataCard | null
+  title: string
+  rowCount: number
+  rows: Record<string, unknown>[]
+  columns: string[]
+  isLoading: boolean
 }
 
 export function ContextPanel({
@@ -32,18 +34,12 @@ export function ContextPanel({
   onResizeMouseDown,
   onClose,
   isMobile,
-  data,
+  title,
+  rowCount,
+  rows,
+  columns,
+  isLoading,
 }: ContextPanelProps) {
-  // Debug: log incoming data structure
-  console.log("[ContextPanel] data:", data)
-  console.log("[ContextPanel] data.data:", data?.data)
-
-  // Extract rows and columns from data
-  const dataObj = data?.data as { rows?: Record<string, unknown>[]; columns?: string[] } | undefined
-  const rows = dataObj?.rows || []
-  const columns = dataObj?.columns || (rows.length > 0 ? Object.keys(rows[0]) : [])
-
-  console.log("[ContextPanel] rows:", rows.length, "columns:", columns)
 
   return (
     <div
@@ -62,10 +58,10 @@ export function ContextPanel({
       <PageHeader>
         <PageHeaderLeft>
           <TableIcon className="size-4 text-muted-foreground" />
-          <span className="text-sm font-semibold">{data?.title || "Data"}</span>
+          <span className="text-sm font-semibold">{title}</span>
         </PageHeaderLeft>
         <PageHeaderRight>
-          <span className="text-xs text-muted-foreground">{data?.row_count || 0} rows</span>
+          <span className="text-xs text-muted-foreground">{rowCount} rows</span>
           <Button variant="ghost" size="icon-sm" onClick={onClose}>
             <X />
           </Button>
@@ -74,7 +70,11 @@ export function ContextPanel({
 
       {/* Content */}
       <div className="flex-1 overflow-auto">
-        {rows.length > 0 ? (
+        {isLoading ? (
+          <div className="flex items-center justify-center h-full">
+            <Loader2 className="size-6 animate-spin text-muted-foreground" />
+          </div>
+        ) : rows.length > 0 ? (
           <table className="w-full text-sm">
             <thead className="sticky top-0 bg-[var(--bg-primary)]">
               <tr className="border-b">

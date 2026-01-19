@@ -339,6 +339,52 @@ async def get_chat_messages(
         return []
 
 
+@app.get("/chat/data/{request_id}")
+async def get_request_data(
+    request_id: str,
+    user_id: str = Depends(require_auth),
+):
+    """Get full data for a specific request from data_fetcher trace."""
+    if not supabase:
+        raise HTTPException(status_code=500, detail="Database not available")
+
+    try:
+        # Verify request belongs to user
+        log_result = supabase.table("chat_logs") \
+            .select("id") \
+            .eq("request_id", request_id) \
+            .eq("user_id", user_id) \
+            .execute()
+
+        if not log_result.data:
+            raise HTTPException(status_code=404, detail="Request not found")
+
+        # Get data_fetcher trace with full_data
+        trace_result = supabase.table("request_traces") \
+            .select("output_data") \
+            .eq("request_id", request_id) \
+            .eq("agent_name", "data_fetcher") \
+            .execute()
+
+        if not trace_result.data:
+            return {"rows": [], "columns": [], "row_count": 0}
+
+        output_data = trace_result.data[0].get("output_data") or {}
+        full_data = output_data.get("full_data") or {}
+
+        return {
+            "rows": full_data.get("rows", []),
+            "columns": full_data.get("columns", []),
+            "row_count": full_data.get("row_count", 0),
+            "title": full_data.get("title", ""),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Failed to get request data: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 class FeedbackUpdate(BaseModel):
     positive_feedback: Optional[str] = None
     negative_feedback: Optional[str] = None

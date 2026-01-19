@@ -53,7 +53,7 @@ export type ChatMessage = {
 export type DataCard = {
   title: string
   row_count: number
-  data: Record<string, unknown>
+  request_id?: string  // For loading full data from API
 }
 
 // SSE event types from backend

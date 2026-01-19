@@ -74,12 +74,13 @@ function tracesToAgentSteps(traces: any[]): AgentStep[] {
 }
 
 // Extract data_card and preview from traces for history loading
-function extractDataFromTraces(traces: any[]): { dataCard?: DataCard; preview?: string } {
+function extractDataFromTraces(traces: any[], requestId?: string): { dataCard?: DataCard; preview?: string } {
   if (!traces || traces.length === 0) return {}
 
   let dataCard: DataCard | undefined
   let preview: string | undefined
   let dataTitle: string | undefined
+  let rowCount = 0
 
   for (const trace of traces) {
     const outputData =
@@ -98,20 +99,17 @@ function extractDataFromTraces(traces: any[]): { dataCard?: DataCard; preview?: 
     // Find data_fetcher trace with full_data
     if (trace.agent_name === "data_fetcher" && outputData.full_data) {
       const fullData = outputData.full_data
-      dataCard = {
-        title: fullData.title || dataTitle || "",
-        row_count: fullData.row_count || 0,
-        data: fullData,
-      }
+      dataTitle = fullData.title || dataTitle
+      rowCount = fullData.row_count || 0
     }
   }
 
-  // If we have data_title but no data_card yet, create minimal card
-  if (dataTitle && !dataCard) {
+  // Create data card if we have title (data will be loaded from API on click)
+  if (dataTitle) {
     dataCard = {
       title: dataTitle,
-      row_count: 0,
-      data: {},
+      row_count: rowCount,
+      request_id: requestId,
     }
   }
 
@@ -164,7 +162,7 @@ export function useChat({ chatId, onChatCreated, onTitleUpdated }: UseChatOption
           const loadedMessages: ChatMessage[] = messages
             .map((item: any) => {
               const traces = item.traces || []
-              const { dataCard, preview } = extractDataFromTraces(traces)
+              const { dataCard, preview } = extractDataFromTraces(traces, item.request_id)
 
               return [
                 { role: "user" as const, content: item.question },
@@ -359,18 +357,14 @@ export function useChat({ chatId, onChatCreated, onTitleUpdated }: UseChatOption
                   }
                 } else if (event.type === "data_title") {
                   // Save data title for data card
-                  dataCard = { title: event.title, row_count: 0, data: {} }
-                  setStreamingDataCard({ title: event.title, row_count: 0, data: {} })
+                  dataCard = { title: event.title, row_count: 0 }
+                  setStreamingDataCard({ title: event.title, row_count: 0 })
                 } else if (event.type === "data_ready") {
                   // Data is ready - switch to summary mode
-                  console.log("[useChat] data_ready event:", event)
-                  console.log("[useChat] event.data rows:", (event.data as any)?.rows?.length)
                   dataCard = {
                     title: dataCard?.title || "",
                     row_count: event.row_count,
-                    data: event.data,
                   }
-                  console.log("[useChat] dataCard after data_ready:", dataCard)
                   setStreamingDataCard(dataCard)
                   isAfterDataReady = true
                 } else if (event.type === "offer_analysis") {
@@ -402,7 +396,11 @@ export function useChat({ chatId, onChatCreated, onTitleUpdated }: UseChatOption
                   const content = summaryText || previewText
                   const preview = dataCard ? previewText : undefined // Only include preview if there's a data card
 
-                  console.log("[useChat] done - saving dataCard:", dataCard)
+                  // Add request_id to dataCard for API loading
+                  const finalDataCard = dataCard
+                    ? { ...dataCard, request_id: event.request_id }
+                    : undefined
+
                   setMessages((prev) => [
                     ...prev,
                     {
@@ -414,7 +412,7 @@ export function useChat({ chatId, onChatCreated, onTitleUpdated }: UseChatOption
                       route,
                       validation_passed: validationPassed,
                       usage: usageData,
-                      data_card: dataCard,
+                      data_card: finalDataCard,
                       offer_analysis: offerAnalysis,
                     },
                   ])
