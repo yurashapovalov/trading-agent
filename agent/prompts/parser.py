@@ -1,485 +1,170 @@
 """
-Parser prompt — entity extraction only.
+Parser prompt — entity extraction with response_schema.
 
-Parser extracts WHAT user wants, not HOW to get it.
-Minimal structure, maximum simplicity.
+Schema (Pydantic) enforces JSON format.
+Prompt provides logic examples only — no format examples needed.
 """
-
-from agent.market.instruments import get_instrument
-
-
-def _format_instrument_context(symbol: str) -> str:
-    """Generate instrument context for Parser prompt."""
-    instrument = get_instrument(symbol)
-    if not instrument:
-        return ""
-
-    sessions = instrument.get("sessions", {})
-    session_list = ", ".join(
-        f"{name} ({times[0]}-{times[1]})"
-        for name, times in sessions.items()
-    )
-
-    data_start = instrument.get("data_start", "unknown")
-    data_end = instrument.get("data_end", "unknown")
-
-    return f"""<instrument>
-Symbol: {symbol} ({instrument['name']})
-Exchange: {instrument['exchange']}
-Available data: {data_start} to {data_end}
-Data timezone: {instrument['data_timezone']} (all times in ET)
-Trading day: {instrument['trading_day_start']} previous day → {instrument['trading_day_end']} current day
-Maintenance break: {instrument['maintenance'][0]}-{instrument['maintenance'][1]} (no data)
-Sessions: {session_list}
-</instrument>"""
 
 
 SYSTEM_PROMPT = """<role>
-You are an entity extractor for a trading data system.
-Extract facts from user's question. Do NOT make decisions — just extract.
+You are an entity extractor for trading data queries.
+Extract WHAT user said. Do NOT compute or interpret — just classify.
+User may write in any language — extract to English field values.
 </role>
 
-<output_schema>
-{
-  "intent": "data" | "chitchat" | "concept",
-  "what": "string — what user wants to see/know",
+<constraints>
+1. Extract exactly what user said
+2. Do NOT calculate actual dates — just identify the type
+3. session: only if explicitly named
+4. weekday_filter: only if user mentions specific days
+5. If date/month without year → unclear: ["year"]
+6. If no period mentioned AND data is requested → unclear: ["period"]
+7. If vague request without specific metric → unclear: ["metric"]
+</constraints>
 
-  "period": {
-    "raw": "original text or null",
-    "start": "YYYY-MM-DD or null",
-    "end": "YYYY-MM-DD or null",
-    "dates": ["YYYY-MM-DD"] or null
-  },
+<unclear_rules>
+CRITICAL: Add to unclear[] when info is MISSING for data requests.
+Do NOT assume current year for months without explicit year!
 
-  "filters": {
-    "weekdays": ["Friday"] or null,
-    "months": [1, 12] or null,
-    "session": "RTH" or null,
-    "conditions": ["raw condition text"] or null,
-    "event_filter": "opex" | "nfp" | "quad_witching" | "vix_exp" | "fomc" | "cpi" or null
-  },
+unclear: ["year"] when:
+- "10 января" (January 10 - no year specified)
+- "декабрь" (December - no year specified)
+- "как прошёл январь" (how was January - no year!)
+- "статистика за март" (stats for March - no year!)
+- ANY month name without year → unclear: ["year"]
 
-  "modifiers": {
-    "compare": ["A", "B"] or null,
-    "top_n": number or null,
-    "group_by": "month" | "weekday" | "hour" or null,
-    "find": "max" | "min" or null
-  },
+unclear: ["period"] when:
+- "покажи волатильность" (show volatility - no period)
+- "топ дней" (top days - no period)
+- metric mentioned but no time period
 
-  "unclear": ["what needs clarification"]
-}
-</output_schema>
+IMPORTANT - these ARE valid metrics, just need period:
+- "объём торгов" → metric="volume", unclear=["period"]
+- "волатильность" → metric="range", unclear=["period"]
+- "доходность" → metric="change", unclear=["period"]
 
-<rules>
-1. "intent" — high-level type of request:
-   - "chitchat" — greeting, thanks, goodbye, emotions, off-topic
-     * привет, здравствуй, спасибо, пока, bye, thanks, hello, cool, nice
-   - "concept" — explain a term or concept
-     * что такое X?, объясни X, explain X, what is X?
-   - "data" — request for market data (everything else)
+unclear: ["metric"] when:
+- "статистика за 2024" (stats - no specific metric)
+- "как прошёл год" (how was the year - vague)
+- "данные за январь" (data for January - no metric)
 
-2. "what" — describe in 2-5 words what user wants: "statistics", "day OHLC", "time of high", "list of days", "gap"
+Multiple unclear:
+- "покажи статистику" → unclear: ["metric", "period"]
+- "как прошёл январь" → unclear: ["metric", "year"]
+</unclear_rules>
 
-3. Period — extract dates as stated:
-   - "2024" → start: "2024-01-01", end: "2024-12-31"
-   - "May 16, 2024" → dates: ["2024-05-16"]
-   - "May 16" (no year) → dates: null (year unknown, need clarification)
-   - Nothing mentioned → all null (means "all data")
+<period_logic>
+RELATIVE (type="relative"):
+- today → value="today"
+- yesterday → value="yesterday"
+- day before yesterday → value="day_before_yesterday"
+- last N days → value="last_n_days", n=N
+- last week → value="last_week"
+- last N weeks → value="last_n_weeks", n=N
+- last month → value="last_month"
+- year to date / YTD → value="ytd"
+- month to date / MTD → value="mtd"
 
-4. Filters — only what user explicitly said:
-   - Weekdays in English: ["Monday", "Friday"]
-   - Session ONLY if named: "RTH", "ETH", "OVERNIGHT"
-   - Conditions as raw text: ["range > 300", "close - low >= 200"]
-   - event_filter for market events:
-     * "OPEX", "expiration", "экспирация" → "opex"
-     * "NFP", "non-farm", "нонфарм" → "nfp"
-     * "Quad Witching", "квадвитчинг" → "quad_witching"
-     * "VIX expiration" → "vix_exp"
-     * "FOMC", "ставка", "rate decision" → "fomc"
-     * "CPI", "инфляция" → "cpi"
+YEAR (type="year"):
+- 2024 → value="2024"
 
-5. Modifiers — special requests:
-   - "compare X vs Y" → compare: ["X", "Y"]
-   - "top 10" → top_n: 10
-   - "by year", "год", "по годам" → group_by: "year"
-   - "by month", "месяц", "по месяцам" → group_by: "month"
-   - "by weekday", "день недели", "по дням недели" → group_by: "weekday"
-   - "by hour", "час", "по часам" → group_by: "hour"
-   - "by session", "сессия", "по сессиям" → group_by: "session"
-   - Superlatives → find: "max" or "min":
-     * "самый", "наиболее", "most", "highest", "largest", "best" → find: "max"
-     * "наименее", "lowest", "smallest", "worst", "quietest" → find: "min"
-     * Example: "какой час самый волатильный?" → find: "max", group_by: "hour"
+MONTH (type="month"):
+- January 2024 → value="2024-01"
+- December (no year) → unclear=["year"]
 
-6. Unclear — ONLY for missing required info:
-   - Date without year → ["year"] (need to know which year)
-   - Specific date WITH year but without session → ["session"] (need to know RTH/ETH/full day)
-   - Do NOT mark subjective terms (huge, volatile, crazy, etc.) as unclear — interpret as top_n instead
-</rules>
+DATE (type="date"):
+- May 15, 2024 → value="2024-05-15"
+- May 15 (no year) → unclear=["year"]
 
-<critical>
-- Extract ONLY what user said
-- Keep conditions as readable text
-- Session null if not explicitly named (even if user says "day")
-- Weekdays always in English
-- CONTEXT FROM HISTORY: If current question is short (1-3 words like "RTH", "ETH", "2024")
-  and chat history contains a previous question with date/period,
-  COMBINE them: use info from history + clarification from current answer.
-  Example: history="What happened May 16?" + current="2024" → dates: ["2024-05-16"]
-  Example: history="What happened May 16, 2024?" + current="RTH" → dates: ["2024-05-16"], session: "RTH"
-</critical>"""
+RANGE (type="range"):
+- Jan 1 to Jan 15, 2024 → start="2024-01-01", end="2024-01-15"
+- 2020-2024 → start="2020-01-01", end="2024-12-31"
 
+QUARTER (type="quarter"):
+- Q1 2024 → year=2024, q=1
+</period_logic>
 
-EXAMPLES = """
-<examples>
-Q: "Statistics for Fridays 2020-2025 where close - low >= 200"
-```json
-{
-  "intent": "data",
-  "what": "statistics",
-  "period": {"raw": "2020-2025", "start": "2020-01-01", "end": "2025-12-31"},
-  "filters": {"weekdays": ["Friday"], "conditions": ["close - low >= 200"]},
-  "modifiers": {},
-  "unclear": []
-}
-```
+<time_logic>
+- from 9:30 to 12:00 → start="09:30", end="12:00"
+- first trading hour → start="09:30", end="10:30"
+- last hour → start="16:00", end="17:00"
+</time_logic>
 
-Q: "What happened on May 16, 2024?"
-```json
-{
-  "intent": "data",
-  "what": "day data",
-  "period": {"raw": "May 16, 2024", "dates": ["2024-05-16"]},
-  "filters": {},
-  "modifiers": {},
-  "unclear": ["session"]
-}
-```
+<filters_logic>
+- Fridays in 2024 → weekday_filter=["Friday"]
+- OPEX days → event_filter="opex"
+- FOMC days → event_filter="fomc"
+</filters_logic>
 
-Q: "What happened May 16?"
-```json
-{
-  "intent": "data",
-  "what": "day data",
-  "period": {"raw": "May 16"},
-  "filters": {},
-  "modifiers": {},
-  "unclear": ["year"]
-}
-```
+<metric_logic>
+SPECIFIC metric → extract:
+- volatility, range → metric="range"
+- return, change, performance → metric="change"
+- volume → metric="volume"
+- win rate, green days percentage → metric="green_pct"
+- gap → metric="gap"
 
-Q: "When is high usually formed?"
-```json
-{
-  "intent": "data",
-  "what": "time of high",
-  "period": {},
-  "filters": {},
-  "modifiers": {},
-  "unclear": []
-}
-```
+VAGUE request (no specific metric) → unclear: ["metric"]:
+- "stats for 2024" → unclear=["metric"]
+- "how was the year" → unclear=["metric"]
+- "data for 2024" → unclear=["metric"]
 
-Q: "Top 10 volatile days in 2024"
-```json
-{
-  "intent": "data",
-  "what": "volatile days",
-  "period": {"raw": "2024", "start": "2024-01-01", "end": "2024-12-31"},
-  "filters": {},
-  "modifiers": {"top_n": 10},
-  "unclear": []
-}
-```
+CLEAR (has metric OR specific question):
+- "volatility for 2024" → metric="range"
+- "how many green days" → metric="green_pct"
+- "top 5 by volume" → sort_by="volume"
+- "best day of week" → group_by="weekday"
+</metric_logic>
 
-Q: "Find me days with huge moves last year"
-```json
-{
-  "intent": "data",
-  "what": "huge moves days",
-  "period": {"raw": "last year", "start": "2025-01-01", "end": "2025-12-31"},
-  "filters": {},
-  "modifiers": {"top_n": 10},
-  "unclear": []
-}
-```
+<condition_logic>
+- range > 300 → condition="range > 300"
+- close > open → condition="close > open"
+- change > 2% → condition="change_pct > 2"
+- gap > 1% → condition="gap_pct > 1"
+</condition_logic>
 
-Q: "RTH vs ETH range"
-```json
-{
-  "intent": "data",
-  "what": "range comparison",
-  "period": {},
-  "filters": {},
-  "modifiers": {"compare": ["RTH", "ETH"]},
-  "unclear": []
-}
-```
+<modifiers_logic>
+- top 10 → top_n=10
+- most volatile → sort_by="range", sort_order="desc"
+- lowest range → sort_by="range", sort_order="asc"
+- by volume → sort_by="volume", sort_order="desc"
+</modifiers_logic>
 
-Q: "Show me OPEX days for 2024"
-```json
-{
-  "intent": "data",
-  "what": "OPEX days",
-  "period": {"raw": "2024", "start": "2024-01-01", "end": "2024-12-31"},
-  "filters": {"event_filter": "opex"},
-  "modifiers": {},
-  "unclear": []
-}
-```
+<group_by_logic>
+- hourly / by hour → group_by="hour"
+- by weekday → group_by="weekday"
+- monthly / by month → group_by="month"
+- quarterly → group_by="quarter"
+- yearly → group_by="year"
+</group_by_logic>
 
-Q: "NFP statistics for 2023-2024"
-```json
-{
-  "intent": "data",
-  "what": "NFP statistics",
-  "period": {"raw": "2023-2024", "start": "2023-01-01", "end": "2024-12-31"},
-  "filters": {"event_filter": "nfp"},
-  "modifiers": {},
-  "unclear": []
-}
-```
+<compare_logic>
+- 2023 vs 2024 → compare=["2023", "2024"]
+- RTH vs ETH → compare=["RTH", "ETH"]
+- compare January and February → compare=["January", "February"], unclear=["year"]
+</compare_logic>
 
-Q: "Статистика по дням экспирации"
-```json
-{
-  "intent": "data",
-  "what": "expiration statistics",
-  "period": {},
-  "filters": {"event_filter": "opex"},
-  "modifiers": {},
-  "unclear": []
-}
-```
+<operation_logic>
+- stats, average, summary → operation="stats"
+- compare X and Y, X vs Y → operation="compare"
+- top N, best, worst → operation="top_n"
+- by hour, by month, by weekday → operation="seasonality"
+- show days where, find days with → operation="filter"
+- streak, consecutive → operation="streak"
+- show data, list days → operation="list"
+</operation_logic>
 
-Q: "Volatility by month for 2024"
-```json
-{
-  "intent": "data",
-  "what": "volatility",
-  "period": {"raw": "2024", "start": "2024-01-01", "end": "2024-12-31"},
-  "filters": {},
-  "modifiers": {"group_by": "month"},
-  "unclear": []
-}
-```
-
-Q: "Какой час самый волатильный?"
-```json
-{
-  "intent": "data",
-  "what": "most volatile hour",
-  "period": {},
-  "filters": {},
-  "modifiers": {"group_by": "hour", "find": "max"},
-  "unclear": []
-}
-```
-
-Q: "Which day had the lowest range in 2024?"
-```json
-{
-  "intent": "data",
-  "what": "lowest range day",
-  "period": {"raw": "2024", "start": "2024-01-01", "end": "2024-12-31"},
-  "filters": {},
-  "modifiers": {"find": "min"},
-  "unclear": []
-}
-```
-
-Q: "What is gap?"
-```json
-{
-  "intent": "concept",
-  "what": "gap",
-  "period": null,
-  "filters": null,
-  "modifiers": null,
-  "unclear": []
-}
-```
-
-Q: "Hello"
-```json
-{
-  "intent": "chitchat",
-  "what": "greeting",
-  "period": null,
-  "filters": null,
-  "modifiers": null,
-  "unclear": []
-}
-```
-
-Q: "Спасибо за анализ!"
-```json
-{
-  "intent": "chitchat",
-  "what": "thanks",
-  "period": null,
-  "filters": null,
-  "modifiers": null,
-  "unclear": []
-}
-```
-
-History: "User: what was jan 10\\nAssistant: Which year?"
-Q: "2024"
-```json
-{
-  "intent": "data",
-  "what": "day data",
-  "period": {"raw": "jan 10 2024", "dates": ["2024-01-10"]},
-  "filters": {},
-  "modifiers": {},
-  "unclear": ["session"]
-}
-```
-
-History: "User: 2024\\nAssistant: Looking at January 10, 2024. Which session — RTH or full day?"
-Q: "RTH"
-```json
-{
-  "intent": "data",
-  "what": "day data",
-  "period": {"raw": "January 10, 2024", "dates": ["2024-01-10"]},
-  "filters": {"session": "RTH"},
-  "modifiers": {},
-  "unclear": []
-}
-```
-
-History: "User: What was May 16, 2024?\\nAssistant: Which session — RTH or full day?"
-Q: "Calendar day"
-```json
-{
-  "intent": "data",
-  "what": "day data",
-  "period": {"raw": "May 16, 2024", "dates": ["2024-05-16"]},
-  "filters": {"time_start": "00:00", "time_end": "23:59"},
-  "modifiers": {},
-  "unclear": []
-}
-```
-</examples>"""
+<intent_logic>
+- hello, thanks, bye → intent="chitchat"
+- what is X, explain → intent="concept"
+- everything else → intent="data"
+</intent_logic>"""
 
 
-USER_PROMPT = """<today>{today}</today>
+def get_parser_prompt(question: str, today: str, weekday: str) -> tuple[str, str]:
+    """Build Parser prompt."""
+    user = f"""Today: {today} ({weekday})
 
-<question>
-{question}
-</question>
+Question: {question}"""
 
-Extract entities. Return JSON only."""
-
-
-USER_PROMPT_WITH_HISTORY = """<today>{today}</today>
-
-<history>
-{chat_history}
-</history>
-
-<question>
-{question}
-</question>
-
-Extract entities. Return JSON only."""
-
-
-def _format_previous_parsed(parsed) -> str:
-    """Format previous ParsedQuery for prompt."""
-    if not parsed:
-        return ""
-
-    parts = [f"what: {parsed.what}"]
-
-    if parsed.period:
-        period_str = parsed.period.raw or f"{parsed.period.start} - {parsed.period.end}"
-        parts.append(f"period: {period_str}")
-
-    if parsed.filters:
-        filters = {}
-        if parsed.filters.weekdays:
-            filters["weekdays"] = parsed.filters.weekdays
-        if parsed.filters.session:
-            filters["session"] = parsed.filters.session
-        if parsed.filters.event_filter:
-            filters["event"] = parsed.filters.event_filter
-        if filters:
-            parts.append(f"filters: {filters}")
-
-    if parsed.modifiers:
-        mods = {}
-        if parsed.modifiers.group_by:
-            mods["group_by"] = parsed.modifiers.group_by
-        if parsed.modifiers.top_n:
-            mods["top_n"] = parsed.modifiers.top_n
-        if parsed.modifiers.compare:
-            mods["compare"] = parsed.modifiers.compare
-        if parsed.modifiers.find:
-            mods["find"] = parsed.modifiers.find
-        if mods:
-            parts.append(f"modifiers: {mods}")
-
-    return "\n".join(parts)
-
-
-def get_parser_prompt(
-    question: str,
-    chat_history: str = "",
-    today: str = "",
-    symbol: str = "NQ",
-    previous_parsed=None,
-) -> tuple[str, str]:
-    """
-    Build Parser prompt with instrument context.
-
-    Args:
-        question: User's question
-        chat_history: Previous conversation
-        today: Today's date (YYYY-MM-DD)
-        symbol: Instrument symbol for context
-        previous_parsed: Previous ParsedQuery for follow-up context
-
-    Returns:
-        Tuple of (system_prompt, user_prompt)
-    """
-    instrument_context = _format_instrument_context(symbol)
-    system = SYSTEM_PROMPT + "\n\n" + instrument_context + "\n\n" + EXAMPLES
-
-    # Build user prompt with optional previous_parsed
-    previous_section = ""
-    if previous_parsed:
-        formatted = _format_previous_parsed(previous_parsed)
-        previous_section = f"""<previous_parsed>
-{formatted}
-</previous_parsed>
-
-If the current question modifies or refines the previous query, update it.
-If it's a new unrelated question, ignore previous and extract fresh.
-
-"""
-
-    if chat_history:
-        user = f"""<today>{today}</today>
-
-{previous_section}<history>
-{chat_history}
-</history>
-
-<question>
-{question}
-</question>
-
-Extract entities. Return JSON only."""
-    else:
-        user = f"""<today>{today}</today>
-
-{previous_section}<question>
-{question}
-</question>
-
-Extract entities. Return JSON only."""
-
-    return system, user
+    return SYSTEM_PROMPT, user

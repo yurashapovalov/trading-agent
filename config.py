@@ -48,6 +48,7 @@ CHAT_HISTORY_LIMIT = 20  # Max recent messages to include in LLM context (Gemini
 # Feature flags
 USE_BARB = os.getenv("USE_BARB", "true").lower() == "true"  # Parser+Composer flow (default)
 ANALYST_FAST_MODE = os.getenv("ANALYST_FAST_MODE", "false").lower() == "true"  # Skip JSON/stats, plain text
+USE_PREVIOUS_PARSED = os.getenv("USE_PREVIOUS_PARSED", "true").lower() == "true"  # Pass previous_parsed to Parser for follow-up context
 
 # Trading symbols config
 SYMBOLS = {

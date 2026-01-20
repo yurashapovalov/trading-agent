@@ -1,9 +1,9 @@
-"""Agent implementations for Barb architecture."""
+"""Agent implementations for new architecture."""
 
-from agent.agents.barb import Barb
-from agent.agents.data_fetcher import DataFetcher
-from agent.agents.analyst import Analyst
-from agent.agents.validator import Validator
-from agent.agents.responder import Responder
+# v2: Only import responders (other agents use old query_builder)
+from agent.agents.responders.data import DataResponder, respond
 
-__all__ = ["Barb", "DataFetcher", "Analyst", "Validator", "Responder"]
+__all__ = [
+    "DataResponder",
+    "respond",
+]

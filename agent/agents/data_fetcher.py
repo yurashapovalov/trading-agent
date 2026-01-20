@@ -22,8 +22,9 @@ import duckdb
 from typing import Any
 
 import config
-from agent.state import AgentState, Intent
+from agent.state import AgentState
 from agent.modules import sql
+from agent.patterns import scan_patterns
 
 # Maximum rows to send to Analyst (to reduce token usage)
 MAX_ROWS_FOR_ANALYST = 50
@@ -112,7 +113,7 @@ class DataFetcher:
             "total_duration_ms": state.get("total_duration_ms", 0) + duration_ms,
         }
 
-    def _execute_sql(self, sql_query: str, intent: Intent = None) -> dict[str, Any]:
+    def _execute_sql(self, sql_query: str, intent: dict = None) -> dict[str, Any]:
         """Execute SQL query in DuckDB.
 
         Args:
@@ -150,6 +151,17 @@ class DataFetcher:
                         if special_op == "event_time":
                             granularity = "distribution"
 
+                # Scan for patterns if data has OHLC columns (raw bar data)
+                columns = set(df.columns) if len(df) > 0 else set()
+                has_ohlc = {"open", "high", "low", "close"}.issubset(columns)
+
+                if has_ohlc and rows:
+                    rows = scan_patterns(rows)
+                    # Update columns list with pattern flags
+                    columns = list(rows[0].keys()) if rows else list(df.columns)
+                else:
+                    columns = list(df.columns) if len(df) > 0 else []
+
                 # Smart sort by priority column
                 rows, sort_col = self._smart_sort(rows)
 
@@ -157,7 +169,7 @@ class DataFetcher:
                     "rows": rows,
                     "row_count": len(rows),
                     "granularity": granularity,
-                    "columns": list(df.columns) if len(df) > 0 else [],
+                    "columns": columns,
                     "source": source,
                     "sorted_by": sort_col,
                 }
@@ -168,7 +180,7 @@ class DataFetcher:
                 "row_count": 0,
             }
 
-    def _handle_data(self, intent: Intent) -> dict[str, Any]:
+    def _handle_data(self, intent: dict) -> dict[str, Any]:
         """Handle type=data using template queries from sql.py."""
         symbol = intent.get("symbol", "NQ")
         period_start = intent.get("period_start")
@@ -178,14 +190,25 @@ class DataFetcher:
         if not period_start or not period_end:
             return {"error": "Missing period_start or period_end"}
 
-        return sql.fetch(
+        result = sql.fetch(
             symbol=symbol,
             period_start=period_start,
             period_end=period_end,
             granularity=granularity,
         )
 
-    def _handle_concept(self, intent: Intent) -> dict[str, Any]:
+        # Scan for patterns if data has OHLC columns
+        rows = result.get("rows", [])
+        if rows:
+            columns = set(rows[0].keys())
+            has_ohlc = {"open", "high", "low", "close"}.issubset(columns)
+            if has_ohlc:
+                result["rows"] = scan_patterns(rows)
+                result["columns"] = list(result["rows"][0].keys()) if result["rows"] else []
+
+        return result
+
+    def _handle_concept(self, intent: dict) -> dict[str, Any]:
         """Handle type=concept - no data needed for concept explanations."""
         return {
             "type": "concept",

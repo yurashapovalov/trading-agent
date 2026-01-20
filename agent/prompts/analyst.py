@@ -6,7 +6,7 @@ Fast mode: plain markdown without JSON/stats for speed.
 """
 
 import config
-from agent.market.instruments import get_instrument
+from agent.config.market.instruments import get_instrument
 
 
 def _format_instrument_context(symbol: str | None) -> str:

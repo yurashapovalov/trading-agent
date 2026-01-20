@@ -8,7 +8,7 @@ Responder is the voice of the system. It:
 - Speaks the user's language
 """
 
-from agent.market.instruments import get_instrument
+from agent.config.market.instruments import get_instrument
 
 
 def _format_instrument_context(symbol: str) -> str:
