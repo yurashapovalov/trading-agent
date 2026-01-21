@@ -83,7 +83,7 @@ def classify_intent(state: AgentState) -> dict:
 
     return {
         "intent": result.intent,
-        "parsed_query": {"intent": result.intent, "what": result.topic or ""},
+        "parsed_query": {"intent": result.intent},
         "agents_used": ["intent"],
         "step_number": state.get("step_number", 0) + 1,
         "usage": total_usage.model_dump(),
@@ -652,7 +652,6 @@ class Barb:
         if agent == "intent":
             return {
                 "intent": state.get("intent"),
-                "topic": state.get("parsed_query", {}).get("what"),
             }
         elif agent == "parser":
             return {
