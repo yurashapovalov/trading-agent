@@ -18,53 +18,96 @@
 
 **Экономия:** 73% на токенах.
 
-Кэшируются:
-- Parser system prompt
-- Clarifier system prompt
-
-Не кэшируются (слишком маленькие):
-- Responder prompt
-
 ## Conversation Memory
 
-**Проблема:** Нужно помнить что обсуждали раньше.
+**Проблема:** Нужно помнить что обсуждали раньше, но не хранить всё.
 
-**Решение:** Трёхуровневая память.
+**Решение:** Трёхуровневая память с Supabase persistence.
 
 ```
 ┌─────────────────────────────────────┐
-│           Recent (5-10 msgs)        │ ← полный текст
+│     Recent (10 msgs, полный текст)  │ ← chat_logs
 ├─────────────────────────────────────┤
-│         Summaries (старое)          │ ← сжатое
+│     Summaries (max 3, сжатые)       │ ← chat_sessions.memory
 ├─────────────────────────────────────┤
-│         Key Facts (важное)          │ ← "user prefers RU"
+│     Key Facts (важное)              │ ← chat_sessions.memory
 └─────────────────────────────────────┘
 ```
 
-- **Recent:** последние 5-10 сообщений, полный текст
-- **Summaries:** старые сообщения сжимаем в summary
-- **Key Facts:** важные факты о пользователе
+### Tier 1: Recent
 
-## Memory Manager
+- Последние 10 сообщений (5 пар user/assistant)
+- Полный текст
+- Хранятся в `chat_logs`, кешируются в RAM
 
-Singleton — одна память на сессию:
+### Tier 2: Summaries
+
+- Когда recent > 16 сообщений → compaction
+- Старые 6 сообщений → 1-2 предложения (LLM)
+- Максимум 3 summary'я
+- При >6 → merge в один
+
+### Tier 3: Key Facts
+
+- Важная информация ("user prefers RU")
+- Добавляется вручную или автоматически
+- Всегда в начале контекста
+
+## Persistence
 
 ```
-Session 1: ConversationMemory
-Session 2: ConversationMemory
-Session 3: ConversationMemory
+Хранение:
+┌────────────────┐     ┌──────────────────────┐
+│   chat_logs    │     │    chat_sessions     │
+│                │     │                      │
+│ question       │     │ memory: {            │
+│ response       │     │   summaries: [...],  │
+│ created_at     │     │   key_facts: [...]   │
+└────────────────┘     │ }                    │
+        ↓              └──────────────────────┘
+   recent msgs                  ↓
+                        summaries + facts
 ```
 
-При старте графа — загружаем память.
-При завершении — сохраняем ответ.
+**При старте сессии:**
+1. `SELECT memory FROM chat_sessions` → summaries, key_facts
+2. `SELECT question, response FROM chat_logs LIMIT 5` → recent
 
+**При compaction:**
+1. LLM генерирует summary
+2. `UPDATE chat_sessions SET memory = {...}`
+
+## Что видит LLM
+
+```xml
+<key_facts>
+- User prefers Russian
+</key_facts>
+
+<history_summary>
+Обсуждали волатильность 2024, avg 1.2%
+Сравнивали понедельники и пятницы
+</history_summary>
+
+<recent_messages>
+User: А что было вчера?
+Assistant: Вчера NQ вырос на 0.8%...
+</recent_messages>
 ```
-START → load_memory → ... → save_memory → END
-```
 
-## Будущее: Supabase
+## Размер контекста
 
-Сейчас память в RAM. Планируется:
-- Персистенция в Supabase
-- История между сессиями
-- Аналитика разговоров
+| Компонент | Токены |
+|-----------|--------|
+| Key facts | 50-100 |
+| Summaries | 100-200 |
+| Recent | 500-1000 |
+| **Всего** | **~700-1300** |
+
+Фиксированный размер независимо от длины разговора.
+
+## Важно
+
+- **Данные не хранятся** — только вопросы и ответы
+- **DataFrame вычисляется заново** каждый запрос
+- **RAM кеш** — после загрузки из DB повторные запросы не ходят в Supabase
