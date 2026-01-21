@@ -63,6 +63,7 @@ class Responder:
         intent: str = "chitchat",
         subtype: str = "greeting",
         topic: str = "",
+        lang: str = "en",
     ) -> ResponderResult:
         """
         Generate response for chitchat or concept query.
@@ -72,6 +73,7 @@ class Responder:
             intent: "chitchat" or "concept"
             subtype: For chitchat - "greeting", "thanks", "goodbye"
             topic: For concept - the term to explain
+            lang: ISO 639-1 language code (en, ru, es, etc.)
 
         Returns:
             ResponderResult with text and usage
@@ -83,6 +85,7 @@ class Responder:
             subtype=subtype,
             topic=topic or self._extract_topic(question),
             question=question,
+            lang=lang,
         )
 
         # Call LLM
@@ -117,6 +120,7 @@ def respond(
     intent: str = "chitchat",
     subtype: str = "greeting",
     topic: str = "",
+    lang: str = "en",
     symbol: str = "NQ",
 ) -> ResponderResult:
     """
@@ -129,10 +133,11 @@ def respond(
         intent: "chitchat" or "concept"
         subtype: For chitchat - "greeting", "thanks", "goodbye"
         topic: For concept - the term to explain
+        lang: ISO 639-1 language code (en, ru, es, etc.)
         symbol: Trading symbol
 
     Returns:
         ResponderResult with text and usage
     """
     responder = Responder(symbol=symbol)
-    return responder.respond(question, intent, subtype, topic)
+    return responder.respond(question, intent, subtype, topic, lang)

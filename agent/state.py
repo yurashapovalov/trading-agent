@@ -21,10 +21,14 @@ class TradingState(MessagesState):
     session_id: str
     user_id: str
 
+    # Intent classification
+    intent: str | None
+    lang: str | None  # User's language (ISO 639-1: en, ru, es, etc.)
+    question_en: str | None  # Question translated to English
+
     # Parser output
     parsed_query: dict | None
     parser_thoughts: str | None  # Parser's reasoning (for Clarifier)
-    intent: str | None
 
     # Memory
     memory_context: str | None  # Formatted context from ConversationMemory

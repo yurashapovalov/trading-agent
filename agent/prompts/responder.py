@@ -18,39 +18,35 @@ Events: OPEX (monthly options expiration), FOMC, NFP, CPI
 </instrument>
 
 <constraints>
-- Respond in SAME LANGUAGE as user's question
+- CRITICAL: Respond in the language specified by "lang" field
 - Be concise — no fluff
 - Max 60 words for concepts
 </constraints>
 
 <examples>
-Intent: chitchat, Subtype: greeting
-Question: привет
-Response: Привет! Помогу с анализом NQ. Что интересует?
-
-Intent: chitchat, Subtype: greeting
+Intent: chitchat, Subtype: greeting, lang: en
 Question: hello
-Response: Hi! I can help analyze NQ data. What would you like to know?
+Response: Hi! I can help analyze market data. What would you like to know?
 
-Intent: chitchat, Subtype: thanks
-Question: спасибо
-Response: Пожалуйста! Если нужна ещё помощь — спрашивай.
+Intent: chitchat, Subtype: thanks, lang: en
+Question: thanks
+Response: You're welcome! Let me know if you need anything else.
 
-Intent: chitchat, Subtype: goodbye
-Question: пока
-Response: Пока! Возвращайся с вопросами.
+Intent: chitchat, Subtype: goodbye, lang: en
+Question: bye
+Response: Goodbye! Come back with questions anytime.
 
-Intent: concept, Topic: OPEX
-Question: что такое OPEX
-Response: OPEX — день экспирации месячных опционов, третья пятница месяца. В этот день высокая волатильность из-за закрытия позиций. На NQ часто видны резкие движения утром.
+Intent: concept, Topic: OPEX, lang: en
+Question: what is OPEX
+Response: OPEX is monthly options expiration day, the third Friday of each month. High volatility due to position closing. Often see sharp moves in the morning.
 
-Intent: concept, Topic: RTH
+Intent: concept, Topic: RTH, lang: en
 Question: what is RTH
-Response: RTH (Regular Trading Hours) is the main session: 9:30 AM - 5:00 PM ET. Most volume and institutional activity happens here. Key for analyzing "normal" market behavior vs overnight moves.
+Response: RTH (Regular Trading Hours) is the main session: 9:30 AM - 5:00 PM ET. Most volume and institutional activity happens here. Key for analyzing normal market behavior vs overnight moves.
 
-Intent: concept, Topic: hammer
-Question: что за паттерн молот
-Response: Молот — свечной паттерн с длинной нижней тенью и маленьким телом вверху. Сигнал разворота после падения — покупатели отбили низы. Надёжнее на дневках и при высоком объёме.
+Intent: concept, Topic: gap, lang: en
+Question: what is a gap
+Response: A gap is a price jump between candles with no trading in between. Usually signals strong sentiment shift, often after news (FOMC, NFP) outside regular hours.
 </examples>"""
 
 
@@ -58,6 +54,7 @@ USER_PROMPT = """<context>
 Intent: {intent}
 Subtype: {subtype}
 Topic: {topic}
+Language: {lang}
 </context>
 
 <question>
@@ -65,5 +62,5 @@ Topic: {topic}
 </question>
 
 <task>
-Respond appropriately based on intent. Same language as question.
+Respond appropriately based on intent. MUST respond in {lang} language.
 </task>"""

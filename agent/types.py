@@ -35,8 +35,9 @@ class TimeRange(BaseModel):
 class ParsedQuery(BaseModel):
     """Parser output — extracted entities from user question."""
 
-    intent: Literal["data", "chitchat", "concept"] = "data"
+    intent: Literal["data", "chitchat", "concept", "unsupported"] = "data"
     what: str = Field(default="", description="Brief description of what user wants")
+    reason: str | None = Field(default=None, description="Why unsupported: cannot_predict, no_realtime, wrong_instrument")
     operation: Literal["stats", "compare", "top_n", "seasonality", "filter", "streak", "list"] | None = None
 
     period: Period | None = None

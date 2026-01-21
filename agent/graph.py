@@ -69,6 +69,7 @@ def classify_intent(state: AgentState) -> dict:
     Fast intent classification (no thinking).
 
     Quickly determines: chitchat, concept, or data.
+    Also detects user's language and translates to English.
     ~200-400ms instead of ~3500ms with full Parser.
     """
     question = get_current_question(state)
@@ -83,6 +84,8 @@ def classify_intent(state: AgentState) -> dict:
 
     return {
         "intent": result.intent,
+        "lang": result.lang,  # User's language (ISO 639-1)
+        "question_en": result.question_en,  # Translated to English
         "parsed_query": {"intent": result.intent},
         "agents_used": ["intent"],
         "step_number": state.get("step_number", 0) + 1,
@@ -114,9 +117,9 @@ def parse_question(state: AgentState) -> dict:
     Uses memory_context for conversation history.
     If there's a clarified_query from Clarifier, parse that instead.
     """
-    # Use clarified_query if available (from Clarifier), otherwise current question
+    # Use clarified_query if available (from Clarifier), otherwise question_en from IntentClassifier
     clarified = state.get("clarified_query")
-    question = clarified if clarified else get_current_question(state)
+    question = clarified if clarified else state.get("question_en", get_current_question(state))
 
     # Get memory context for Parser (conversation history)
     memory_context = state.get("memory_context", "")
@@ -158,11 +161,13 @@ def route_after_parser(state: AgentState) -> Literal["clarification", "executor"
 def handle_chitchat(state: AgentState) -> dict:
     """
     Chitchat node — greetings, thanks, goodbye using Responder.
+    Uses detected language from IntentClassifier.
     """
     question = get_current_question(state)
+    lang = state.get("lang", "en")  # Default to English
 
     responder = Responder()
-    result = responder.respond(question, intent="chitchat", subtype="greeting")
+    result = responder.respond(question, intent="chitchat", subtype="greeting", lang=lang)
 
     # Aggregate usage (stored as dict in state)
     prev_usage_dict = state.get("usage") or {}
@@ -180,13 +185,15 @@ def handle_chitchat(state: AgentState) -> dict:
 def handle_concept(state: AgentState) -> dict:
     """
     Concept node — explain trading concept using Responder.
+    Uses detected language from IntentClassifier.
     """
     parsed = state.get("parsed_query", {})
     what = parsed.get("what", "")
     question = get_current_question(state)
+    lang = state.get("lang", "en")  # Default to English
 
     responder = Responder()
-    result = responder.respond(question, intent="concept", topic=what)
+    result = responder.respond(question, intent="concept", topic=what, lang=lang)
 
     # Aggregate usage (stored as dict in state)
     prev_usage_dict = state.get("usage") or {}
@@ -652,6 +659,8 @@ class Barb:
         if agent == "intent":
             return {
                 "intent": state.get("intent"),
+                "lang": state.get("lang"),
+                "question_en": state.get("question_en"),
             }
         elif agent == "parser":
             return {

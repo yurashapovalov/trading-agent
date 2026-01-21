@@ -1,10 +1,15 @@
 """
 Fast Intent Classifier — quick routing without thinking.
 
-Single responsibility: classify intent (chitchat/concept/data) fast.
+Single responsibility:
+1. Classify intent (chitchat/concept/data)
+2. Detect user's language (ISO 639-1)
+3. Translate question to English
+
 No thinking mode, minimal prompt, ~500ms.
 
 Used before Parser to skip heavy parsing for simple queries.
+Language flows to Responder for response in user's language.
 
 Uses:
 - prompts/intent.py for prompt constants
@@ -23,16 +28,24 @@ from agent.prompts.intent import SYSTEM_PROMPT, USER_PROMPT_TEMPLATE
 
 
 class IntentOutput(BaseModel):
-    """Fast intent classification output."""
+    """Fast intent classification output with language detection."""
     intent: Literal["chitchat", "concept", "data"] = Field(
         description="chitchat=greetings/thanks, concept=explain trading term, data=query about market data"
+    )
+    lang: str = Field(
+        description="ISO 639-1 language code (en, ru, es, de, zh, etc.)"
+    )
+    question_en: str = Field(
+        description="Question translated to English for internal processing"
     )
 
 
 @dataclass
 class IntentResult:
-    """Intent classification result."""
+    """Intent classification result with language info."""
     intent: Literal["chitchat", "concept", "data"]
+    lang: str  # ISO 639-1 code
+    question_en: str  # Translated to English
     usage: Usage = None
 
     def __post_init__(self):
@@ -78,6 +91,8 @@ class IntentClassifier:
 
         return IntentResult(
             intent=output.intent,
+            lang=output.lang,
+            question_en=output.question_en,
             usage=usage,
         )
 
