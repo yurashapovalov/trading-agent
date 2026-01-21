@@ -1,12 +1,13 @@
 """
-LangGraph v2 — Simplified Flow
+LangGraph v2 — Fast Intent Classification
 
 Flow:
-    Question → Parser → Router
-                          ├── chitchat → END
-                          ├── concept → END
-                          ├── unclear → ClarificationResponder → END (or loop)
-                          └── data → Executor → DataResponder → END
+    Question → IntentClassifier (fast, no thinking)
+                 ├── chitchat → Responder → END
+                 ├── concept → Responder → END
+                 └── data → Parser (with thinking) → Router
+                                                       ├── unclear → Clarifier → END (or loop)
+                                                       └── Executor → END
 """
 
 from typing import Literal
@@ -20,6 +21,7 @@ from langchain_core.messages import HumanMessage, AIMessage
 
 from agent.state import AgentState, get_current_question
 from agent.types import ParsedQuery, Usage
+from agent.agents.intent import IntentClassifier
 from agent.agents.parser import Parser
 from agent.agents.clarifier import Clarifier
 from agent.agents.responder import Responder
@@ -62,6 +64,48 @@ def load_memory(state: AgentState) -> dict:
     }
 
 
+def classify_intent(state: AgentState) -> dict:
+    """
+    Fast intent classification (no thinking).
+
+    Quickly determines: chitchat, concept, or data.
+    ~200-400ms instead of ~3500ms with full Parser.
+    """
+    question = get_current_question(state)
+
+    classifier = IntentClassifier()
+    result = classifier.classify(question)
+
+    # Aggregate usage
+    prev_usage_dict = state.get("usage") or {}
+    prev_usage = Usage.model_validate(prev_usage_dict) if prev_usage_dict else Usage()
+    total_usage = prev_usage + result.usage
+
+    return {
+        "intent": result.intent,
+        "parsed_query": {"intent": result.intent, "what": result.topic or ""},
+        "agents_used": ["intent"],
+        "step_number": state.get("step_number", 0) + 1,
+        "usage": total_usage.model_dump(),
+    }
+
+
+def route_after_intent(state: AgentState) -> Literal["chitchat", "concept", "parser"]:
+    """
+    Route based on fast intent classification.
+
+    chitchat/concept → go directly to responder (skip Parser)
+    data → go to full Parser with thinking
+    """
+    intent = state.get("intent", "data")
+
+    if intent == "chitchat":
+        return "chitchat"
+    if intent == "concept":
+        return "concept"
+    return "parser"
+
+
 def parse_question(state: AgentState) -> dict:
     """
     Parser node — stateless entity extraction.
@@ -88,7 +132,7 @@ def parse_question(state: AgentState) -> dict:
     return {
         "parsed_query": result.query.model_dump(),
         "parser_thoughts": result.thoughts,
-        "agents_used": ["parser"],
+        "agents_used": state.get("agents_used", []) + ["parser"],
         "step_number": state.get("step_number", 0) + 1,
         "usage": total_usage.model_dump(),
         # Clear clarified_query after using it
@@ -96,19 +140,14 @@ def parse_question(state: AgentState) -> dict:
     }
 
 
-def route_after_parser(state: AgentState) -> Literal["chitchat", "concept", "clarification", "executor"]:
+def route_after_parser(state: AgentState) -> Literal["clarification", "executor"]:
     """
     Router — decide next step based on Parser output.
+
+    Only handles data queries (chitchat/concept already routed by intent classifier).
     """
     parsed = state.get("parsed_query", {})
-    intent = parsed.get("intent", "data")
     unclear = parsed.get("unclear", [])
-
-    if intent == "chitchat":
-        return "chitchat"
-
-    if intent == "concept":
-        return "concept"
 
     if unclear:
         return "clarification"
@@ -234,16 +273,16 @@ def handle_clarification(state: AgentState) -> dict:
     return update
 
 
-def route_entry(state: AgentState) -> Literal["parser", "clarifier"]:
+def route_entry(state: AgentState) -> Literal["intent", "clarifier"]:
     """
     Entry router — check if we're in clarification flow.
 
     If awaiting_clarification, user's message is an answer → go to Clarifier.
-    Otherwise, it's a new question → go to Parser.
+    Otherwise, it's a new question → go to fast IntentClassifier.
     """
     if state.get("awaiting_clarification"):
         return "clarifier"
-    return "parser"
+    return "intent"
 
 
 def route_after_clarification(state: AgentState) -> Literal["parser", "respond"]:
@@ -320,24 +359,26 @@ def handle_executor(state: AgentState) -> dict:
 
 def build_graph() -> StateGraph:
     """
-    Build the graph with memory and clarification loop.
+    Build the graph with fast intent classification.
 
     Flow:
         START → load_memory → route_entry
                                ├── awaiting_clarification → clarifier → route_after_clarification
                                │                                          ├── has clarified_query → parser (LOOP!)
                                │                                          └── need more info → save_memory → END
-                               └── new question → parser → route_after_parser
+                               └── new question → intent → route_after_intent
                                                             ├── chitchat → save_memory → END
                                                             ├── concept → save_memory → END
-                                                            ├── unclear → clarifier → save_memory → END
-                                                            └── data → executor → save_memory → END
+                                                            └── data → parser → route_after_parser
+                                                                                  ├── unclear → clarifier
+                                                                                  └── executor → save_memory → END
     """
     graph = StateGraph(AgentState)
 
     # Add nodes
     graph.add_node("load_memory", load_memory)
-    graph.add_node("parser", parse_question)
+    graph.add_node("intent", classify_intent)  # Fast intent classifier
+    graph.add_node("parser", parse_question)   # Full parser with thinking
     graph.add_node("chitchat", handle_chitchat)
     graph.add_node("concept", handle_concept)
     graph.add_node("clarifier", handle_clarification)
@@ -352,18 +393,27 @@ def build_graph() -> StateGraph:
         "load_memory",
         route_entry,
         {
-            "parser": "parser",
+            "intent": "intent",
             "clarifier": "clarifier",
         }
     )
 
-    # After Parser — route based on intent/unclear
+    # After IntentClassifier — route to responder or parser
+    graph.add_conditional_edges(
+        "intent",
+        route_after_intent,
+        {
+            "chitchat": "chitchat",
+            "concept": "concept",
+            "parser": "parser",  # Only data queries go to full Parser
+        }
+    )
+
+    # After Parser — route based on unclear (data queries only)
     graph.add_conditional_edges(
         "parser",
         route_after_parser,
         {
-            "chitchat": "chitchat",
-            "concept": "concept",
             "clarification": "clarifier",
             "executor": "executor",
         }
@@ -457,7 +507,8 @@ class Barb:
 
         # Map LangGraph node names to our agent names
         NODE_TO_AGENT = {
-            "parser": "parser",
+            "intent": "intent",      # Fast intent classifier
+            "parser": "parser",      # Full parser with thinking
             "executor": "executor",
             "clarifier": "clarifier",
             "chitchat": "responder",
@@ -567,7 +618,11 @@ class Barb:
 
     def _get_agent_input(self, agent: str, state: dict) -> dict:
         """Get input data for agent (for logging)."""
-        if agent == "parser":
+        if agent == "intent":
+            return {
+                "question": get_current_question(state),
+            }
+        elif agent == "parser":
             return {
                 "question": get_current_question(state),
                 "memory_context": state.get("memory_context", "")[:500] if state.get("memory_context") else None,
@@ -594,7 +649,12 @@ class Barb:
 
     def _get_agent_output(self, agent: str, state: dict) -> dict:
         """Get output data for agent (for logging)."""
-        if agent == "parser":
+        if agent == "intent":
+            return {
+                "intent": state.get("intent"),
+                "topic": state.get("parsed_query", {}).get("what"),
+            }
+        elif agent == "parser":
             return {
                 "parsed_query": state.get("parsed_query"),
                 "thoughts": state.get("parser_thoughts"),
