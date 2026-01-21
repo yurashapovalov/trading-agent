@@ -27,6 +27,7 @@ from agent.agents.clarifier import Clarifier
 from agent.agents.responder import Responder
 from agent.executor import execute
 from agent.memory import get_memory_manager
+from agent.agents.presenter import Presenter
 
 
 # =============================================================================
@@ -357,37 +358,26 @@ def handle_executor(state: AgentState) -> dict:
     """
     Executor node — get data and compute result.
 
-    Also resets clarification_attempts on success.
+    Uses Presenter to format response based on data size and context.
     """
     parsed_dict = state.get("parsed_query", {})
     parsed = ParsedQuery.model_validate(parsed_dict)
 
+    # Get original question for Presenter (in user's language)
+    question = get_current_question(state)
+    lang = state.get("lang", "en")
+
     result = execute(parsed, symbol="NQ", today=date.today())
 
-    # Format response based on result
-    if result["intent"] == "no_data":
-        response = "По указанным критериям данные не найдены."
-    elif result["intent"] == "data":
-        row_count = result.get("row_count", 0)
-        operation = result.get("operation", "stats")
-
-        # Simple response for now
-        response = f"Получено {row_count} записей. Операция: {operation}."
-
-        # Add some stats if available
-        op_result = result.get("result", {})
-        if "count" in op_result:
-            response += f" Всего дней: {op_result['count']}."
-        if "green_pct" in op_result:
-            response += f" Зелёных: {op_result['green_pct']}%."
-    else:
-        response = "Что-то пошло не так."
+    # Use Presenter to format response
+    presenter = Presenter(symbol="NQ")
+    presentation = presenter.present(data=result, question=question, lang=lang)
 
     return {
-        "response": response,
-        "messages": [AIMessage(content=response)],
+        "response": presentation.text,
+        "messages": [AIMessage(content=presentation.text)],
         "data": result,
-        "agents_used": state.get("agents_used", []) + ["executor"],
+        "agents_used": state.get("agents_used", []) + ["executor", "presenter"],
     }
 
 

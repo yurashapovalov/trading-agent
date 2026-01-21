@@ -32,7 +32,14 @@ import config
 from agent.config.market.events import get_event_type, check_dates_for_events
 from agent.config.market.holidays import HOLIDAY_NAMES, check_dates_for_holidays
 from agent.config.patterns.candle import get_candle_pattern
-from agent.prompts.presenter import TEMPLATES, TITLE_PROMPT, SUMMARY_PROMPT, SHORT_SUMMARY_PROMPT
+from agent.prompts.presenter import (
+    TEMPLATES,
+    ACKNOWLEDGE_PROMPT,
+    TITLE_PROMPT,
+    SUMMARY_PROMPT,
+    SHORT_SUMMARY_PROMPT,
+    NO_DATA_PROMPT,
+)
 
 
 # =============================================================================
@@ -223,23 +230,31 @@ class DataResponseType(str, Enum):
     NO_DATA = "no_data"  # 0 rows
     SINGLE = "single"  # 1 row, natural summary
     INLINE = "inline"  # 2-5 rows, summary + table
-    OFFER_ANALYSIS = "offer_analysis"  # >5 rows, ask about analysis
+    LARGE_DATA = "large_data"  # >5 rows
 
 
 @dataclass
 class DataResponse:
-    """Response from DataResponder."""
+    """Response from Presenter.
 
-    text: str
+    Three parts for frontend:
+    1. acknowledge - shown before DataCard ("Понял, получаю...")
+    2. title - DataCard title
+    3. summary - shown after DataCard ("Вот 21 день...")
+    """
+
+    acknowledge: str  # "Понял, получаю волатильность за 2024..."
+    title: str | None  # DataCard title
+    summary: str  # "Вот 21 день. Было раннее закрытие..."
     type: DataResponseType
-    title: str | None = None  # DataCard title (only for offer_analysis)
     row_count: int = 0
 
-
-def _detect_language(text: str) -> str:
-    """Simple language detection based on character set."""
-    cyrillic_count = sum(1 for c in text if '\u0400' <= c <= '\u04FF')
-    return "ru" if cyrillic_count > len(text) * 0.3 else "en"
+    @property
+    def text(self) -> str:
+        """Combined text for backwards compatibility."""
+        if self.title:
+            return f"{self.acknowledge}\n\n{self.summary}"
+        return self.summary
 
 
 class Presenter:
@@ -271,6 +286,7 @@ class Presenter:
         self,
         data: dict,
         question: str = "",
+        lang: str = "en",
     ) -> DataResponse:
         """
         Format data for user presentation.
@@ -278,9 +294,10 @@ class Presenter:
         Args:
             data: Query result from executor (rows, row_count, result, etc.)
             question: User's original question
+            lang: User's language (ISO 639-1 code from IntentClassifier)
 
         Returns:
-            DataResponse with text, type, optional title
+            DataResponse with acknowledge, title, summary
         """
         original_question = question
 
@@ -293,38 +310,43 @@ class Presenter:
         columns = list(rows[0].keys()) if rows else []
         row_count = data.get("row_count", len(rows))
 
-        lang = _detect_language(original_question)
-
         # No data
         if row_count == 0:
+            summary = self._generate_no_data(original_question, lang)
             return DataResponse(
-                text=TEMPLATES["no_data"][lang],
+                acknowledge="",
+                title=None,
+                summary=summary,
                 type=DataResponseType.NO_DATA,
                 row_count=0,
             )
 
         # Single row — natural summary, no table
         if row_count == 1:
-            text = self._summarize_single(rows[0], columns, original_question)
+            summary = self._summarize_single(rows[0], columns, original_question, lang)
             return DataResponse(
-                text=text,
+                acknowledge=self._generate_acknowledge(original_question, lang),
+                title=None,
+                summary=summary,
                 type=DataResponseType.SINGLE,
                 row_count=1,
             )
 
         # Small dataset (2-5 rows) — summary + table
         if row_count <= self.INLINE_THRESHOLD:
-            summary = self._summarize_small(rows, columns, original_question)
+            summary = self._summarize_small(rows, columns, original_question, lang)
             table = self._format_table(rows, columns)
-            text = f"{summary}\n\n{table}"
+            summary_with_table = f"{summary}\n\n{table}"
             return DataResponse(
-                text=text,
+                acknowledge=self._generate_acknowledge(original_question, lang),
+                title=None,
+                summary=summary_with_table,
                 type=DataResponseType.INLINE,
                 row_count=row_count,
             )
 
         # Large dataset (>5 rows) — DataCard + offer analysis
-        title = self._generate_title(original_question, columns, row_count)
+        title = self._generate_title(original_question, columns, row_count, lang)
 
         # Build context for LLM (flags from SQL + holidays/events from config)
         flag_counts = _count_flags(rows, columns)
@@ -337,14 +359,15 @@ class Presenter:
 
         # Generate summary with LLM using context
         if full_context:
-            text = self._generate_summary(original_question, row_count, full_context)
+            text = self._generate_summary(original_question, row_count, full_context, lang)
         else:
-            text = TEMPLATES["offer_analysis"][lang].format(row_count=row_count)
+            text = TEMPLATES["large_data"].get(lang, TEMPLATES["large_data"]["en"]).format(row_count=row_count)
 
         return DataResponse(
-            text=text,
-            type=DataResponseType.OFFER_ANALYSIS,
+            acknowledge=self._generate_acknowledge(original_question, lang),
             title=title,
+            summary=text,
+            type=DataResponseType.LARGE_DATA,
             row_count=row_count,
         )
 
@@ -383,10 +406,9 @@ class Presenter:
         row: dict,
         columns: list[str],
         question: str,
+        lang: str,
     ) -> str:
         """Generate summary for single row using LLM with context."""
-        lang = _detect_language(question)
-
         # Count flags from SQL (patterns)
         flag_counts = _count_flags([row], columns)
         flags_context = _build_flags_context(flag_counts)
@@ -400,7 +422,7 @@ class Presenter:
 
         if full_context:
             # Use LLM to write natural summary
-            return self._generate_summary_short(question, 1, full_context, date_val)
+            return self._generate_summary_short(question, 1, full_context, lang, date_val)
 
         # Fallback — simple template
         if lang == "ru":
@@ -412,9 +434,9 @@ class Presenter:
         rows: list[dict],
         columns: list[str],
         question: str,
+        lang: str,
     ) -> str:
         """Generate summary for small dataset (2-5 rows) using LLM with context."""
-        lang = _detect_language(question)
         row_count = len(rows)
 
         # Count flags from SQL (patterns)
@@ -429,7 +451,7 @@ class Presenter:
 
         if full_context:
             # Use LLM to write natural summary
-            return self._generate_summary_short(question, row_count, full_context)
+            return self._generate_summary_short(question, row_count, full_context, lang)
 
         # Fallback — simple template
         if lang == "ru":
@@ -441,6 +463,7 @@ class Presenter:
         question: str,
         row_count: int,
         flags_context: str,
+        lang: str,
         date_val: str | None = None,
     ) -> str:
         """Generate short summary (1 sentence) for small datasets."""
@@ -450,6 +473,7 @@ class Presenter:
             row_count=row_count,
             date_info=date_info,
             flags_context=flags_context,
+            lang=lang,
         )
 
         try:
@@ -463,22 +487,67 @@ class Presenter:
             )
             return response.text.strip()
         except Exception:
-            lang = _detect_language(question)
             if lang == "ru":
                 return f"Вот данные, {row_count} строк."
             return f"Here's the data, {row_count} rows."
+
+    def _generate_acknowledge(self, question: str, lang: str) -> str:
+        """Generate acknowledge message using LLM.
+
+        Returns short confirmation like "Понял, получаю волатильность за 2024..."
+        """
+        prompt = ACKNOWLEDGE_PROMPT.format(question=question, lang=lang)
+
+        try:
+            response = self.client.models.generate_content(
+                model=self.model,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    temperature=0.3,
+                    max_output_tokens=50,
+                ),
+            )
+            return response.text.strip()
+        except Exception:
+            # Fallback
+            if lang == "ru":
+                return "Понял, получаю данные..."
+            return "Got it, fetching data..."
+
+    def _generate_no_data(self, question: str, lang: str) -> str:
+        """Generate no-data response using LLM.
+
+        Returns context-aware message like "Данных за 2099 год нет — попробуй другой период."
+        """
+        prompt = NO_DATA_PROMPT.format(question=question, lang=lang)
+
+        try:
+            response = self.client.models.generate_content(
+                model=self.model,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    temperature=0.3,
+                    max_output_tokens=60,
+                ),
+            )
+            return response.text.strip()
+        except Exception:
+            # Fallback
+            return TEMPLATES["no_data"].get(lang, TEMPLATES["no_data"]["en"])
 
     def _generate_title(
         self,
         question: str,
         columns: list[str],
         row_count: int,
+        lang: str,
     ) -> str:
         """Generate DataCard title using LLM."""
         prompt = TITLE_PROMPT.format(
             question=question,
             columns=", ".join(columns[:5]),
             row_count=row_count,
+            lang=lang,
         )
 
         try:
@@ -499,6 +568,7 @@ class Presenter:
         question: str,
         row_count: int,
         flags_context: str,
+        lang: str,
     ) -> str:
         """Generate data summary using LLM with flags as context.
 
@@ -509,6 +579,7 @@ class Presenter:
             question=question,
             row_count=row_count,
             flags_context=flags_context,
+            lang=lang,
         )
 
         try:
@@ -523,15 +594,14 @@ class Presenter:
             return response.text.strip()
         except Exception:
             # Fallback to simple template
-            lang = _detect_language(question)
-            return TEMPLATES["offer_analysis"][lang].format(row_count=row_count)
+            return TEMPLATES["large_data"].get(lang, TEMPLATES["large_data"]["en"]).format(row_count=row_count)
 
 
 # =============================================================================
 # SIMPLE API
 # =============================================================================
 
-def present(question: str, data: dict, symbol: str = "NQ") -> str:
+def present(question: str, data: dict, symbol: str = "NQ", lang: str = "en") -> str:
     """
     Format data for user presentation.
 
@@ -541,22 +611,20 @@ def present(question: str, data: dict, symbol: str = "NQ") -> str:
         question: User's original question
         data: Executor result dict
         symbol: Trading symbol
+        lang: User's language (ISO 639-1 code)
 
     Returns:
         Formatted text string
     """
     intent = data.get("intent")
 
-    # Handle non-data intents
-    is_ru = any('\u0400' <= c <= '\u04FF' for c in question)
-
     if intent == "no_data":
-        if is_ru:
+        if lang == "ru":
             return "Ничего не нашлось. Попробуй другой период или фильтры."
         return "Nothing found. Try different period or filters."
 
     if intent == "chitchat":
-        if is_ru:
+        if lang == "ru":
             return "Привет! Чем могу помочь с анализом данных?"
         return "Hi! How can I help with data analysis?"
 
@@ -566,11 +634,11 @@ def present(question: str, data: dict, symbol: str = "NQ") -> str:
 
     if intent == "clarification":
         unclear = data.get("unclear", [])
-        if is_ru:
+        if lang == "ru":
             return f"Уточни: {', '.join(unclear)}"
         return f"Please clarify: {', '.join(unclear)}"
 
     # Data intent — use Presenter
     presenter = Presenter(symbol=symbol)
-    response = presenter.present(data, question)
+    response = presenter.present(data, question, lang)
     return response.text
