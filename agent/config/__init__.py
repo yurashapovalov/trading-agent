@@ -1,39 +1,11 @@
 """
 CONFIG — Configuration and settings.
 
-Contains domain-specific configuration that doesn't expand to atoms:
-- defaults.py: Smart defaults (single source of truth)
-- completeness.py: Query completeness rules
-- market/: Trading calendar, instruments, events
-- backtest/: Execution parameters, output metrics
+Contains domain-specific configuration:
+- market/: Trading calendar, instruments, events, holidays
+- backtest/: Execution parameters, output metrics (for future use)
 - patterns/: Candle and price pattern definitions
-
-This is NOT molecules (molecules expand to atoms).
-Config is parameters passed to engines as-is.
 """
-
-# Smart defaults and completeness rules
-from agent.config.defaults import (
-    DEFAULT_ANALYTICS_GROUP,
-    DEFAULT_STATISTICS_METRICS,
-    DEFAULT_SYMBOL,
-    DEFAULT_DATA_SORT,
-    DEFAULT_DATA_LIMIT,
-    DEFAULT_RECENT_DAYS,
-    DEFAULT_EVENT_TIME_GROUP,
-    DEFAULT_BREAKOUT_LOOKBACK,
-    DEFAULT_COMPARE_METRICS,
-)
-
-from agent.config.completeness import (
-    FieldRequirement,
-    FieldRule,
-    COMPLETENESS_RULES,
-    check_completeness,
-    get_defaults,
-    get_field_description,
-    get_unclear_description,
-)
 
 # Re-export for convenience
 from agent.config.backtest import (

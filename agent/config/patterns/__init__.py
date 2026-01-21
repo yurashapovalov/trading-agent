@@ -2,14 +2,14 @@
 Pattern definitions — candle and price patterns.
 
 Static knowledge about patterns:
-- Detection parameters (for Expander → Computed)
-- Descriptions (for Responder context)
+- Detection parameters
+- Descriptions for Presenter context
 - Categories, signals, relationships
 
 Used by:
 - Parser: understands pattern names and categories
-- Expander: converts pattern → Computed atom
-- Responder: explains what patterns mean
+- Presenter: explains what patterns mean
+- Scanner: detects patterns in data
 """
 
 from agent.config.patterns.candle import (

@@ -5,7 +5,7 @@ Provides template-based queries for common data access patterns:
 - daily: One row per trading day
 - hourly: One row per hour
 
-Used by DataFetcher as fallback when QueryBuilder is not available.
+Used by Executor for data queries.
 
 Example:
     data = fetch("NQ", "2024-01-01", "2024-01-31", "daily")

@@ -1,6 +1,6 @@
 # Конфигурация
 
-Система знает про паттерны, события и праздники через конфиги.
+Система знает про инструменты, паттерны, события и праздники через конфиги.
 
 ## Зачем
 
@@ -8,123 +8,123 @@
 
 ```
 User: "что было в день OPEX?"
-           ↓
+      ↓
 Executor: проверяет config/market/events.py
-           ↓
+      ↓
 Presenter: "15 января был OPEX — monthly options expiration"
 ```
 
-## Паттерны свечей
+## Структура
 
-`agent/config/patterns/candle.py`
-
-```python
-"hammer": {
-    "name": "Hammer",
-    "category": "reversal",     # reversal, continuation, neutral
-    "signal": "bullish",        # bullish, bearish, neutral  
-    "importance": "medium",     # high, medium, low
-    "description": "Молот — потенциальный разворот вверх"
-}
+```
+agent/config/
+├── market/
+│   ├── instruments.py   # Инструменты и сессии
+│   ├── holidays.py      # Праздники
+│   └── events.py        # OPEX, NFP, FOMC...
+├── patterns/
+│   ├── candle.py        # Свечные паттерны
+│   └── price.py         # Ценовые паттерны
+└── backtest/            # (будущее)
 ```
 
-**Importance** определяет когда упоминать:
-- **high** — всегда (engulfing, morning star)
-- **medium** — если паттернов немного
-- **low** — только если совсем мало
+## Инструменты
 
-Presenter смотрит на importance и решает что включить в ответ.
+`market/instruments.py` — параметры торговых инструментов.
+
+| Параметр | NQ |
+|----------|-----|
+| Биржа | CME |
+| Данные | 2008 — 2026 |
+| Торговый день | 18:00 prev → 17:00 current (ET) |
+| Maintenance | 17:00 — 18:00 (нет данных) |
+
+**Сессии:**
+
+| Сессия | Время (ET) |
+|--------|------------|
+| RTH | 09:30 — 17:00 |
+| ETH | 18:00 — 17:00 (full day) |
+| OVERNIGHT | 18:00 — 09:30 |
+| ASIAN | 18:00 — 03:00 |
+| EUROPEAN | 03:00 — 09:30 |
+
+## Праздники
+
+`market/holidays.py` — когда рынок закрыт или закрывается раньше.
+
+**Полностью закрыт:**
+- New Year's Day, MLK Day, Presidents Day
+- Good Friday, Memorial Day, Juneteenth
+- Independence Day, Labor Day, Thanksgiving, Christmas
+
+**Early close (13:00 ET):**
+- Independence Day Eve, Black Friday
+- Christmas Eve, New Year's Eve
+
+Date Resolver автоматически пропускает праздники при расчёте "вчера", "прошлая неделя".
 
 ## Рыночные события
 
-`agent/config/market/events.py`
+`market/events.py` — регулярные события, влияющие на волатильность.
 
-| Событие | Что это | Как определяется |
-|---------|---------|------------------|
+| Событие | Что это | Когда |
+|---------|---------|-------|
 | **OPEX** | Monthly options expiration | 3-я пятница месяца |
 | **Quad Witching** | 4 типа контрактов экспирятся | 3-я пятница Mar/Jun/Sep/Dec |
 | **NFP** | Non-farm payrolls | 1-я пятница месяца |
 | **FOMC** | Fed meeting | по расписанию |
+| **VIX Expiration** | VIX settlement | среда за 30 дней до SPX expiry |
 
-```python
-# Проверка даты
-events = check_dates_for_events(["2024-01-19"])
-# → {"2024-01-19": ["OPEX"]}
-```
+Presenter упоминает события когда они релевантны анализу.
 
-## Праздники
+## Свечные паттерны
 
-`agent/config/market/holidays.py`
+`patterns/candle.py` — определения паттернов для детекции и объяснения.
 
-```python
-# US Market Holidays
-"2024-01-01": "New Year's Day"
-"2024-01-15": "MLK Day"
-"2024-02-19": "Presidents Day"
-...
+**Reversal (разворотные):**
+- hammer, inverted_hammer, hanging_man, shooting_star
+- bullish_engulfing, bearish_engulfing
+- morning_star, evening_star
 
-# Early Close (1:00 PM ET)
-"2024-07-03": "Independence Day Eve"
-"2024-11-29": "Black Friday"
-```
+**Continuation (продолжение):**
+- three_white_soldiers, three_black_crows
 
-```python
-# Проверка
-is_trading_day("NQ", date(2024, 12, 25))  # False (Christmas)
-get_day_type("NQ", date(2024, 11, 29))    # "early_close"
-```
+**Neutral:**
+- doji, dragonfly_doji, gravestone_doji
+- spinning_top, marubozu
 
-## Как агенты используют конфиги
+Каждый паттерн имеет: category, signal (bullish/bearish/neutral), importance, reliability.
 
-### Parser
-Не использует конфиги напрямую — просто парсит вопрос.
+## Ценовые паттерны
 
-### Executor
-```python
-# Date Resolver учитывает праздники
-"yesterday" → пропускает выходные и праздники
-```
+`patterns/price.py` — структурные паттерны на нескольких барах.
 
-### Presenter
-```python
-# Проверяет какие события были в данных
-events = check_dates_for_events(dates)
-holidays = check_dates_for_holidays(dates)
-patterns = scan_patterns(rows)
+**Consolidation:**
+- inside_bar — range внутри предыдущего бара
+- narrow_range_4 (NR4) — минимальный range за 4 бара
+- narrow_range_7 (NR7) — минимальный range за 7 баров
 
-# Формирует контекст
-"3× OPEX days, 1× NFP, 5× hammer patterns"
-```
+**Trend:**
+- higher_high, higher_low — uptrend structure
+- lower_low, lower_high — downtrend structure
 
-## Добавление нового
+**Breakout:**
+- breakout_high, breakout_low — пробой уровня
 
-**Новый паттерн:**
-```python
-# agent/config/patterns/candle.py
-"new_pattern": {
-    "name": "New Pattern",
-    "category": "...",
-    "signal": "...",
-    "importance": "...",
-    "description": "..."
-}
-```
+## Backtest (будущее)
 
-**Новое событие:**
-```python
-# agent/config/market/events.py
-def is_new_event(d: date) -> bool:
-    # логика определения
-    return True/False
-```
+`backtest/` — наброски для будущего бэктестинга:
 
-**Новый праздник:**
-```python
-# agent/config/market/holidays.py
-US_HOLIDAYS = {
-    ...
-    date(2025, 1, 1): "New Year's Day",
-}
-```
+- Position sizing: fixed, percent, risk_based, kelly
+- Execution: slippage, commission, initial_capital
+- Output: 25+ метрик (win_rate, sharpe, drawdown...)
 
-Конфиги — это knowledge base системы. LLM не нужно знать когда OPEX — система знает.
+## Кто использует
+
+| Компонент | Что берёт из конфигов |
+|-----------|----------------------|
+| **Date Resolver** | Праздники — пропускает при расчёте дат |
+| **Executor** | Инструменты — сессии, торговые дни |
+| **Presenter** | События, праздники, паттерны — контекст для ответа |
+| **Scanner** | Паттерны — параметры детекции |

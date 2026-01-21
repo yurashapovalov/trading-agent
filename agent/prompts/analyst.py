@@ -27,13 +27,18 @@ def _format_instrument_context(symbol: str | None) -> str:
     data_start = instrument.get("data_start", "unknown")
     data_end = instrument.get("data_end", "unknown")
 
+    trading_day = instrument.get("trading_day", {})
+    trading_start = trading_day.get("start", "18:00")
+    trading_end = trading_day.get("end", "17:00")
+    maintenance = instrument.get("maintenance", ("17:00", "18:00"))
+
     return f"""<instrument>
 You are analyzing: {symbol} ({instrument['name']})
 Exchange: {instrument['exchange']}
 Available data: {data_start} to {data_end}
-Trading hours: {instrument['trading_day_start']} prev day → {instrument['trading_day_end']} current day (ET)
+Trading hours: {trading_start} prev day → {trading_end} current day (ET)
 Sessions: {session_list}
-Maintenance break: {instrument['maintenance'][0]}-{instrument['maintenance'][1]} ET (no data)
+Maintenance break: {maintenance[0]}-{maintenance[1]} ET (no data)
 </instrument>"""
 
 
@@ -233,8 +238,8 @@ def get_analyst_prompt(
         chat_history: Previous messages for context
         search_condition: Natural language condition for filtering data
         symbol: Trading instrument (NQ, ES, etc.) for context
-        holiday_info: Info about holidays in requested dates (from Barb)
-        event_info: Info about events in requested dates (OPEX, NFP, etc. from Barb)
+        holiday_info: Info about holidays in requested dates
+        event_info: Info about events in requested dates (OPEX, NFP, etc.)
         assumptions: List of assumptions made by Understander (for transparency)
 
     Returns:

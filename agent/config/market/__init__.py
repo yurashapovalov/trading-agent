@@ -7,9 +7,8 @@ Market data — источники правды о торговых инстру
 - events: Регулярные события (FOMC, NFP, OPEX, EIA...)
 
 Используется:
-- QueryBuilder для построения SQL
-- Barb для валидации дат
-- Analyst для контекста ответов
+- Executor для построения SQL и валидации дат
+- Presenter для контекста ответов
 """
 
 from agent.config.market.instruments import (
