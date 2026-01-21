@@ -108,8 +108,9 @@ return None
 - [x] Cleanup артефактов
 - [x] Token caching (73% savings)
 - [x] Unit tests (60 tests)
+- [x] Supabase persistence (conversation memory)
 
 ### Next
-- [ ] Supabase persistence
 - [ ] Anomaly Finder (docs/plans/anomaly_finder.md)
 - [ ] More instruments (ES, CL, GC)
+- [ ] Auto-detect user language → key_facts
