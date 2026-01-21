@@ -436,6 +436,7 @@ class Barb:
         Stream SSE events for the question.
 
         Yields dicts with event data for API to serialize.
+        Uses stream_mode="updates" to get node-by-node updates with proper timing.
         """
         start_time = time.time()
 
@@ -448,75 +449,100 @@ class Barb:
             "step_number": 0,
         }
 
-        # Track which nodes we've seen and their usage
-        seen_nodes = set()
-        node_start_times = {}
-        last_state = {}
-        prev_usage = Usage()  # Track usage before each agent
+        # Track state and timing
+        current_state = dict(initial_state)
+        prev_usage = Usage()
+        node_start_time = time.time()  # First node starts now
+        current_agent = None
+
+        # Map LangGraph node names to our agent names
+        NODE_TO_AGENT = {
+            "parser": "parser",
+            "executor": "executor",
+            "clarifier": "clarifier",
+            "chitchat": "responder",
+            "concept": "responder",
+        }
 
         try:
-            # Stream through graph nodes
-            for state in self.graph.stream(initial_state, stream_mode="values"):
-                last_state = state
-                agents_used = state.get("agents_used", [])
+            # Stream through graph with updates mode
+            for update in self.graph.stream(initial_state, stream_mode="updates"):
+                # update is dict like {"node_name": {state_updates}}
+                for node_name, node_updates in update.items():
+                    # Skip empty updates (LangGraph returns None for empty dict returns)
+                    if node_updates is None:
+                        continue
 
-                # Detect new agents
-                for agent in agents_used:
-                    if agent not in seen_nodes:
-                        seen_nodes.add(agent)
-                        node_start_times[agent] = time.time()
+                    # Skip internal nodes
+                    if node_name in ("load_memory", "save_memory", "__start__"):
+                        # Merge updates into current state
+                        current_state.update(node_updates)
+                        continue
 
-                        # Emit step_start
-                        yield {
-                            "type": "step_start",
-                            "agent": agent,
-                        }
+                    agent = NODE_TO_AGENT.get(node_name)
+                    if not agent:
+                        current_state.update(node_updates)
+                        continue
 
-                        # Calculate per-agent usage (delta)
-                        current_usage_dict = state.get("usage") or {}
-                        current_usage = Usage.model_validate(current_usage_dict) if current_usage_dict else Usage()
-                        agent_usage = Usage(
-                            input_tokens=current_usage.input_tokens - prev_usage.input_tokens,
-                            output_tokens=current_usage.output_tokens - prev_usage.output_tokens,
-                            thinking_tokens=current_usage.thinking_tokens - prev_usage.thinking_tokens,
-                            cached_tokens=current_usage.cached_tokens - prev_usage.cached_tokens,
-                        )
-                        prev_usage = current_usage  # Update for next agent
-
-                        # Emit step_end with data including usage
-                        duration_ms = int((time.time() - node_start_times[agent]) * 1000)
-                        output = self._get_agent_output(agent, state)
-                        output["usage"] = {
-                            "input_tokens": agent_usage.input_tokens,
-                            "output_tokens": agent_usage.output_tokens,
-                            "thinking_tokens": agent_usage.thinking_tokens,
-                            "cached_tokens": agent_usage.cached_tokens,
-                            "cost_usd": agent_usage.cost(config.GEMINI_LITE_MODEL),
-                        }
-
-                        yield {
-                            "type": "step_end",
-                            "agent": agent,
-                            "duration_ms": duration_ms,
-                            "input": self._get_agent_input(agent, state),
-                            "output": output,
-                        }
-
-                # Stream response text if available
-                response = state.get("response")
-                if response and not state.get("_response_sent"):
+                    # Emit step_start for this agent
                     yield {
-                        "type": "text_delta",
-                        "content": response,
+                        "type": "step_start",
+                        "agent": agent,
                     }
-                    # Mark as sent to avoid duplicates
-                    state["_response_sent"] = True
+
+                    # Merge updates into current state
+                    current_state.update(node_updates)
+
+                    # Calculate duration (time since node started)
+                    duration_ms = int((time.time() - node_start_time) * 1000)
+
+                    # Calculate per-agent usage (delta)
+                    current_usage_dict = current_state.get("usage") or {}
+                    current_usage = Usage.model_validate(current_usage_dict) if current_usage_dict else Usage()
+                    agent_usage = Usage(
+                        input_tokens=current_usage.input_tokens - prev_usage.input_tokens,
+                        output_tokens=current_usage.output_tokens - prev_usage.output_tokens,
+                        thinking_tokens=current_usage.thinking_tokens - prev_usage.thinking_tokens,
+                        cached_tokens=current_usage.cached_tokens - prev_usage.cached_tokens,
+                    )
+                    prev_usage = current_usage
+
+                    # Build output with usage
+                    output = self._get_agent_output(agent, current_state)
+                    output["usage"] = {
+                        "input_tokens": agent_usage.input_tokens,
+                        "output_tokens": agent_usage.output_tokens,
+                        "thinking_tokens": agent_usage.thinking_tokens,
+                        "cached_tokens": agent_usage.cached_tokens,
+                        "cost_usd": agent_usage.cost(config.GEMINI_LITE_MODEL),
+                    }
+
+                    # Emit step_end with timing and data
+                    yield {
+                        "type": "step_end",
+                        "agent": agent,
+                        "duration_ms": duration_ms,
+                        "input": self._get_agent_input(agent, current_state),
+                        "output": output,
+                    }
+
+                    # Stream response text if available
+                    response = current_state.get("response")
+                    if response:
+                        yield {
+                            "type": "text_delta",
+                            "content": response,
+                        }
+
+                    # Next node starts now
+                    node_start_time = time.time()
+                    current_agent = agent
 
             # Final state
             total_duration_ms = int((time.time() - start_time) * 1000)
 
-            # Usage from aggregated state (stored as dict)
-            usage_dict = last_state.get("usage") or {}
+            # Usage from aggregated state
+            usage_dict = current_state.get("usage") or {}
             usage = Usage.model_validate(usage_dict) if usage_dict else Usage()
             yield {
                 "type": "usage",
@@ -530,7 +556,7 @@ class Barb:
             yield {
                 "type": "done",
                 "total_duration_ms": total_duration_ms,
-                "response": last_state.get("response", ""),
+                "response": current_state.get("response", ""),
             }
 
         except Exception as e:
