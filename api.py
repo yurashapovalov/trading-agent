@@ -661,20 +661,21 @@ async def chat_stream(request: ChatRequest, user_id: str = Depends(require_auth)
                     agent_name = event.get("agent")
                     step_number += 1
                     duration_ms = event.get("duration_ms", 0)
-                    result = event.get("result") or {}
+                    output = event.get("output") or event.get("result") or {}
 
-                    # Get route from barb
-                    if agent_name == "barb":
-                        route = result.get("type")
+                    # Track which agent generates the final response
+                    # (responder for chitchat/concept, clarifier for questions, presenter for data)
+                    if agent_name in ("responder", "clarifier", "presenter") and output.get("response"):
+                        route = agent_name
 
-                    # Log trace step (use 'output' for full data, fallback to 'result')
+                    # Log trace step
                     await log_trace_step(
                         request_id=request_id,
                         user_id=user_id,
                         step_number=step_number,
                         agent_name=agent_name,
                         input_data=event.get("input"),
-                        output_data=event.get("output") or event.get("result"),
+                        output_data=output,
                         duration_ms=duration_ms,
                     )
 

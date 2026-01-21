@@ -7,7 +7,7 @@ Flow:
                  ├── concept → Responder → END
                  └── data → Parser (with thinking) → Router
                                                        ├── unclear → Clarifier → END (or loop)
-                                                       └── Executor → END
+                                                       └── Executor → Presenter → END
 """
 
 from typing import Literal
@@ -358,26 +358,36 @@ def handle_executor(state: AgentState) -> dict:
     """
     Executor node — get data and compute result.
 
-    Uses Presenter to format response based on data size and context.
+    Only executes query, presentation is done by Presenter node.
     """
     parsed_dict = state.get("parsed_query", {})
     parsed = ParsedQuery.model_validate(parsed_dict)
 
-    # Get original question for Presenter (in user's language)
-    question = get_current_question(state)
-    lang = state.get("lang", "en")
-
     result = execute(parsed, symbol="NQ", today=date.today())
 
-    # Use Presenter to format response
+    return {
+        "data": result,
+        "agents_used": state.get("agents_used", []) + ["executor"],
+    }
+
+
+def handle_presenter(state: AgentState) -> dict:
+    """
+    Presenter node — format data for user.
+
+    Takes execution result and formats response based on data size and context.
+    """
+    question = get_current_question(state)
+    lang = state.get("lang", "en")
+    data = state.get("data", {})
+
     presenter = Presenter(symbol="NQ")
-    presentation = presenter.present(data=result, question=question, lang=lang)
+    presentation = presenter.present(data=data, question=question, lang=lang)
 
     return {
         "response": presentation.text,
         "messages": [AIMessage(content=presentation.text)],
-        "data": result,
-        "agents_used": state.get("agents_used", []) + ["executor", "presenter"],
+        "agents_used": state.get("agents_used", []) + ["presenter"],
     }
 
 
@@ -399,7 +409,7 @@ def build_graph() -> StateGraph:
                                                             ├── concept → save_memory → END
                                                             └── data → parser → route_after_parser
                                                                                   ├── unclear → clarifier
-                                                                                  └── executor → save_memory → END
+                                                                                  └── executor → presenter → save_memory → END
     """
     graph = StateGraph(AgentState)
 
@@ -411,6 +421,7 @@ def build_graph() -> StateGraph:
     graph.add_node("concept", handle_concept)
     graph.add_node("clarifier", handle_clarification)
     graph.add_node("executor", handle_executor)
+    graph.add_node("presenter", handle_presenter)
     graph.add_node("save_memory", save_memory)
 
     # Start with loading memory
@@ -460,7 +471,8 @@ def build_graph() -> StateGraph:
     # All response nodes go to save_memory before END
     graph.add_edge("chitchat", "save_memory")
     graph.add_edge("concept", "save_memory")
-    graph.add_edge("executor", "save_memory")
+    graph.add_edge("executor", "presenter")  # Executor → Presenter → save_memory
+    graph.add_edge("presenter", "save_memory")
 
     # save_memory goes to END
     graph.add_edge("save_memory", END)
@@ -538,6 +550,7 @@ class Barb:
             "intent": "intent",      # Fast intent classifier
             "parser": "parser",      # Full parser with thinking
             "executor": "executor",
+            "presenter": "presenter",  # Formats data for user
             "clarifier": "clarifier",
             "chitchat": "responder",
             "concept": "responder",
@@ -660,6 +673,13 @@ class Barb:
             return {
                 "parsed_query": state.get("parsed_query"),
             }
+        elif agent == "presenter":
+            data = state.get("data") or {}
+            return {
+                "question": get_current_question(state),
+                "lang": state.get("lang"),
+                "row_count": data.get("row_count"),
+            }
         elif agent == "clarifier":
             return {
                 "question": get_current_question(state),
@@ -702,6 +722,10 @@ class Barb:
             if df is not None and hasattr(df, "to_dict"):
                 output["full_data"] = self._df_to_dict(df)
             return output
+        elif agent == "presenter":
+            return {
+                "response": state.get("response"),
+            }
         elif agent == "clarifier":
             return {
                 "response": state.get("response"),
