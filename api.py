@@ -622,9 +622,6 @@ async def chat_stream(request: ChatRequest, user_id: str = Depends(require_auth)
     # Supabase is only used for UI history display and analytics.
 
     async def generate():
-        import time
-        start_time = time.time()
-
         final_text = ""
         usage_data = {}
         request_id = str(uuid.uuid4())
@@ -633,7 +630,6 @@ async def chat_stream(request: ChatRequest, user_id: str = Depends(require_auth)
         validation_attempts = 0
         validation_passed = None
         step_number = 0
-        duration_ms = 0
 
         # Create chat_log entry FIRST so traces can reference it via FK
         await init_chat_log(
@@ -703,7 +699,25 @@ async def chat_stream(request: ChatRequest, user_id: str = Depends(require_auth)
 
                 elif event_type == "done":
                     duration_ms = event.get("total_duration_ms", 0)
-                    completed = True
+
+                    # Complete chat_log IMMEDIATELY (before any more yields)
+                    # This ensures logging happens even if client disconnects
+                    await complete_chat_log(
+                        request_id=request_id,
+                        chat_id=chat_id,
+                        response=final_text[:10000] if final_text else None,
+                        route=route,
+                        agents_used=list(set(agents_used)) if agents_used else [],
+                        validation_attempts=validation_attempts,
+                        validation_passed=validation_passed,
+                        input_tokens=usage_data.get("input_tokens", 0),
+                        output_tokens=usage_data.get("output_tokens", 0),
+                        thinking_tokens=usage_data.get("thinking_tokens", 0),
+                        cost_usd=usage_data.get("cost", 0),
+                        duration_ms=duration_ms,
+                        model=config.GEMINI_MODEL,
+                        provider="gemini"
+                    )
 
                     # Generate chat title after 2-3 messages
                     new_title = await maybe_generate_chat_title(chat_id)
@@ -716,29 +730,6 @@ async def chat_stream(request: ChatRequest, user_id: str = Depends(require_auth)
         except Exception as e:
             print(f"[CHAT] Error: {e}")
             yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
-
-        finally:
-            # Compute duration if not set from done event
-            if duration_ms == 0:
-                duration_ms = int((time.time() - start_time) * 1000)
-
-            # Always complete chat_log, even if client disconnects early
-            await complete_chat_log(
-                request_id=request_id,
-                chat_id=chat_id,
-                response=final_text[:10000] if final_text else None,
-                route=route,
-                agents_used=list(set(agents_used)) if agents_used else [],
-                validation_attempts=validation_attempts,
-                validation_passed=validation_passed,
-                input_tokens=usage_data.get("input_tokens", 0),
-                output_tokens=usage_data.get("output_tokens", 0),
-                thinking_tokens=usage_data.get("thinking_tokens", 0),
-                cost_usd=usage_data.get("cost", 0),
-                duration_ms=duration_ms,
-                model=config.GEMINI_MODEL,
-                provider="gemini"
-            )
 
     return StreamingResponse(
         generate(),
