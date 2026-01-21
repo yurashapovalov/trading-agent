@@ -34,18 +34,20 @@ def load_memory(state: AgentState) -> dict:
     Load conversation memory and add current user message.
 
     Runs at the start of each invoke to:
-    1. Get/create memory for session
+    1. Get/create memory for session (loads from Supabase if exists)
     2. Add user message to memory
     3. Put memory context into state for downstream nodes
     """
-    session_id = state.get("session_id") or str(uuid.uuid4())
+    # session_id is actually chat_id from API
+    chat_id = state.get("session_id") or str(uuid.uuid4())
+    user_id = state.get("user_id")
     question = get_current_question(state)
 
-    # Get memory for session
+    # Get memory for chat (auto-loads from Supabase)
     manager = get_memory_manager()
-    memory = manager.get_or_create(session_id)
+    memory = manager.get_or_create(chat_id=chat_id, user_id=user_id)
 
-    # Add user message to memory
+    # Add user message to memory (not saved to DB here - API does that via chat_logs)
     if question:
         memory.add_message("user", question)
 
@@ -53,7 +55,7 @@ def load_memory(state: AgentState) -> dict:
     memory_context = memory.get_context()
 
     return {
-        "session_id": session_id,
+        "session_id": chat_id,
         "memory_context": memory_context,
     }
 
@@ -235,13 +237,16 @@ def save_memory(state: AgentState) -> dict:
     Save assistant response to memory.
 
     Runs before END to persist the conversation turn.
+    Note: Actual persistence to chat_logs is done by API layer.
+    This updates in-memory state and may trigger compaction → summary save.
     """
-    session_id = state.get("session_id")
+    chat_id = state.get("session_id")
+    user_id = state.get("user_id")
     response = state.get("response")
 
-    if session_id and response:
+    if chat_id and response:
         manager = get_memory_manager()
-        memory = manager.get_or_create(session_id)
+        memory = manager.get_or_create(chat_id=chat_id, user_id=user_id)
         memory.add_message("assistant", response)
 
     return {}

@@ -1,21 +1,19 @@
 """
-Tiered Conversation Memory.
+Tiered Conversation Memory with Supabase persistence.
 
 Smart memory that balances detail and efficiency:
-- Recent messages: Full text (last N messages)
-- Older messages: LLM-generated summaries
-- Key facts: Extracted important info
+- Recent messages: Full text from chat_logs (last N messages)
+- Older messages: LLM-generated summaries in chat_sessions.memory
+- Key facts: Extracted important info in chat_sessions.memory
 
 Usage:
-    memory = ConversationMemory()
+    memory = ConversationMemory(chat_id="xxx", user_id="yyy")
+    await memory.load()  # Load from Supabase
 
-    # Add messages
     memory.add_message("user", "привет")
     memory.add_message("assistant", "Привет! Чем помочь?")
 
-    # Get context for LLM
     context = memory.get_context()
-    # Returns formatted string with key_facts + summary + recent
 """
 
 import logging
@@ -37,45 +35,256 @@ class Message:
     role: str  # "user" or "assistant"
     content: str
     timestamp: datetime = field(default_factory=datetime.now)
+    db_id: int | None = None  # chat_logs.id if from DB
 
 
 @dataclass
 class ConversationMemory:
     """
-    Tiered conversation memory.
+    Tiered conversation memory with Supabase persistence.
 
     Tiers:
-    1. Recent (full text) - last `recent_limit` messages
-    2. Summaries - compressed older messages
-    3. Key facts - important extracted info
+    1. Recent (full text) - last `recent_limit` messages from chat_logs
+    2. Summaries - compressed older messages in chat_sessions.memory
+    3. Key facts - important extracted info in chat_sessions.memory
 
     Config:
-    - recent_limit: Max recent messages to keep full
+    - recent_limit: Max recent messages to keep (pairs * 2)
     - summary_chunk_size: Messages per summary
     - max_summaries: Max summaries to keep
     """
 
-    recent_limit: int = 10
-    summary_chunk_size: int = 5
+    # DB identifiers
+    chat_id: str | None = None
+    user_id: str | None = None
+
+    # Config
+    recent_limit: int = 10  # 5 pairs of (question, response)
+    summary_chunk_size: int = 6  # 3 pairs
     max_summaries: int = 3
 
+    # Memory tiers
     recent: list[Message] = field(default_factory=list)
-    summaries: list[str] = field(default_factory=list)
+    summaries: list[dict] = field(default_factory=list)  # [{content, up_to_id}]
     key_facts: list[str] = field(default_factory=list)
 
+    # Internal
     _client: Optional[genai.Client] = field(default=None, repr=False)
+    _supabase: Optional[object] = field(default=None, repr=False)
+    _loaded: bool = field(default=False, repr=False)
+    _last_db_id: int | None = field(default=None, repr=False)  # Last chat_logs.id we've seen
 
     def __post_init__(self):
         if self._client is None:
             self._client = genai.Client(api_key=config.GOOGLE_API_KEY)
 
-    def add_message(self, role: str, content: str):
+    def _get_supabase(self):
+        """Lazy load Supabase client."""
+        if self._supabase is None and config.SUPABASE_URL:
+            from supabase import create_client
+            self._supabase = create_client(config.SUPABASE_URL, config.SUPABASE_SERVICE_KEY)
+        return self._supabase
+
+    # =========================================================================
+    # LOAD FROM DB
+    # =========================================================================
+
+    async def load(self) -> bool:
+        """
+        Load memory from Supabase.
+
+        - Recent messages from chat_logs
+        - Summaries and key_facts from chat_sessions.memory
+
+        Returns True if loaded successfully.
+        """
+        if not self.chat_id or self._loaded:
+            return False
+
+        supabase = self._get_supabase()
+        if not supabase:
+            return False
+
+        try:
+            # 1. Load summaries and key_facts from chat_sessions
+            session_result = supabase.table("chat_sessions") \
+                .select("memory") \
+                .eq("id", self.chat_id) \
+                .execute()
+
+            if session_result.data:
+                memory_data = session_result.data[0].get("memory") or {}
+                self.summaries = memory_data.get("summaries", [])
+                self.key_facts = memory_data.get("key_facts", [])
+
+                # Get last summarized id
+                if self.summaries:
+                    self._last_db_id = self.summaries[-1].get("up_to_id")
+
+            # 2. Load recent messages from chat_logs
+            query = supabase.table("chat_logs") \
+                .select("id, question, response, created_at") \
+                .eq("chat_id", self.chat_id) \
+                .order("created_at", desc=True) \
+                .limit(self.recent_limit // 2)  # Pairs, not messages
+
+            # Only get messages after last summary
+            if self._last_db_id:
+                query = query.gt("id", self._last_db_id)
+
+            logs_result = query.execute()
+
+            if logs_result.data:
+                # Reverse to get chronological order
+                for row in reversed(logs_result.data):
+                    # Add user message
+                    self.recent.append(Message(
+                        role="user",
+                        content=row["question"],
+                        timestamp=datetime.fromisoformat(row["created_at"].replace("Z", "+00:00")),
+                        db_id=row["id"],
+                    ))
+                    # Add assistant message (if exists)
+                    if row.get("response"):
+                        self.recent.append(Message(
+                            role="assistant",
+                            content=row["response"],
+                            timestamp=datetime.fromisoformat(row["created_at"].replace("Z", "+00:00")),
+                            db_id=row["id"],
+                        ))
+
+            self._loaded = True
+            logger.debug(f"Loaded memory for chat {self.chat_id}: {len(self.recent)} recent, {len(self.summaries)} summaries")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to load memory: {e}")
+            return False
+
+    def load_sync(self) -> bool:
+        """Synchronous version of load()."""
+        import asyncio
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # Can't run async in running loop, do sync version
+                return self._load_sync_impl()
+            return loop.run_until_complete(self.load())
+        except RuntimeError:
+            return asyncio.run(self.load())
+
+    def _load_sync_impl(self) -> bool:
+        """Direct sync implementation."""
+        if not self.chat_id or self._loaded:
+            return False
+
+        supabase = self._get_supabase()
+        if not supabase:
+            return False
+
+        try:
+            # Same logic as async but synchronous
+            session_result = supabase.table("chat_sessions") \
+                .select("memory") \
+                .eq("id", self.chat_id) \
+                .execute()
+
+            if session_result.data:
+                memory_data = session_result.data[0].get("memory") or {}
+                self.summaries = memory_data.get("summaries", [])
+                self.key_facts = memory_data.get("key_facts", [])
+                if self.summaries:
+                    self._last_db_id = self.summaries[-1].get("up_to_id")
+
+            query = supabase.table("chat_logs") \
+                .select("id, question, response, created_at") \
+                .eq("chat_id", self.chat_id) \
+                .order("created_at", desc=True) \
+                .limit(self.recent_limit // 2)
+
+            if self._last_db_id:
+                query = query.gt("id", self._last_db_id)
+
+            logs_result = query.execute()
+
+            if logs_result.data:
+                for row in reversed(logs_result.data):
+                    self.recent.append(Message(
+                        role="user",
+                        content=row["question"],
+                        timestamp=datetime.fromisoformat(row["created_at"].replace("Z", "+00:00")),
+                        db_id=row["id"],
+                    ))
+                    if row.get("response"):
+                        self.recent.append(Message(
+                            role="assistant",
+                            content=row["response"],
+                            timestamp=datetime.fromisoformat(row["created_at"].replace("Z", "+00:00")),
+                            db_id=row["id"],
+                        ))
+
+            self._loaded = True
+            return True
+        except Exception as e:
+            logger.error(f"Failed to load memory (sync): {e}")
+            return False
+
+    # =========================================================================
+    # SAVE TO DB
+    # =========================================================================
+
+    async def save_memory_state(self):
+        """Save summaries and key_facts to chat_sessions.memory."""
+        if not self.chat_id:
+            return
+
+        supabase = self._get_supabase()
+        if not supabase:
+            return
+
+        try:
+            memory_data = {
+                "summaries": self.summaries,
+                "key_facts": self.key_facts,
+            }
+            supabase.table("chat_sessions") \
+                .update({"memory": memory_data}) \
+                .eq("id", self.chat_id) \
+                .execute()
+            logger.debug(f"Saved memory state for chat {self.chat_id}")
+        except Exception as e:
+            logger.error(f"Failed to save memory state: {e}")
+
+    def save_memory_state_sync(self):
+        """Synchronous version."""
+        import asyncio
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                asyncio.create_task(self.save_memory_state())
+            else:
+                loop.run_until_complete(self.save_memory_state())
+        except RuntimeError:
+            asyncio.run(self.save_memory_state())
+
+    # =========================================================================
+    # MESSAGE MANAGEMENT
+    # =========================================================================
+
+    def add_message(self, role: str, content: str, db_id: int | None = None):
         """
         Add message to memory.
 
+        Note: Messages are persisted to chat_logs by the API layer,
+        not here. This just updates in-memory state.
+
         Automatically compacts when recent exceeds limit.
         """
-        self.recent.append(Message(role=role, content=content))
+        self.recent.append(Message(role=role, content=content, db_id=db_id))
+
+        # Track last db_id for summarization boundary
+        if db_id and (self._last_db_id is None or db_id > self._last_db_id):
+            self._last_db_id = db_id
 
         # Compact if needed
         if len(self.recent) > self.recent_limit + self.summary_chunk_size:
@@ -86,6 +295,12 @@ class ConversationMemory:
         if fact not in self.key_facts:
             self.key_facts.append(fact)
             logger.debug(f"Added key fact: {fact}")
+            # Save to DB
+            self.save_memory_state_sync()
+
+    # =========================================================================
+    # CONTEXT GENERATION
+    # =========================================================================
 
     def get_context(self, max_tokens: int = 2000) -> str:
         """
@@ -102,9 +317,8 @@ class ConversationMemory:
 
         # Summaries (compressed history)
         if self.summaries:
-            # Take last N summaries
             recent_summaries = self.summaries[-self.max_summaries:]
-            summary_text = "\n".join(recent_summaries)
+            summary_text = "\n".join(s["content"] for s in recent_summaries)
             parts.append(f"<history_summary>\n{summary_text}\n</history_summary>")
 
         # Recent messages (full detail)
@@ -122,10 +336,15 @@ class ConversationMemory:
         ]
 
     def clear(self):
-        """Clear all memory."""
+        """Clear all memory (in-memory only, doesn't affect DB)."""
         self.recent.clear()
         self.summaries.clear()
         self.key_facts.clear()
+        self._last_db_id = None
+
+    # =========================================================================
+    # COMPACTION (Summarization)
+    # =========================================================================
 
     def _compact(self):
         """Compress oldest messages into summary."""
@@ -136,19 +355,36 @@ class ConversationMemory:
         chunk = self.recent[:self.summary_chunk_size]
         self.recent = self.recent[self.summary_chunk_size:]
 
+        # Get the last db_id in chunk for tracking
+        chunk_last_id = None
+        for msg in reversed(chunk):
+            if msg.db_id:
+                chunk_last_id = msg.db_id
+                break
+
         # Generate summary
-        summary = self._summarize_chunk(chunk)
-        if summary:
-            self.summaries.append(summary)
+        summary_text = self._summarize_chunk(chunk)
+        if summary_text:
+            self.summaries.append({
+                "content": summary_text,
+                "up_to_id": chunk_last_id,
+            })
 
             # Limit summaries
             if len(self.summaries) > self.max_summaries * 2:
                 # Merge old summaries
                 old_summaries = self.summaries[:-self.max_summaries]
                 self.summaries = self.summaries[-self.max_summaries:]
-                merged = self._merge_summaries(old_summaries)
+                merged = self._merge_summaries([s["content"] for s in old_summaries])
                 if merged:
-                    self.summaries.insert(0, merged)
+                    # Keep the oldest up_to_id for the merged summary
+                    self.summaries.insert(0, {
+                        "content": merged,
+                        "up_to_id": old_summaries[-1].get("up_to_id"),
+                    })
+
+            # Save to DB
+            self.save_memory_state_sync()
 
         logger.debug(f"Compacted {len(chunk)} messages into summary")
 
