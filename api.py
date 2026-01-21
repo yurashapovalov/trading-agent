@@ -263,10 +263,9 @@ async def delete_chat(chat_id: str, user_id: str = Depends(require_auth)):
         if not result.data:
             raise HTTPException(status_code=404, detail="Chat not found")
 
-        # Clear LangGraph checkpointer context for this chat
-        from agent.checkpointer import clear_thread_checkpoint
-        thread_id = f"{user_id}_{chat_id}"
-        clear_thread_checkpoint(thread_id)
+        # Clear memory for this chat session
+        from agent.memory import get_memory_manager
+        get_memory_manager().delete(chat_id)
 
         return {"status": "ok", "deleted": chat_id}
     except HTTPException:
@@ -619,7 +618,7 @@ async def chat_stream(request: ChatRequest, user_id: str = Depends(require_auth)
     chat_id = get_or_create_chat_session(user_id, request.chat_id)
 
     # NOTE: chat_history is NOT loaded for LLM context anymore!
-    # LangGraph checkpointer handles message accumulation automatically by thread_id.
+    # Memory module handles conversation context (agent/memory/).
     # Supabase is only used for UI history display and analytics.
 
     async def generate():
@@ -645,7 +644,7 @@ async def chat_stream(request: ChatRequest, user_id: str = Depends(require_auth)
             for event in trading_graph.stream_sse(
                 question=request.message,
                 user_id=user_id,
-                session_id=chat_id,  # Use chat_id as session_id for LangGraph checkpointer
+                session_id=chat_id,  # Use chat_id as session_id for memory
                 request_id=request_id,  # Pass request_id so frontend gets the same ID saved to DB
             ):
                 yield f"data: {json.dumps(clean_for_json(event), default=str)}\n\n"

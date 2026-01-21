@@ -1,0 +1,258 @@
+"""Supabase logging for request traces and completions.
+
+Logs to two tables:
+- request_traces: Per-agent step data (input, output, duration)
+- chat_logs: Complete request summary (question, response, usage)
+
+Both async and sync versions provided for different contexts.
+"""
+
+import json
+from datetime import datetime
+from typing import Any
+from supabase import create_client
+
+import config
+
+
+def make_json_serializable(obj: Any) -> Any:
+    """Convert object to JSON-serializable format."""
+    if obj is None:
+        return None
+    # Convert to JSON string and back to handle Timestamps, etc.
+    try:
+        return json.loads(json.dumps(obj, default=str))
+    except (TypeError, ValueError):
+        return str(obj)
+
+# Initialize Supabase client
+_supabase = None
+
+
+def get_supabase():
+    """Get or create Supabase client."""
+    global _supabase
+    if _supabase is None and config.SUPABASE_URL:
+        _supabase = create_client(config.SUPABASE_URL, config.SUPABASE_SERVICE_KEY)
+    return _supabase
+
+
+async def init_chat_log(
+    request_id: str,
+    user_id: str,
+    chat_id: str | None,
+    session_id: str,
+    question: str,
+):
+    """
+    Create initial chat_log entry at the START of request.
+
+    This allows request_traces to reference the request_id via FK.
+    Response and stats will be updated at the end via complete_chat_log.
+    """
+    supabase = get_supabase()
+    if not supabase:
+        return
+
+    try:
+        supabase.table("chat_logs").insert({
+            "request_id": request_id,
+            "user_id": user_id,
+            "chat_id": chat_id,
+            "session_id": session_id,
+            "question": question,
+            "response": None,  # Will be updated at completion
+        }).execute()
+    except Exception as e:
+        print(f"Failed to init chat log: {e}")
+
+
+async def log_trace_step(
+    request_id: str,
+    user_id: str,
+    step_number: int,
+    agent_name: str,
+    input_data: dict | None = None,
+    output_data: dict | None = None,
+    duration_ms: int = 0,
+):
+    """
+    Log a single agent step to request_traces.
+
+    All agent-specific data (usage, validation, sql) goes into input_data/output_data JSONB.
+    """
+    supabase = get_supabase()
+    if not supabase:
+        return
+
+    try:
+        serializable_input = make_json_serializable(input_data)
+        serializable_output = make_json_serializable(output_data)
+
+        supabase.table("request_traces").insert({
+            "request_id": request_id,
+            "user_id": user_id,
+            "step_number": step_number,
+            "agent_name": agent_name,
+            "input_data": serializable_input,
+            "output_data": serializable_output,
+            "duration_ms": duration_ms,
+        }).execute()
+    except Exception as e:
+        print(f"Failed to log trace step: {e}")
+
+
+async def complete_chat_log(
+    request_id: str,
+    chat_id: str | None = None,
+    response: str = "",
+    route: str | None = None,
+    agents_used: list[str] | None = None,
+    validation_attempts: int = 1,
+    validation_passed: bool | None = None,
+    input_tokens: int = 0,
+    output_tokens: int = 0,
+    thinking_tokens: int = 0,
+    cost_usd: float = 0.0,
+    duration_ms: int = 0,
+    model: str | None = None,
+    provider: str = "gemini",
+):
+    """
+    Complete chat_log entry at the END of request.
+
+    Updates the row created by init_chat_log with response and stats.
+    Also updates chat_sessions stats if chat_id provided.
+    """
+    supabase = get_supabase()
+    if not supabase:
+        return
+
+    try:
+        # Truncate response if too long
+        if len(response) > 10000:
+            response = response[:10000] + "... [truncated]"
+
+        supabase.table("chat_logs").update({
+            "response": response,
+            "route": route,
+            "agents_used": agents_used or [],
+            "validation_attempts": validation_attempts,
+            "validation_passed": validation_passed,
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "thinking_tokens": thinking_tokens,
+            "cost_usd": cost_usd,
+            "duration_ms": duration_ms,
+            "model": model,
+            "provider": provider,
+        }).eq("request_id", request_id).execute()
+
+        # Update chat_sessions stats if chat_id provided
+        if chat_id:
+            await update_chat_session_stats(
+                chat_id=chat_id,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                thinking_tokens=thinking_tokens,
+                cost_usd=cost_usd,
+            )
+
+    except Exception as e:
+        print(f"Failed to complete chat log: {e}")
+
+
+async def update_chat_session_stats(
+    chat_id: str,
+    input_tokens: int = 0,
+    output_tokens: int = 0,
+    thinking_tokens: int = 0,
+    cost_usd: float = 0.0,
+):
+    """Increment chat_sessions stats JSONB field."""
+    supabase = get_supabase()
+    if not supabase:
+        return
+
+    try:
+        # Use raw SQL to increment JSONB values atomically
+        supabase.rpc("increment_chat_stats", {
+            "p_chat_id": chat_id,
+            "p_input_tokens": input_tokens,
+            "p_output_tokens": output_tokens,
+            "p_thinking_tokens": thinking_tokens,
+            "p_cost_usd": cost_usd,
+        }).execute()
+    except Exception as e:
+        # Fallback: read-modify-write (less safe but works without RPC)
+        try:
+            result = supabase.table("chat_sessions") \
+                .select("stats") \
+                .eq("id", chat_id) \
+                .execute()
+
+            if result.data:
+                stats = result.data[0].get("stats") or {}
+                stats["message_count"] = (stats.get("message_count") or 0) + 1
+                stats["input_tokens"] = (stats.get("input_tokens") or 0) + input_tokens
+                stats["output_tokens"] = (stats.get("output_tokens") or 0) + output_tokens
+                stats["thinking_tokens"] = (stats.get("thinking_tokens") or 0) + thinking_tokens
+                stats["cost_usd"] = (stats.get("cost_usd") or 0) + cost_usd
+
+                supabase.table("chat_sessions") \
+                    .update({"stats": stats, "updated_at": "now()"}) \
+                    .eq("id", chat_id) \
+                    .execute()
+        except Exception as e2:
+            print(f"Failed to update chat stats (fallback): {e2}")
+
+
+def log_trace_step_sync(
+    request_id: str,
+    user_id: str,
+    step_number: int,
+    agent_name: str,
+    **kwargs
+):
+    """Synchronous version of log_trace_step for non-async contexts."""
+    import asyncio
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            asyncio.create_task(log_trace_step(
+                request_id, user_id, step_number, agent_name, **kwargs
+            ))
+        else:
+            loop.run_until_complete(log_trace_step(
+                request_id, user_id, step_number, agent_name, **kwargs
+            ))
+    except RuntimeError:
+        asyncio.run(log_trace_step(
+            request_id, user_id, step_number, agent_name, **kwargs
+        ))
+
+
+def log_completion_sync(
+    request_id: str,
+    user_id: str,
+    session_id: str,
+    question: str,
+    response: str,
+    **kwargs
+):
+    """Synchronous version of log_completion for non-async contexts."""
+    import asyncio
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            asyncio.create_task(log_completion(
+                request_id, user_id, session_id, question, response, **kwargs
+            ))
+        else:
+            loop.run_until_complete(log_completion(
+                request_id, user_id, session_id, question, response, **kwargs
+            ))
+    except RuntimeError:
+        asyncio.run(log_completion(
+            request_id, user_id, session_id, question, response, **kwargs
+        ))
