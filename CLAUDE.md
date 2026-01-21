@@ -87,6 +87,13 @@ docs/
 ```bash
 source .venv/bin/activate
 
+# Unit tests (pytest)
+pytest agent/tests/ -v                        # все unit тесты
+pytest agent/tests/test_date_resolver.py -v   # период → даты
+pytest agent/tests/test_operations.py -v      # stats, top_n, compare
+pytest agent/tests/test_executor.py -v        # executor integration
+
+# Integration tests (manual)
 python -m agent.tests.test_graph -s    # single questions
 python -m agent.tests.test_graph -c    # conversations
 python -m agent.tests.test_graph -i    # interactive
