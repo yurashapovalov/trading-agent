@@ -1,5 +1,5 @@
 """
-DataResponder — handles query results.
+Presenter — formats query results for user.
 
 Friendly, concise, professional. Like a colleague showing data to a colleague.
 
@@ -32,6 +32,7 @@ import config
 from agent.config.market.events import get_event_type, check_dates_for_events
 from agent.config.market.holidays import HOLIDAY_NAMES, check_dates_for_holidays
 from agent.config.patterns.candle import get_candle_pattern
+from agent.prompts.presenter import TEMPLATES, TITLE_PROMPT, SUMMARY_PROMPT, SHORT_SUMMARY_PROMPT
 
 
 # =============================================================================
@@ -241,49 +242,9 @@ def _detect_language(text: str) -> str:
     return "ru" if cyrillic_count > len(text) * 0.3 else "en"
 
 
-# Templates — friendly, like a colleague
-TEMPLATES = {
-    "no_data": {
-        "ru": "Ничего не нашлось. Попробуй другой период или фильтры.",
-        "en": "Nothing found. Try different period or filters.",
-    },
-    "offer_analysis": {
-        "ru": "Готово, {row_count} строк. Там много интересного — хочешь анализ?",
-        "en": "Done, {row_count} rows. Lots of interesting stuff — want analysis?",
-    },
-}
-
-
-TITLE_PROMPT = """Generate a short title (3-6 words) for this data card.
-
-User question: {question}
-Data: {row_count} rows, columns: {columns}
-
-Return ONLY the title in the same language as the question."""
-
-
-SUMMARY_PROMPT = """Write a brief data summary (1-2 sentences) for a trading colleague.
-
-Question: {question}
-Data: {row_count} rows
-
-Context from data (pre-computed flags — use as hints, don't quote literally):
-{flags_context}
-
-Rules:
-- Write in the same language as the question
-- Be concise, friendly, like a colleague
-- Use the flag context to mention what's notable (holidays, events, patterns)
-- Don't interpret raw numbers — just mention the context
-- End with a natural transition like "хочешь анализ?" or "want analysis?"
-
-Example (RU): "Вот данные за декабрь, 21 день. Учти, попало раннее закрытие перед праздником. Было несколько молотов — покупатели отбивали низы. Хочешь детальный анализ?"
-Example (EN): "Here's December data, 21 days. Note: includes early close before holiday. Few hammers — buyers defended lows. Want detailed analysis?\""""
-
-
-class DataResponder:
+class Presenter:
     """
-    Handles query results.
+    Formats query results for user.
 
     Friendly, concise, professional — like a colleague.
     Uses domain knowledge to summarize naturally.
@@ -295,10 +256,8 @@ class DataResponder:
     - >5 rows → DataCard + "Хочешь анализ?"
 
     Usage:
-        responder = DataResponder(symbol="NQ")
-        result = responder.respond(query, data, original_question)
-        # 1 row → "10 января был диапазон 150 пунктов, закрылись выше открытия."
-        # 5 rows → "Вот 5 пятниц. В среднем диапазон 120 пунктов.\n\n| date | ... |"
+        presenter = Presenter(symbol="NQ")
+        result = presenter.present(data, question)
     """
 
     INLINE_THRESHOLD = 5
@@ -308,13 +267,13 @@ class DataResponder:
         self.model = config.GEMINI_LITE_MODEL
         self.symbol = symbol
 
-    def respond(
+    def present(
         self,
         data: dict,
         question: str = "",
     ) -> DataResponse:
         """
-        Generate response for query data.
+        Format data for user presentation.
 
         Args:
             data: Query result from executor (rows, row_count, result, etc.)
@@ -485,22 +444,13 @@ class DataResponder:
         date_val: str | None = None,
     ) -> str:
         """Generate short summary (1 sentence) for small datasets."""
-        prompt = f"""Write ONE sentence summary for trading data.
-
-Question: {question}
-Data: {row_count} row(s){f', date: {date_val}' if date_val else ''}
-
-Context (pre-computed flags — use as hints):
-{flags_context}
-
-Rules:
-- Same language as question
-- ONE sentence, concise
-- Mention notable context (events, patterns)
-- Don't end with question
-
-Example (RU): "Данные за 15 декабря — было раннее закрытие, сформировался молот."
-Example (EN): "December 15 data — early close day, hammer formed.\""""
+        date_info = f", date: {date_val}" if date_val else ""
+        prompt = SHORT_SUMMARY_PROMPT.format(
+            question=question,
+            row_count=row_count,
+            date_info=date_info,
+            flags_context=flags_context,
+        )
 
         try:
             response = self.client.models.generate_content(
@@ -581,11 +531,11 @@ Example (EN): "December 15 data — early close day, hammer formed.\""""
 # SIMPLE API
 # =============================================================================
 
-def respond(question: str, data: dict, symbol: str = "NQ") -> str:
+def present(question: str, data: dict, symbol: str = "NQ") -> str:
     """
-    Generate human-friendly response for executor result.
+    Format data for user presentation.
 
-    Simple wrapper for DataResponder.
+    Simple wrapper for Presenter class.
 
     Args:
         question: User's original question
@@ -593,7 +543,7 @@ def respond(question: str, data: dict, symbol: str = "NQ") -> str:
         symbol: Trading symbol
 
     Returns:
-        Response text string
+        Formatted text string
     """
     intent = data.get("intent")
 
@@ -620,7 +570,7 @@ def respond(question: str, data: dict, symbol: str = "NQ") -> str:
             return f"Уточни: {', '.join(unclear)}"
         return f"Please clarify: {', '.join(unclear)}"
 
-    # Data intent — use DataResponder
-    responder = DataResponder(symbol=symbol)
-    response = responder.respond(data, question)
+    # Data intent — use Presenter
+    presenter = Presenter(symbol=symbol)
+    response = presenter.present(data, question)
     return response.text

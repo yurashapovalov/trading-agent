@@ -1,1040 +1,387 @@
 """
-LangGraph v3 — Responder-centric Flow
+LangGraph v2 — Simplified Flow
 
 Flow:
-Question ─► Parser ─► Composer ─► Responder ─┬─ greeting/concept/clarification/not_supported ─► END
-                                             │
-                                             └─ query ─► QueryBuilder ─► DataFetcher ─► [routing]
-                                                                              │
-                                                     ┌────────────────────────┴────────────────────────┐
-                                                     ↓                                                 ↓
-                                              [row_count ≤ 5]                                   [row_count > 5]
-                                                     ↓                                                 ↓
-                                              Responder_summary ─► END                  UI: button ─► Analyst ─► END
-
-Agents:
-- Parser: LLM extracts entities from question (what, period, filters, modifiers)
-- Composer: Code logic determines type (query/greeting/concept/clarification/not_supported), builds QuerySpec
-- Responder: User-facing communication — expert preview, clarifications, summaries
-- QueryBuilder: Deterministic SQL generation
-- DataFetcher: Execute SQL
-- Analyst: Deep data analysis (on-demand)
+    Question → Parser → Router
+                          ├── chitchat → END
+                          ├── concept → END
+                          ├── unclear → ClarificationResponder → END (or loop)
+                          └── data → Executor → DataResponder → END
 """
 
 from typing import Literal
+from datetime import date
+import uuid
+
 from langgraph.graph import StateGraph, START, END
-from langgraph.types import Command
+from langchain_core.messages import HumanMessage, AIMessage
 
-from agent.state import AgentState, create_initial_input, get_current_question, get_chat_history
-from langchain_core.messages import AIMessage
-from agent.agents.data_fetcher import DataFetcher
-from agent.agents.analyst import Analyst
-from agent.agents.validator import Validator
-from agent.agents.responder import Responder
+from agent.state import AgentState, get_current_question
+from agent.types import ParsedQuery
 from agent.agents.parser import Parser
-from agent.agents.composer_agent import ComposerAgent
-from agent.query_builder import QueryBuilder
-from agent.checkpointer import get_checkpointer
-import config
-
-
-# =============================================================================
-# Initialize agents (singletons)
-# =============================================================================
-
-parser_agent = Parser()
-composer_agent = ComposerAgent()
-responder_agent = Responder()
-query_builder = QueryBuilder()
-data_fetcher = DataFetcher()
-analyst = Analyst()
-validator = Validator()
+from agent.agents.clarifier import Clarifier
+from agent.agents.responder import Responder
+from agent.executor import execute
+from agent.memory import get_memory_manager
 
 
 # =============================================================================
 # Node Functions
 # =============================================================================
 
-def parse_question(state: AgentState) -> dict:
+def load_memory(state: AgentState) -> dict:
     """
-    Parser node — extract entities from question using LLM.
+    Load conversation memory and add current user message.
 
-    Input: question, chat_history, previous parsed_query
-    Output: parsed_query (ParsedQuery), parser_usage
+    Runs at the start of each invoke to:
+    1. Get/create memory for session
+    2. Add user message to memory
+    3. Put memory context into state for downstream nodes
     """
+    session_id = state.get("session_id") or str(uuid.uuid4())
     question = get_current_question(state)
-    chat_history = get_chat_history(state)
-    history_str = _format_chat_history(chat_history)
 
-    # Get previous parsed_query for follow-up context
-    previous_parsed = state.get("parsed_query")
+    # Get memory for session
+    manager = get_memory_manager()
+    memory = manager.get_or_create(session_id)
 
-    result = parser_agent.parse(
-        question,
-        chat_history=history_str,
-        previous_parsed=previous_parsed,
-    )
+    # Add user message to memory
+    if question:
+        memory.add_message("user", question)
+
+    # Get context for downstream nodes
+    memory_context = memory.get_context()
 
     return {
-        "parsed_query": result.parsed_query,
-        "parser_raw_output": result.raw_output,
-        "usage": {
-            "input_tokens": result.input_tokens,
-            "output_tokens": result.output_tokens,
-            "cost_usd": result.cost_usd,
-        },
+        "session_id": session_id,
+        "memory_context": memory_context,
+    }
+
+
+def parse_question(state: AgentState) -> dict:
+    """
+    Parser node — stateless entity extraction.
+
+    Just takes a question and parses it.
+    Uses memory_context for conversation history.
+    If there's a clarified_query from Clarifier, parse that instead.
+    """
+    # Use clarified_query if available (from Clarifier), otherwise current question
+    clarified = state.get("clarified_query")
+    question = clarified if clarified else get_current_question(state)
+
+    # Get memory context for Parser (conversation history)
+    memory_context = state.get("memory_context", "")
+
+    parser = Parser()
+    result = parser.parse(question, today=date.today(), context=memory_context)
+
+    return {
+        "parsed_query": result.query.model_dump(),
+        "parser_thoughts": result.thoughts,
         "agents_used": ["parser"],
         "step_number": state.get("step_number", 0) + 1,
+        # Clear clarified_query after using it
+        "clarified_query": None,
     }
 
 
-def compose_query(state: AgentState) -> dict:
+def route_after_parser(state: AgentState) -> Literal["chitchat", "concept", "clarification", "executor"]:
     """
-    Composer node — business logic to determine type + build QuerySpec.
-
-    Input: parsed_query (from Parser)
-    Output: intent, query_spec_obj (if query)
+    Router — decide next step based on Parser output.
     """
-    parsed_query = state.get("parsed_query")
-    if parsed_query is None:
-        # Fallback: treat as greeting
-        return {
-            "intent": {"type": "chitchat", "symbol": "NQ"},
-            "agents_used": ["composer"],
-            "step_number": state.get("step_number", 0) + 1,
-        }
+    parsed = state.get("parsed_query", {})
+    intent = parsed.get("intent", "data")
+    unclear = parsed.get("unclear", [])
 
+    if intent == "chitchat":
+        return "chitchat"
+
+    if intent == "concept":
+        return "concept"
+
+    if unclear:
+        return "clarification"
+
+    return "executor"
+
+
+def handle_chitchat(state: AgentState) -> dict:
+    """
+    Chitchat node — greetings, thanks, goodbye using Responder.
+    """
     question = get_current_question(state)
-    result = composer_agent.compose(parsed_query, original_question=question)
 
-    # Build update dict
-    update = {
-        "agents_used": ["composer"],
-        "step_number": state.get("step_number", 0) + 1,
+    responder = Responder()
+    response = responder.respond(question, intent="chitchat", subtype="greeting")
+
+    return {
+        "response": response,
+        "messages": [AIMessage(content=response)],
+        "agents_used": state.get("agents_used", []) + ["responder"],
     }
 
-    # Get parser output for debug
-    parser_output = state.get("parser_raw_output")
 
-    if result.type == "query":
-        update["intent"] = {
-            "type": "data",
-            "parser_output": parser_output,
-            "symbol": result.spec.symbol if result.spec else "NQ",
-            "holiday_info": result.holiday_info,
-            "event_info": result.event_info,
-            "query_spec": {
-                "special_op": result.spec.special_op.value if result.spec else None,
-                "source": result.spec.source.value if result.spec else None,
-                "grouping": result.spec.grouping.value if result.spec else None,
-            },
-        }
-        update["query_spec_obj"] = result.spec
+def handle_concept(state: AgentState) -> dict:
+    """
+    Concept node — explain trading concept using Responder.
+    """
+    parsed = state.get("parsed_query", {})
+    what = parsed.get("what", "")
+    question = get_current_question(state)
 
-    elif result.type == "clarification":
-        update["intent"] = {
-            "type": "clarification",
-            "field": result.field,
-            "suggestions": result.options or [],
-            "response_text": result.summary or "",
-            "parser_output": parser_output,
-            "symbol": "NQ",
-        }
+    responder = Responder()
+    response = responder.respond(question, intent="concept", topic=what)
 
-    elif result.type == "concept":
-        update["intent"] = {
-            "type": "concept",
-            "concept": result.concept,
-            "parser_output": parser_output,
-            "symbol": "NQ",
-        }
+    return {
+        "response": response,
+        "messages": [AIMessage(content=response)],
+        "agents_used": state.get("agents_used", []) + ["responder"],
+    }
 
-    elif result.type == "greeting":
-        update["intent"] = {
-            "type": "chitchat",
-            "parser_output": parser_output,
-            "symbol": "NQ",
-        }
 
-    elif result.type == "not_supported":
-        update["intent"] = {
-            "type": "out_of_scope",
-            "response_text": result.reason,
-            "parser_output": parser_output,
-            "symbol": "NQ",
-        }
+def handle_clarification(state: AgentState) -> dict:
+    """
+    Clarification node — ask user for missing info OR confirm clarified query.
 
+    Two modes:
+    1. First time (from Parser): ask clarifying question, store context
+    2. User answered: combine original + answer → generate clarified_query
+    """
+    question = get_current_question(state)
+    parsed = state.get("parsed_query", {})
+    parser_thoughts = state.get("parser_thoughts", "")
+
+    # Build previous_context from clarification history
+    history = state.get("clarification_history", [])
+    original = state.get("original_question", "")
+
+    if history:
+        # Format history for Clarifier
+        lines = [f"Original question: {original}"]
+        for turn in history:
+            if turn["role"] == "assistant":
+                lines.append(f"Assistant: {turn['content']}")
+            else:
+                lines.append(f"User: {turn['content']}")
+        previous_context = "\n".join(lines)
     else:
-        update["intent"] = {
-            "type": "chitchat",
-            "parser_output": parser_output,
-            "symbol": "NQ",
-        }
+        previous_context = ""
+
+    clarifier = Clarifier()
+    result = clarifier.clarify(
+        question=question,
+        parsed=parsed,
+        previous_context=previous_context,
+        parser_thoughts=parser_thoughts,
+    )
+
+    update = {
+        "response": result.response,
+        "messages": [AIMessage(content=result.response)],
+        "agents_used": state.get("agents_used", []) + ["clarifier"],
+    }
+
+    if result.clarified_query:
+        # Clarifier formed complete query — pass to Parser
+        update["clarified_query"] = result.clarified_query
+        update["awaiting_clarification"] = False
+        update["clarification_history"] = None
+        update["original_question"] = None
+    else:
+        # Still need more info — store state and wait
+        update["awaiting_clarification"] = True
+
+        # Store original question on first clarification
+        if not original:
+            update["original_question"] = question
+
+        # Add to history
+        new_history = list(history) if history else []
+        if history:  # User responded, add their message
+            new_history.append({"role": "user", "content": question})
+        new_history.append({"role": "assistant", "content": result.response})
+        update["clarification_history"] = new_history
 
     return update
 
 
-def _format_chat_history(chat_history: list) -> str:
-    """Format chat history for Barb."""
-    if not chat_history:
-        return ""
-    history_str = ""
-    for msg in chat_history[-config.CHAT_HISTORY_LIMIT:]:
-        role = "User" if msg.get("role") == "user" else "Assistant"
-        history_str += f"{role}: {msg.get('content', '')}\n"
-    return history_str
-
-
-def build_query(state: AgentState) -> dict:
+def route_entry(state: AgentState) -> Literal["parser", "clarifier"]:
     """
-    QueryBuilder node — builds SQL from QuerySpec.
+    Entry router — check if we're in clarification flow.
 
-    Deterministic, no LLM, always valid SQL.
-    Barb passes QuerySpec directly via query_spec_obj.
+    If awaiting_clarification, user's message is an answer → go to Clarifier.
+    Otherwise, it's a new question → go to Parser.
     """
-    try:
-        query_spec = state.get("query_spec_obj")
-        if query_spec is None:
-            raise ValueError("query_spec_obj is required but not found in state")
-
-        sql = query_builder.build(query_spec)
-
-        return {
-            "sql_query": sql,
-            "agents_used": ["query_builder"],
-            "step_number": state.get("step_number", 0) + 1,
-        }
-
-    except Exception as e:
-        print(f"[QueryBuilder] Error: {e}")
-        return {
-            "sql_query": None,
-            "query_builder_error": str(e),
-            "agents_used": ["query_builder"],
-            "step_number": state.get("step_number", 0) + 1,
-        }
+    if state.get("awaiting_clarification"):
+        return "clarifier"
+    return "parser"
 
 
-def fetch_data(state: AgentState) -> dict:
-    """DataFetcher node — получает данные."""
-    return data_fetcher(state)
-
-
-def analyze_data(state: AgentState) -> dict:
-    """Analyst node — интерпретирует данные и пишет ответ."""
-    return analyst(state)
-
-
-def validate_response(state: AgentState) -> dict:
-    """Validator node — проверяет корректность статистики."""
-    return validator(state)
-
-
-def respond_to_user(state: AgentState) -> dict:
+def route_after_clarification(state: AgentState) -> Literal["parser", "respond"]:
     """
-    Responder node — handles non-query user communication.
+    Router after Clarifier — check if we have clarified_query.
 
-    Uses Responder agent (LLM) for natural, expert responses.
-    Called for: chitchat, concept (from Parser), clarification, not_supported (from Composer).
-    Query types bypass this and go directly to query_builder.
+    If yes → go to Parser to parse the reformulated query.
+    If no → respond to user and wait for more input.
     """
-    # Check if we came from Parser (chitchat/concept) or Composer
-    parsed = state.get("parsed_query")
-    intent = state.get("intent")
-
-    # If no intent from Composer, build it from Parser output
-    if not intent and parsed:
-        parser_output = state.get("parser_raw_output")
-        if parsed.intent == "chitchat":
-            intent = {
-                "type": "chitchat",
-                "parser_output": parser_output,
-                "symbol": "NQ",
-            }
-        elif parsed.intent == "concept":
-            intent = {
-                "type": "concept",
-                "concept": parsed.what,  # "gap", "RTH", etc.
-                "parser_output": parser_output,
-                "symbol": "NQ",
-            }
-        # Update state with intent for Responder
-        state = {**state, "intent": intent}
-
-    # Call Responder agent
-    result = responder_agent(state)
-    return result
+    if state.get("clarified_query"):
+        return "parser"
+    return "respond"
 
 
-def after_parser(state: AgentState) -> Literal["responder", "composer"]:
+def save_memory(state: AgentState) -> dict:
     """
-    Route after Parser based on intent.
+    Save assistant response to memory.
 
-    - chitchat/concept → responder (skip Composer entirely)
-    - data → composer (build QuerySpec)
+    Runs before END to persist the conversation turn.
     """
-    parsed = state.get("parsed_query")
-    if parsed and parsed.intent in ("chitchat", "concept"):
-        return "responder"
-    return "composer"
+    session_id = state.get("session_id")
+    response = state.get("response")
+
+    if session_id and response:
+        manager = get_memory_manager()
+        memory = manager.get_or_create(session_id)
+        memory.add_message("assistant", response)
+
+    return {}
 
 
-def after_composer(state: AgentState) -> Literal["responder", "query_builder"]:
+def handle_executor(state: AgentState) -> dict:
     """
-    Route after Composer based on result type.
-
-    - query/data → query_builder (skip Responder, generate title after data)
-    - clarification/not_supported → responder
+    Executor node — get data and compute result.
     """
-    intent = state.get("intent") or {}
-    intent_type = intent.get("type", "chitchat")
+    parsed_dict = state.get("parsed_query", {})
+    parsed = ParsedQuery.model_validate(parsed_dict)
 
-    if intent_type in ("data", "query"):
-        return "query_builder"
+    result = execute(parsed, symbol="NQ", today=date.today())
+
+    # Format response based on result
+    if result["intent"] == "no_data":
+        response = "По указанным критериям данные не найдены."
+    elif result["intent"] == "data":
+        row_count = result.get("row_count", 0)
+        operation = result.get("operation", "stats")
+
+        # Simple response for now
+        response = f"Получено {row_count} записей. Операция: {operation}."
+
+        # Add some stats if available
+        op_result = result.get("result", {})
+        if "count" in op_result:
+            response += f" Всего дней: {op_result['count']}."
+        if "green_pct" in op_result:
+            response += f" Зелёных: {op_result['green_pct']}%."
     else:
-        return "responder"
+        response = "Что-то пошло не так."
 
-
-def offer_analysis(state: AgentState) -> dict:
-    """
-    Offer detailed analysis for large datasets (>5 rows).
-
-    Uses Responder to generate:
-    - data_title for DataCard
-    - offer message asking if user wants detailed analysis
-    """
-    full_data = state.get("full_data") or {}
-    row_count = full_data.get("row_count", 0)
-    intent = state.get("intent") or {}
-
-    # Build state for Responder with offer_analysis type
-    offer_state = {
-        **state,
-        "intent": {
-            **intent,
-            "type": "offer_analysis",
-            "row_count": row_count,
-        },
-    }
-
-    # Call Responder for human response + title
-    result = responder_agent(offer_state)
-
-    # Title is generated by Responder for offer_analysis type
     return {
-        "response": result.get("response", ""),
-        "data_title": result.get("data_title"),  # Generated by Responder
-        "offer_analysis": True,  # Signal for frontend to show Analyze button
-        "usage": result.get("usage"),
-        "agents_used": ["responder_offer"],
-        "step_number": state.get("step_number", 0) + 1,
-        "messages": result.get("messages", []),
-    }
-
-
-def summarize_data(state: AgentState) -> dict:
-    """
-    Responder summarizes small datasets (≤5 rows).
-
-    For small results, Responder gives a brief summary without full Analyst.
-    Uses the same Responder agent but with data context.
-    """
-    from agent.prompts.responder import get_responder_prompt
-
-    data = state.get("data") or {}
-    full_data = state.get("full_data") or {}
-    intent = state.get("intent") or {}
-
-    # Build summary prompt with data
-    question = get_current_question(state)
-    rows = full_data.get("rows", [])
-    columns = full_data.get("columns", [])
-
-    # Format data as markdown table for Responder
-    data_summary = ""
-    if rows and columns:
-        # Build markdown table
-        header = "| " + " | ".join(columns) + " |"
-        separator = "| " + " | ".join(["---"] * len(columns)) + " |"
-        data_summary = header + "\n" + separator + "\n"
-        for row in rows[:5]:
-            values = [str(row.get(col, "")) for col in columns]
-            data_summary += "| " + " | ".join(values) + " |\n"
-
-    # Update state with data summary for Responder
-    summary_state = {
-        **state,
-        "intent": {
-            **intent,
-            "type": "data_summary",  # Special type for summarization
-            "data_preview": data_summary,
-            "row_count": full_data.get("row_count", 0),
-        },
-    }
-
-    # Call Responder for summary
-    result = responder_agent(summary_state)
-
-    # No data_title for summarize — data shown inline, no DataCard needed
-    return {
-        "response": result.get("response", ""),
-        # No data_title — inline summary, no DataCard
-        "usage": result.get("usage"),
-        "agents_used": ["responder_summary"],
-        "step_number": state.get("step_number", 0) + 1,
-        "messages": result.get("messages", []),
+        "response": response,
+        "messages": [AIMessage(content=response)],
+        "data": result,
+        "agents_used": state.get("agents_used", []) + ["executor"],
     }
 
 
 # =============================================================================
-# Conditional Edges
-# =============================================================================
-
-# Threshold for auto-summarization vs manual analysis
-AUTO_SUMMARIZE_THRESHOLD = 5
-
-
-def after_data_fetcher(state: AgentState) -> Literal["no_data", "summarize", "offer_analysis"]:
-    """
-    Route after data is fetched based on row count.
-
-    - 0 rows: no_data (tell user no data found)
-    - 1-5 rows: auto-summarize with Responder (inline answer, no DataCard)
-    - >5 rows: offer detailed analysis (with DataCard)
-    """
-    full_data = state.get("full_data") or {}
-    row_count = full_data.get("row_count", 0)
-
-    if row_count == 0:
-        return "no_data"
-    elif row_count <= AUTO_SUMMARIZE_THRESHOLD:
-        return "summarize"
-    else:
-        return "offer_analysis"
-
-
-def no_data_response(state: AgentState) -> dict:
-    """
-    Handle case when query returned 0 rows.
-
-    Uses Responder to generate a human message about no data found.
-    No DataCard shown.
-    """
-    intent = state.get("intent") or {}
-
-    # Build state for Responder with no_data type
-    no_data_state = {
-        **state,
-        "intent": {
-            **intent,
-            "type": "no_data",
-            "row_count": 0,
-        },
-    }
-
-    # Call Responder for human response
-    result = responder_agent(no_data_state)
-
-    return {
-        "response": result.get("response", ""),
-        "usage": result.get("usage"),
-        "agents_used": ["responder_no_data"],
-        "step_number": state.get("step_number", 0) + 1,
-        "messages": result.get("messages", []),
-    }
-
-
-def after_validation(state: AgentState) -> Literal["end", "analyst"]:
-    """Решает, закончить или переписать ответ."""
-    validation = state.get("validation") or {}
-    status = validation.get("status", "ok")
-    attempts = state.get("validation_attempts", 0)
-
-    # Максимум 3 попытки
-    if attempts >= 3:
-        return "end"
-
-    if status == "ok":
-        return "end"
-    else:
-        return "analyst"
-
-
-# =============================================================================
-# Graph Builder
+# Build Graph
 # =============================================================================
 
 def build_graph() -> StateGraph:
     """
-    Build agent graph with Responder-centric flow.
+    Build the graph with memory and clarification loop.
 
     Flow:
-    Question ─► Parser ─► Composer ─► Responder ─┬─ greeting/concept/clarification ─► END
-                                                 │
-                                                 └─ query ─► QueryBuilder ─► DataFetcher ─┬─ ≤5 rows ─► Summarize ─► END
-                                                                                          │
-                                                                                          └─ >5 rows ─► END (+ Analyze button)
-
-    Analyst is on-demand (triggered via button/separate request).
+        START → load_memory → route_entry
+                               ├── awaiting_clarification → clarifier → route_after_clarification
+                               │                                          ├── has clarified_query → parser (LOOP!)
+                               │                                          └── need more info → save_memory → END
+                               └── new question → parser → route_after_parser
+                                                            ├── chitchat → save_memory → END
+                                                            ├── concept → save_memory → END
+                                                            ├── unclear → clarifier → save_memory → END
+                                                            └── data → executor → save_memory → END
     """
-
     graph = StateGraph(AgentState)
 
-    # Nodes
+    # Add nodes
+    graph.add_node("load_memory", load_memory)
     graph.add_node("parser", parse_question)
-    graph.add_node("composer", compose_query)
-    graph.add_node("responder", respond_to_user)
-    graph.add_node("query_builder", build_query)
-    graph.add_node("data_fetcher", fetch_data)
-    graph.add_node("no_data", no_data_response)
-    graph.add_node("summarize", summarize_data)
-    graph.add_node("offer_analysis", offer_analysis)
-    # Analyst/Validator kept for on-demand analysis
-    graph.add_node("analyst", analyze_data)
-    graph.add_node("validator", validate_response)
+    graph.add_node("chitchat", handle_chitchat)
+    graph.add_node("concept", handle_concept)
+    graph.add_node("clarifier", handle_clarification)
+    graph.add_node("executor", handle_executor)
+    graph.add_node("save_memory", save_memory)
 
-    # Flow: START → parser → [routing by intent]
-    graph.add_edge(START, "parser")
+    # Start with loading memory
+    graph.add_edge(START, "load_memory")
 
-    # After parser: route by intent
-    # - chitchat/concept → responder (skip Composer entirely)
-    # - data → composer (build QuerySpec)
+    # After loading memory — check if we're in clarification flow
+    graph.add_conditional_edges(
+        "load_memory",
+        route_entry,
+        {
+            "parser": "parser",
+            "clarifier": "clarifier",
+        }
+    )
+
+    # After Parser — route based on intent/unclear
     graph.add_conditional_edges(
         "parser",
-        after_parser,
+        route_after_parser,
         {
-            "responder": "responder",
-            "composer": "composer",
+            "chitchat": "chitchat",
+            "concept": "concept",
+            "clarification": "clarifier",
+            "executor": "executor",
         }
     )
 
-    # After composer: route based on result type
-    # - query/data → query_builder (skip responder, title generated after data)
-    # - clarification/not_supported → responder
+    # After Clarifier — check if we have clarified_query (LOOP back to parser!)
     graph.add_conditional_edges(
-        "composer",
-        after_composer,
+        "clarifier",
+        route_after_clarification,
         {
-            "query_builder": "query_builder",
-            "responder": "responder",
+            "parser": "parser",  # Loop! clarified_query → parse it
+            "respond": "save_memory",  # No clarified_query → save and wait for user
         }
     )
 
-    # responder → END (for non-query types)
-    graph.add_edge("responder", END)
+    # All response nodes go to save_memory before END
+    graph.add_edge("chitchat", "save_memory")
+    graph.add_edge("concept", "save_memory")
+    graph.add_edge("executor", "save_memory")
 
-    # query_builder → data_fetcher → [conditional routing by row_count]
-    graph.add_edge("query_builder", "data_fetcher")
-
-    # After data_fetcher: route based on row count
-    graph.add_conditional_edges(
-        "data_fetcher",
-        after_data_fetcher,
-        {
-            "no_data": "no_data",
-            "summarize": "summarize",
-            "offer_analysis": "offer_analysis",
-        }
-    )
-
-    # no_data → END (0 rows, no DataCard)
-    graph.add_edge("no_data", END)
-
-    # summarize → END (1-5 rows, inline summary, no DataCard)
-    graph.add_edge("summarize", END)
-
-    # offer_analysis → END (>5 rows, DataCard + offer button)
-    graph.add_edge("offer_analysis", END)
-
-    # Analyst flow (for on-demand analysis)
-    graph.add_edge("analyst", "validator")
-    graph.add_conditional_edges(
-        "validator",
-        after_validation,
-        {
-            "end": END,
-            "analyst": "analyst",
-        }
-    )
+    # save_memory goes to END
+    graph.add_edge("save_memory", END)
 
     return graph
 
 
-def compile_graph(checkpointer=None):
-    """Компилирует граф с checkpointer."""
+def compile_graph():
+    """Compile graph for execution."""
     graph = build_graph()
-
-    if checkpointer is None:
-        checkpointer = get_checkpointer()
-
-    return graph.compile(checkpointer=checkpointer)
-
-
-def get_app():
-    """Возвращает скомпилированное приложение."""
-    return compile_graph(get_checkpointer())
+    return graph.compile()
 
 
 # =============================================================================
-# TradingGraph Wrapper
+# Test
 # =============================================================================
 
-class TradingGraph:
-    """
-    Обёртка для графа v2 с QueryBuilder.
+if __name__ == "__main__":
+    app = compile_graph()
 
-    Использование:
-        graph = TradingGraph()
-        result = graph.invoke("Покажи статистику", "user1")
-    """
+    tests = [
+        "привет",
+        "что такое OPEX",
+        "статистика за 2024",
+        "волатильность за 2024",
+    ]
 
-    def __init__(self):
-        self._app = None
-        self._checkpointer = None
-
-    @property
-    def app(self):
-        """Ленивая инициализация графа."""
-        if self._app is None:
-            self._checkpointer = get_checkpointer()
-            self._app = compile_graph(self._checkpointer)
-        return self._app
-
-    def invoke(
-        self,
-        question: str,
-        user_id: str,
-        session_id: str = "default",
-        chat_history: list = None,  # DEPRECATED: ignored, checkpointer manages history
-    ) -> AgentState:
-        """Синхронный запуск графа.
-
-        Note: chat_history parameter is deprecated and ignored.
-        The checkpointer automatically restores previous messages by thread_id.
-        """
-        # Only pass the NEW message - checkpointer restores previous messages
-        initial_input = create_initial_input(
-            question=question,
-            user_id=user_id,
-            session_id=session_id,
-        )
-
-        config = {
-            "configurable": {
-                "thread_id": f"{user_id}_{session_id}"
-            }
-        }
-
-        return self.app.invoke(initial_input, config)
-
-    def stream_sse(
-        self,
-        question: str,
-        user_id: str,
-        session_id: str = "default",
-        request_id: str | None = None,
-        chat_history: list = None,  # DEPRECATED: ignored, checkpointer manages history
-    ):
-        """
-        Streaming с SSE событиями для frontend.
-
-        Events:
-        - step_start: агент начал работу
-        - step_end: агент закончил
-        - text_delta: текст ответа
-        - usage: токены
-        - done: завершение
-
-        Note: chat_history parameter is deprecated and ignored.
-        The checkpointer automatically restores previous messages by thread_id.
-        """
-        import time
-
-        start_time = time.time()
-        last_step_time = start_time
-
-        # Only pass the NEW message - checkpointer restores previous messages
-        initial_input = create_initial_input(
-            question=question,
-            user_id=user_id,
-            session_id=session_id,
-            request_id=request_id,
-        )
-
-        config = {
-            "configurable": {
-                "thread_id": f"{user_id}_{session_id}"
-            }
-        }
-
-        # Track state for SSE events (not for LLM context!)
-        accumulated_state = {
-            "question": question,
-        }
-        # Track usage separately - sum from all agents in this request
-        accumulated_usage = {
-            "input_tokens": 0,
-            "output_tokens": 0,
-            "thinking_tokens": 0,
-            "cost_usd": 0.0,
-        }
-
-        # Сразу отправить step_start для parser — моментальный фидбек
-        yield {
-            "type": "step_start",
-            "agent": "parser",
-            "message": self._get_agent_message("parser")
-        }
-
-        for event in self.app.stream(initial_input, config, stream_mode=["updates", "custom"]):
-            stream_type, data = event
-
-            # Custom events (text_delta) — пробрасываем напрямую
-            if stream_type == "custom":
-                yield data
-                continue
-
-            # Updates events
-            for node_name, updates in data.items():
-                current_time = time.time()
-                step_duration_ms = int((current_time - last_step_time) * 1000)
-                last_step_time = current_time
-
-                # step_start (skip parser — already sent before stream)
-                if node_name != "parser":
-                    yield {
-                        "type": "step_start",
-                        "agent": node_name,
-                        "message": self._get_agent_message(node_name)
-                    }
-
-                # Handle by node type
-                if node_name == "parser":
-                    # Parser extracts entities — no intent yet
-                    parsed_query = updates.get("parsed_query")
-                    usage = updates.get("usage") or {}
-
-                    yield {
-                        "type": "step_end",
-                        "agent": node_name,
-                        "duration_ms": step_duration_ms,
-                        "input": {
-                            "question": accumulated_state.get("question"),
-                        },
-                        "result": {
-                            "what": parsed_query.what if parsed_query else None,
-                            "has_period": parsed_query.period is not None if parsed_query else False,
-                        },
-                        "output": {
-                            "parsed_query": updates.get("parser_raw_output"),
-                            "usage": usage,
-                        }
-                    }
-                    accumulated_state["parsed_query"] = parsed_query
-
-                    # Accumulate usage from parser (LLM call)
-                    if usage:
-                        accumulated_usage["input_tokens"] += usage.get("input_tokens", 0)
-                        accumulated_usage["output_tokens"] += usage.get("output_tokens", 0)
-                        accumulated_usage["thinking_tokens"] += usage.get("thinking_tokens", 0)
-                        accumulated_usage["cost_usd"] += usage.get("cost_usd", 0.0)
-
-                elif node_name == "composer":
-                    # Composer determines type + builds QuerySpec
-                    intent = updates.get("intent") or {}
-
-                    yield {
-                        "type": "step_end",
-                        "agent": node_name,
-                        "duration_ms": step_duration_ms,
-                        "input": {
-                            "parsed_query": accumulated_state.get("parsed_query"),
-                        },
-                        "result": {
-                            "type": intent.get("type"),
-                            "symbol": intent.get("symbol", "NQ"),
-                        },
-                        "output": {
-                            "intent": intent,
-                        }
-                    }
-                    accumulated_state["intent"] = intent
-
-                elif node_name == "query_builder":
-                    sql_query = updates.get("sql_query")
-                    error = updates.get("query_builder_error")
-
-                    yield {
-                        "type": "step_end",
-                        "agent": node_name,
-                        "duration_ms": step_duration_ms,
-                        "input": {
-                            "query_spec": accumulated_state.get("intent", {}).get("query_spec"),
-                        },
-                        "result": {
-                            "sql_generated": sql_query is not None,
-                            "error": error,
-                        },
-                        "output": {
-                            "sql_query": sql_query,
-                        }
-                    }
-                    accumulated_state["sql_query"] = sql_query
-
-                elif node_name == "data_fetcher":
-                    data_result = updates.get("data") or {}
-                    full_data = updates.get("full_data") or {}
-                    row_count = full_data.get("row_count", data_result.get("row_count", 0))
-
-                    # Get data_title from responder (ran earlier)
-                    data_title = accumulated_state.get("data_title")
-
-                    # Add title to full_data for logging
-                    if data_title:
-                        full_data = {**full_data, "title": data_title}
-
-                    yield {
-                        "type": "step_end",
-                        "agent": node_name,
-                        "duration_ms": step_duration_ms,
-                        "input": {
-                            "sql_query": accumulated_state.get("sql_query"),
-                        },
-                        "result": {
-                            "rows": row_count,
-                            "showing": data_result.get("showing", data_result.get("row_count", 0)),
-                            "truncated": data_result.get("truncated", False),
-                            "granularity": data_result.get("granularity"),
-                        },
-                        "output": {
-                            "summary": data_result,   # Top-N for Analyst
-                            "full_data": full_data,   # All rows + title (saved to logs + UI)
-                        },
-                    }
-                    accumulated_state["data"] = data_result
-                    accumulated_state["full_data"] = full_data
-
-                    # NOTE: data_ready event is sent from offer_analysis node
-                    # (only for >5 rows when DataCard should be shown)
-
-                elif node_name == "analyst":
-                    response = updates.get("response") or ""
-                    stats = updates.get("stats") or {}
-                    usage = updates.get("usage") or {}
-
-                    yield {
-                        "type": "step_end",
-                        "agent": node_name,
-                        "duration_ms": step_duration_ms,
-                        "input": {
-                            "data": accumulated_state.get("data"),  # Summary that Analyst sees
-                            "data_row_count": accumulated_state.get("data", {}).get("row_count", 0),
-                        },
-                        "result": {
-                            "response_length": len(response),
-                            "stats_count": len(stats) if stats else 0,
-                        },
-                        "output": {
-                            "response": response,
-                            "stats": stats,
-                            "usage": usage,
-                        }
-                    }
-                    accumulated_state["response"] = response
-                    # Accumulate usage from analyst
-                    if usage:
-                        accumulated_usage["input_tokens"] += usage.get("input_tokens", 0)
-                        accumulated_usage["output_tokens"] += usage.get("output_tokens", 0)
-                        accumulated_usage["thinking_tokens"] += usage.get("thinking_tokens", 0)
-                        accumulated_usage["cost_usd"] += usage.get("cost_usd", 0.0)
-
-                elif node_name == "validator":
-                    validation = updates.get("validation") or {}
-                    yield {
-                        "type": "step_end",
-                        "agent": node_name,
-                        "duration_ms": step_duration_ms,
-                        "result": {"status": validation.get("status")},
-                        "output": validation
-                    }
-
-                elif node_name == "responder":
-                    response = updates.get("response") or ""
-                    data_title = updates.get("data_title")
-                    usage = updates.get("usage") or {}
-                    intent = updates.get("intent") or accumulated_state.get("intent", {})
-                    suggestions = intent.get("suggestions") or []
-
-                    # NOTE: data_title is sent via custom event from responder agent
-                    # (during streaming), so we don't emit it here to avoid duplicates
-
-                    # Send suggestions for clarification
-                    if suggestions:
-                        yield {
-                            "type": "suggestions",
-                            "suggestions": suggestions
-                        }
-
-                    yield {
-                        "type": "step_end",
-                        "agent": node_name,
-                        "duration_ms": step_duration_ms,
-                        "result": {
-                            "response_length": len(response),
-                            "has_data_title": data_title is not None,
-                        },
-                        "output": {
-                            "response": response,
-                            "data_title": data_title,
-                            "suggestions": suggestions,
-                        }
-                    }
-
-                    # Save data_title for data_fetcher to include in full_data
-                    if data_title:
-                        accumulated_state["data_title"] = data_title
-
-                    # Accumulate usage from responder
-                    if usage:
-                        accumulated_usage["input_tokens"] += usage.get("input_tokens", 0)
-                        accumulated_usage["output_tokens"] += usage.get("output_tokens", 0)
-                        accumulated_usage["cost_usd"] += usage.get("cost_usd", 0.0)
-
-                elif node_name == "summarize":
-                    response = updates.get("response") or ""
-                    usage = updates.get("usage") or {}
-
-                    yield {
-                        "type": "step_end",
-                        "agent": node_name,
-                        "duration_ms": step_duration_ms,
-                        "result": {
-                            "response_length": len(response),
-                        },
-                        "output": {
-                            "response": response,
-                        }
-                    }
-                    accumulated_state["response"] = response
-
-                    # Accumulate usage from summarize
-                    if usage:
-                        accumulated_usage["input_tokens"] += usage.get("input_tokens", 0)
-                        accumulated_usage["output_tokens"] += usage.get("output_tokens", 0)
-                        accumulated_usage["cost_usd"] += usage.get("cost_usd", 0.0)
-
-                elif node_name == "no_data":
-                    response = updates.get("response") or ""
-                    usage = updates.get("usage") or {}
-
-                    yield {
-                        "type": "step_end",
-                        "agent": node_name,
-                        "duration_ms": step_duration_ms,
-                        "result": {
-                            "response_length": len(response),
-                            "row_count": 0,
-                        },
-                        "output": {
-                            "response": response,
-                        }
-                    }
-                    accumulated_state["response"] = response
-
-                    # Accumulate usage from no_data (Responder call)
-                    if usage:
-                        accumulated_usage["input_tokens"] += usage.get("input_tokens", 0)
-                        accumulated_usage["output_tokens"] += usage.get("output_tokens", 0)
-                        accumulated_usage["cost_usd"] += usage.get("cost_usd", 0.0)
-
-                elif node_name == "offer_analysis":
-                    response = updates.get("response") or ""
-                    data_title = updates.get("data_title")
-                    offer_analysis_flag = updates.get("offer_analysis", False)
-                    usage = updates.get("usage") or {}
-                    full_data = accumulated_state.get("full_data", {})
-                    row_count = full_data.get("row_count", 0)
-
-                    yield {
-                        "type": "step_end",
-                        "agent": node_name,
-                        "duration_ms": step_duration_ms,
-                        "result": {
-                            "response_length": len(response),
-                            "offer_analysis": offer_analysis_flag,
-                            "has_data_title": data_title is not None,
-                        },
-                        "output": {
-                            "response": response,
-                            "data_title": data_title,
-                        }
-                    }
-                    accumulated_state["response"] = response
-                    if data_title:
-                        accumulated_state["data_title"] = data_title
-
-                    # Accumulate usage from offer_analysis (Responder call)
-                    if usage:
-                        accumulated_usage["input_tokens"] += usage.get("input_tokens", 0)
-                        accumulated_usage["output_tokens"] += usage.get("output_tokens", 0)
-                        accumulated_usage["cost_usd"] += usage.get("cost_usd", 0.0)
-
-                    # Send data_title event for frontend DataCard
-                    if data_title:
-                        yield {
-                            "type": "data_title",
-                            "title": data_title,
-                        }
-
-                    # Send data_ready event with row count
-                    yield {
-                        "type": "data_ready",
-                        "row_count": row_count,
-                        "data": full_data,
-                    }
-
-                    # Signal frontend to show Analyze button
-                    if offer_analysis_flag:
-                        yield {
-                            "type": "offer_analysis",
-                            "message": response,
-                        }
-
-        # Final events
-        duration_ms = int((time.time() - start_time) * 1000)
-
-        # Use accumulated_usage (summed from step_end events) instead of final_state
-        # This ensures we only count this request's usage, not accumulated from checkpointer
-        yield {
-            "type": "usage",
-            "input_tokens": accumulated_usage["input_tokens"],
-            "output_tokens": accumulated_usage["output_tokens"],
-            "thinking_tokens": accumulated_usage["thinking_tokens"],
-            "cost": accumulated_usage["cost_usd"]
-        }
-
-        yield {
-            "type": "done",
-            "total_duration_ms": duration_ms,
-            "request_id": initial_input.get("request_id")
-        }
-
-    def _get_agent_message(self, agent: str) -> str:
-        """Return status message for agent."""
-        messages = {
-            "parser": "Understanding question...",
-            "composer": "Building query...",
-            "responder": "Preparing response...",
-            "query_builder": "Building SQL query...",
-            "data_fetcher": "Fetching data...",
-            "no_data": "No data found...",
-            "summarize": "Summarizing results...",
-            "offer_analysis": "Data ready...",
-            "analyst": "Analyzing data...",
-            "validator": "Validating response...",
-        }
-        return messages.get(agent, f"Running {agent}...")
-
-
-# Singleton
-trading_graph = TradingGraph()
+    for q in tests:
+        print(f"\n{'='*60}")
+        print(f"Q: {q}")
+        result = app.invoke({"messages": [HumanMessage(content=q)]})
+        print(f"A: {result.get('response', 'NO RESPONSE')}")
+        print(f"Agents: {result.get('agents_used', [])}")

@@ -1,9 +1,17 @@
-"""Prompt templates for agents."""
+"""
+Prompt templates for agents.
 
-from agent.prompts.analyst import get_analyst_prompt
-from agent.prompts.parser import get_parser_prompt
+Each file contains only constants (SYSTEM_PROMPT, USER_PROMPT, etc.)
+Agent logic is in agent/agents/*.py
+"""
+
+# Export prompt constants for convenience
+from agent.prompts.parser import SYSTEM_PROMPT as PARSER_SYSTEM_PROMPT
+from agent.prompts.clarification import SYSTEM_PROMPT as CLARIFICATION_SYSTEM_PROMPT
+from agent.prompts.responder import SYSTEM_PROMPT as RESPONDER_SYSTEM_PROMPT
 
 __all__ = [
-    "get_analyst_prompt",
-    "get_parser_prompt",
+    "PARSER_SYSTEM_PROMPT",
+    "CLARIFICATION_SYSTEM_PROMPT",
+    "RESPONDER_SYSTEM_PROMPT",
 ]

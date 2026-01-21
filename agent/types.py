@@ -60,3 +60,12 @@ class ParsedQuery(BaseModel):
 
     compare: list[str] | None = Field(default=None, description="e.g. 2023, 2024")
     unclear: list[str] | None = Field(default=None, description="e.g. year")
+
+
+class ClarificationOutput(BaseModel):
+    """Output from Clarifier agent."""
+    response: str = Field(description="Message to user in their language")
+    clarified_query: str | None = Field(
+        default=None,
+        description="Reformulated query for Parser (only when clarification complete)"
+    )

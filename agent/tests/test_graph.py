@@ -1,25 +1,18 @@
 """
-Test v2 graph flow.
+Test graph flow.
 
-Run: python -m agent.tests.test_graph_v2
+Run: python -m agent.tests.test_graph
 """
 
 import json
+import re
 from datetime import date, datetime
 from pathlib import Path
 from dataclasses import dataclass, field
 
-from google import genai
-from google.genai import types
-
-import config
-import re
-
-from agent.types import ParsedQuery
-from agent.prompts.parser import get_parser_prompt
-from agent.prompts.clarification import get_clarification_prompt, ClarificationOutput
+from agent.types import ParsedQuery, ClarificationOutput
+from agent.agents import Parser, Clarifier, present
 from agent.executor import execute
-from agent.agents.responders.data import respond as data_respond
 
 
 def validate_parsed(question: str, parsed: ParsedQuery) -> ParsedQuery:
@@ -33,13 +26,6 @@ def validate_parsed(question: str, parsed: ParsedQuery) -> ParsedQuery:
         parsed.unclear = unclear
 
     return parsed
-
-
-# =============================================================================
-# LLM Client
-# =============================================================================
-
-client = genai.Client(api_key=config.GOOGLE_API_KEY)
 
 
 # =============================================================================
@@ -81,58 +67,31 @@ class ConversationState:
 
 def run_parser(question: str) -> ParsedQuery:
     """Run Parser agent."""
-    today = date.today()
-    weekday = today.strftime("%A")
-
-    system, user = get_parser_prompt(question, today.isoformat(), weekday)
-
-    response = client.models.generate_content(
-        model=config.GEMINI_LITE_MODEL,
-        contents=f"{system}\n\n{user}",
-        config=types.GenerateContentConfig(
-            temperature=0,
-            response_mime_type="application/json",
-            response_schema=ParsedQuery,
-        ),
-    )
-
-    parsed = ParsedQuery.model_validate_json(response.text)
+    parser = Parser()
+    result = parser.parse(question, today=date.today())
 
     # Post-validate: если года нет — уточняем
-    parsed = validate_parsed(question, parsed)
+    parsed = validate_parsed(question, result.query)
 
     return parsed
 
 
 def run_clarification(question: str, parsed: dict, previous_context: str = "", mode: str = "asking", debug: bool = False) -> ClarificationOutput:
-    """Run ClarificationResponder agent."""
-    system, user = get_clarification_prompt(
-        question=question,
-        parsed=parsed,
-        previous_context=previous_context,
-        mode=mode,
-    )
-
+    """Run Clarifier agent."""
     if debug:
-        print(f"\n  [DEBUG ClarificationResponder]")
+        print(f"\n  [DEBUG Clarifier]")
         print(f"  question: {question}")
         print(f"  parsed.period: {parsed.get('period')}")
         print(f"  parsed.unclear: {parsed.get('unclear')}")
         print(f"  parsed.what: {parsed.get('what')}")
         print(f"  previous_context: {previous_context}")
-        print(f"  mode: {mode}")
 
-    response = client.models.generate_content(
-        model=config.GEMINI_LITE_MODEL,
-        contents=f"{system}\n\n{user}",
-        config=types.GenerateContentConfig(
-            temperature=0,
-            response_mime_type="application/json",
-            response_schema=ClarificationOutput,
-        ),
+    clarifier = Clarifier()
+    result = clarifier.clarify(
+        question=question,
+        parsed=parsed,
+        previous_context=previous_context,
     )
-
-    result = ClarificationOutput.model_validate_json(response.text)
 
     if debug:
         print(f"  → response: {result.response}")
@@ -205,7 +164,7 @@ def process_question(question: str, state: ConversationState) -> dict:
                 result["steps"].append("executor")
 
                 # Build data response using DataResponder
-                data_response = data_respond(
+                data_response = present(
                     state.original_question or clarification.clarified_query,
                     exec_result,
                     symbol="NQ"
@@ -271,7 +230,7 @@ def process_question(question: str, state: ConversationState) -> dict:
     result["steps"].append("executor")
 
     # Build response using DataResponder
-    response = data_respond(question, exec_result, symbol="NQ")
+    response = present(question, exec_result, symbol="NQ")
     result["response"] = response
     state.add_assistant(response)
     return result
@@ -533,10 +492,10 @@ if __name__ == "__main__":
     else:
         # Default: show help
         print("Usage:")
-        print("  python -m agent.tests.test_graph_v2 -c    # conversation tests")
-        print("  python -m agent.tests.test_graph_v2 -s    # single tests")
-        print("  python -m agent.tests.test_graph_v2 -i    # interactive mode")
-        print("  python -m agent.tests.test_graph_v2 -a    # all tests")
+        print("  python -m agent.tests.test_graph -c    # conversation tests")
+        print("  python -m agent.tests.test_graph -s    # single tests")
+        print("  python -m agent.tests.test_graph -i    # interactive mode")
+        print("  python -m agent.tests.test_graph -a    # all tests")
         print()
         if "-a" in args or "--all" in args:
             run_tests()

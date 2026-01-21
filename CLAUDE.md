@@ -87,9 +87,9 @@ docs/
 ```bash
 source .venv/bin/activate
 
-python -m agent.tests.test_graph_v2 -s    # single questions
-python -m agent.tests.test_graph_v2 -c    # conversations
-python -m agent.tests.test_graph_v2 -i    # interactive
+python -m agent.tests.test_graph -s    # single questions
+python -m agent.tests.test_graph -c    # conversations
+python -m agent.tests.test_graph -i    # interactive
 ```
 
 ## Стек
@@ -245,19 +245,19 @@ def _helper() -> str:
 ## TODO
 
 ### Phase 1: Cleanup
-- [ ] Удалить артефакты (graph.py, state.py, checkpointer.py, старые agents)
-- [ ] Создать новый минимальный state
-- [ ] Проверить что graph_v2 работает
+- [x] Удалить старые артефакты (старые agents, responders, logs)
+- [x] Создать новый минимальный state (state.py)
+- [x] Проверить что graph работает
 
 ### Phase 2: Supabase
 - [ ] Создать таблицы (sessions, messages, traces, strategies)
 - [ ] Функции для работы с историей
 - [ ] Компактификация старых сообщений
 
-### Phase 3: Token Caching
-- [ ] Разбить промпты на static/dynamic
-- [ ] CacheManager для Gemini кэширования
-- [ ] Тесты экономии токенов
+### Phase 3: Token Caching ✅
+- [x] Разбить промпты на static/dynamic
+- [x] CacheManager для Gemini кэширования (agent/memory/cache.py)
+- [x] Тесты экономии токенов — 73% savings
 
 ### Phase 4: LangGraph
 - [ ] Новые nodes (anomaly_scanner, backtester)

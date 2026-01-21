@@ -1,199 +1,207 @@
 """
-Parser agent — extracts entities from user question using LLM.
+Parser agent — extracts entities from user question.
 
-Input: question, chat_history, today
-Output: ParsedQuery (what, period, filters, modifiers, unclear)
+Single responsibility: parse question → return ParsedQuery.
 
-No business logic here — just entity extraction.
+Features:
+- Explicit caching for system prompt (cost savings)
+- Thinking with small budget (better quality)
+- Thought logging (debugging)
+
+Uses:
+- prompts/parser.py for prompt constants
+- types.py for ParsedQuery schema
+- memory/cache.py for explicit caching
 """
 
-from __future__ import annotations
-
-import json
-from datetime import datetime
+import logging
 from dataclasses import dataclass
+from datetime import date
+from typing import Optional
 
 from google import genai
 from google.genai import types
-from pydantic import ValidationError
 
 import config
-from agent.prompts.parser import get_parser_prompt
-from agent.query_builder.types import (
-    ParsedQuery,
-    ParsedPeriod,
-    ParsedFilters,
-    ParsedModifiers,
-)
-from agent.pricing import calculate_cost
+from agent.types import ParsedQuery
+from agent.prompts.parser import SYSTEM_PROMPT, USER_PROMPT_TEMPLATE
+from agent.memory.cache import get_cache_manager
 
-
-def dict_to_parsed_query(data: dict) -> ParsedQuery:
-    """Convert raw LLM dict output to typed ParsedQuery.
-
-    Validates LLM output against Pydantic models.
-    Returns fallback ParsedQuery on validation errors.
-    """
-    try:
-        period_data = data.get("period")
-        period = ParsedPeriod(**period_data) if period_data else None
-
-        filters_data = data.get("filters")
-        filters = ParsedFilters(**filters_data) if filters_data else None
-
-        modifiers_data = data.get("modifiers")
-        modifiers = ParsedModifiers(**modifiers_data) if modifiers_data else None
-
-        # Parse intent with fallback to "data"
-        intent = data.get("intent", "data")
-        if intent not in ("data", "chitchat", "concept"):
-            intent = "data"
-
-        return ParsedQuery(
-            intent=intent,
-            what=data.get("what", "greeting"),
-            period=period,
-            filters=filters,
-            modifiers=modifiers,
-            unclear=data.get("unclear", []),
-            summary=data.get("summary", ""),
-        )
-    except ValidationError as e:
-        print(f"[Parser] ParsedQuery validation failed: {e}")
-        # Return fallback — ask for clarification
-        return ParsedQuery(
-            intent="data",
-            what="unknown",
-            unclear=["question"],
-            summary="I couldn't understand your question. Could you please rephrase it?",
-        )
+logger = logging.getLogger(__name__)
 
 
 @dataclass
-class ParserResult:
-    """Result from Parser agent."""
-    parsed_query: ParsedQuery
-    raw_output: dict  # Original LLM output for debugging
-
-    # Usage stats
-    input_tokens: int = 0
-    output_tokens: int = 0
-    thinking_tokens: int = 0
-    cached_tokens: int = 0
-    cost_usd: float = 0.0
-    parse_time_ms: int = 0
+class ParseResult:
+    """Parser result with optional thinking summary."""
+    query: ParsedQuery
+    thoughts: Optional[str] = None
+    cached: bool = False
 
 
 class Parser:
     """
-    Parser agent — extracts entities from user question.
+    Entity extraction from trading questions.
 
-    Uses Gemini LLM to parse the question into structured entities.
-    Does NOT make business decisions (that's Composer's job).
+    Takes user question, returns structured ParsedQuery.
+    Uses thinking for better quality and logs thought process.
 
     Usage:
         parser = Parser()
-        result = parser.parse("Volatility by hour for Fridays")
-        # result.parsed_query contains: what="volatility", period=..., filters=...
+        result = parser.parse("волатильность за 2024")
+        # result.query.metric = "range"
+        # result.thoughts = "User asks about volatility..."
     """
 
-    name = "parser"
+    # Cache settings (explicit caching needs stable model version like gemini-2.0-flash-001)
+    # Preview models don't support explicit caching, so we rely on implicit
+    CACHE_KEY = "parser_system_v1"
+    CACHE_TTL = 3600  # 1 hour
 
-    def __init__(self, symbol: str = "NQ"):
-        """Initialize Parser with Gemini client."""
+    # Thinking budget (small for simple extraction)
+    THINKING_BUDGET = 512
+
+    def __init__(
+        self,
+        model: str | None = None,
+        use_cache: bool = True,  # Explicit caching for system prompt
+        use_thinking: bool = True,
+    ):
         self.client = genai.Client(api_key=config.GOOGLE_API_KEY)
-        self.model = config.GEMINI_LITE_MODEL
-        self.symbol = symbol
+        self.model = model or config.GEMINI_LITE_MODEL
+        self.use_cache = use_cache
+        self.use_thinking = use_thinking
+        self._cache_manager = get_cache_manager() if use_cache else None
 
     def parse(
         self,
         question: str,
-        chat_history: str = "",
-        today: str | None = None,
-        previous_parsed: ParsedQuery | None = None,
-    ) -> ParserResult:
+        today: date | None = None,
+        context: str = "",
+    ) -> ParseResult:
         """
-        Parse question and extract entities.
+        Parse user question into structured entities.
 
         Args:
             question: User's question in any language
-            chat_history: Previous conversation for context
-            today: Today's date (YYYY-MM-DD), defaults to now
-            previous_parsed: Previous ParsedQuery for follow-up context
+            today: Current date (defaults to today)
+            context: Optional conversation context
 
         Returns:
-            ParserResult with parsed_query and usage stats
+            ParseResult with query and optional thoughts
         """
         if today is None:
-            today = datetime.now().strftime("%Y-%m-%d")
+            today = date.today()
 
-        # Build prompt
-        system, user = get_parser_prompt(
-            question,
-            chat_history,
-            today,
-            symbol=self.symbol,
-            previous_parsed=previous_parsed,
-        )
-        full_prompt = f"{system}\n\n{user}"
+        weekday = today.strftime("%A")
 
-        start = datetime.now()
-
-        # Call LLM with thinking enabled for better reasoning
-        # Use response_schema to enforce valid JSON structure
-        response = self.client.models.generate_content(
-            model=self.model,
-            contents=full_prompt,
-            config=types.GenerateContentConfig(
-                temperature=0,
-                response_mime_type="application/json",
-                response_schema=ParsedQuery,  # Enforce JSON schema
-                thinking_config=types.ThinkingConfig(thinking_budget=512),
-            ),
+        # Build user prompt
+        user_prompt = USER_PROMPT_TEMPLATE.format(
+            today=today.isoformat(),
+            weekday=weekday,
+            question=question,
         )
 
-        parse_time_ms = int((datetime.now() - start).total_seconds() * 1000)
+        # Add context if provided
+        if context:
+            user_prompt = f"<context>\n{context}\n</context>\n\n{user_prompt}"
 
-        # Parse JSON response
-        try:
-            raw_output = json.loads(response.text)
-        except json.JSONDecodeError:
-            raw_output = {"what": "greeting", "summary": "Hello!"}
+        # Build config
+        gen_config = types.GenerateContentConfig(
+            temperature=0,
+            response_mime_type="application/json",
+            response_schema=ParsedQuery,
+        )
 
-        # Convert to typed ParsedQuery
-        parsed_query = dict_to_parsed_query(raw_output)
-
-        # Track usage
-        input_tokens = 0
-        output_tokens = 0
-        thinking_tokens = 0
-        cached_tokens = 0
-        cost_usd = 0.0
-
-        if response.usage_metadata:
-            input_tokens = response.usage_metadata.prompt_token_count or 0
-            output_tokens = response.usage_metadata.candidates_token_count or 0
-            thinking_tokens = getattr(response.usage_metadata, 'thoughts_token_count', 0) or 0
-            cached_tokens = getattr(response.usage_metadata, 'cached_content_token_count', 0) or 0
-            cost_usd = calculate_cost(
-                input_tokens=input_tokens,
-                output_tokens=output_tokens,
-                thinking_tokens=thinking_tokens,
-                cached_tokens=cached_tokens,
-                model=self.model,
+        # Add thinking if enabled
+        if self.use_thinking:
+            gen_config.thinking_config = types.ThinkingConfig(
+                thinking_budget=self.THINKING_BUDGET,
+                include_thoughts=True,
             )
 
-        return ParserResult(
-            parsed_query=parsed_query,
-            raw_output=raw_output,
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-            thinking_tokens=thinking_tokens,
-            cached_tokens=cached_tokens,
-            cost_usd=cost_usd,
-            parse_time_ms=parse_time_ms,
-        )
+        # Try cached request first
+        cache_name = None
+        if self.use_cache and self._cache_manager:
+            cache_name = self._cache_manager.get_or_create(
+                key=self.CACHE_KEY,
+                content=SYSTEM_PROMPT,
+                ttl_seconds=self.CACHE_TTL,
+            )
+
+        # Make request
+        if cache_name:
+            # Cached: system prompt is in cache
+            response = self.client.models.generate_content(
+                model=self.model,
+                contents=user_prompt,
+                config=types.GenerateContentConfig(
+                    cached_content=cache_name,
+                    temperature=0,
+                    response_mime_type="application/json",
+                    response_schema=ParsedQuery,
+                    thinking_config=gen_config.thinking_config if self.use_thinking else None,
+                ),
+            )
+            cached = True
+        else:
+            # Not cached: include system prompt in contents
+            response = self.client.models.generate_content(
+                model=self.model,
+                contents=f"{SYSTEM_PROMPT}\n\n{user_prompt}",
+                config=gen_config,
+            )
+            cached = False
+
+        # Extract thoughts and response
+        thoughts = None
+        response_text = None
+
+        for part in response.candidates[0].content.parts:
+            if not part.text:
+                continue
+            if hasattr(part, 'thought') and part.thought:
+                thoughts = part.text
+                logger.debug(f"Parser thinking: {thoughts[:200]}...")
+            else:
+                response_text = part.text
+
+        # Parse response
+        if response_text:
+            query = ParsedQuery.model_validate_json(response_text)
+        else:
+            # Fallback to response.text
+            query = ParsedQuery.model_validate_json(response.text)
+
+        # Log for debugging
+        logger.info(f"Parsed: intent={query.intent}, cached={cached}")
+        if thoughts:
+            logger.debug(f"Thoughts: {thoughts}")
+
+        return ParseResult(query=query, thoughts=thoughts, cached=cached)
 
 
-# Singleton for easy import
-parser = Parser()
+# =============================================================================
+# Simple API
+# =============================================================================
+
+def parse(
+    question: str,
+    today: date | None = None,
+    context: str = "",
+) -> ParsedQuery:
+    """
+    Parse question into structured entities.
+
+    Simple wrapper — returns just ParsedQuery (no thoughts).
+
+    Args:
+        question: User's question
+        today: Current date (optional)
+        context: Conversation context (optional)
+
+    Returns:
+        ParsedQuery with extracted entities
+    """
+    parser = Parser()
+    result = parser.parse(question, today, context)
+    return result.query
