@@ -244,9 +244,31 @@ def _helper() -> str:
 
 ## TODO
 
-- [ ] Чистка старых артефактов
-- [ ] Подключение к фронту
-- [ ] Supabase для переписок и трейсов
+### Phase 1: Cleanup
+- [ ] Удалить артефакты (graph.py, state.py, checkpointer.py, старые agents)
+- [ ] Создать новый минимальный state
+- [ ] Проверить что graph_v2 работает
+
+### Phase 2: Supabase
+- [ ] Создать таблицы (sessions, messages, traces, strategies)
+- [ ] Функции для работы с историей
+- [ ] Компактификация старых сообщений
+
+### Phase 3: Token Caching
+- [ ] Разбить промпты на static/dynamic
+- [ ] CacheManager для Gemini кэширования
+- [ ] Тесты экономии токенов
+
+### Phase 4: LangGraph
+- [ ] Новые nodes (anomaly_scanner, backtester)
+- [ ] Conditional routing
+- [ ] Human-in-the-loop для clarification
+
+### Phase 5: Frontend
+- [ ] Подключить API к новому графу
+- [ ] E2E тестирование
+
+### Later
 - [ ] Anomaly Finder модуль (docs/plans/anomaly_finder.md)
 - [ ] Больше инструментов (ES, CL, GC)
 - [ ] Индикаторы
