@@ -71,8 +71,15 @@ def classify_intent(state: AgentState) -> dict:
     Quickly determines: chitchat, concept, or data.
     Also detects user's language and translates to English.
     ~200-400ms instead of ~3500ms with full Parser.
+
+    If clarified_query is present (from Clarifier), use that instead of current message.
     """
-    question = get_current_question(state)
+    # Use clarified_query if present (from Clarifier), otherwise current question
+    clarified = state.get("clarified_query")
+    if clarified:
+        question = clarified
+    else:
+        question = get_current_question(state)
 
     classifier = IntentClassifier()
     result = classifier.classify(question)
@@ -82,7 +89,7 @@ def classify_intent(state: AgentState) -> dict:
     prev_usage = Usage.model_validate(prev_usage_dict) if prev_usage_dict else Usage()
     total_usage = prev_usage + result.usage
 
-    return {
+    update = {
         "intent": result.intent,
         "lang": result.lang,  # User's language (ISO 639-1)
         "question_en": result.question_en,  # Translated to English
@@ -91,6 +98,12 @@ def classify_intent(state: AgentState) -> dict:
         "step_number": state.get("step_number", 0) + 1,
         "usage": total_usage.model_dump(),
     }
+
+    # Clear clarified_query after processing
+    if clarified:
+        update["clarified_query"] = None
+
+    return update
 
 
 def route_after_intent(state: AgentState) -> Literal["chitchat", "concept", "parser"]:
@@ -135,6 +148,8 @@ def parse_question(state: AgentState) -> dict:
     return {
         "parsed_query": result.query.model_dump(),
         "parser_thoughts": result.thoughts,
+        "parser_chunks_used": result.chunks_used,  # RAP chunks
+        "parser_cached": result.cached,  # Explicit cache hit
         "agents_used": state.get("agents_used", []) + ["parser"],
         "step_number": state.get("step_number", 0) + 1,
         "usage": total_usage.model_dump(),
@@ -215,10 +230,15 @@ def handle_clarification(state: AgentState) -> dict:
     Two modes:
     1. First time (from Parser): ask clarifying question, store context
     2. User answered: combine original + answer → generate clarified_query
+
+    Uses question_en (translated by IntentClassifier) and responds in user's lang.
     """
-    question = get_current_question(state)
+    # Use translated question when evaluating user's answer
+    question_en = state.get("question_en", get_current_question(state))
+    lang = state.get("lang", "en")
     parsed = state.get("parsed_query", {})
     parser_thoughts = state.get("parser_thoughts", "")
+    clarifier_question = state.get("clarifier_question", "")
 
     # Build previous_context from clarification history
     history = state.get("clarification_history", [])
@@ -238,10 +258,12 @@ def handle_clarification(state: AgentState) -> dict:
 
     clarifier = Clarifier()
     result = clarifier.clarify(
-        question=question,
+        question=question_en,
         parsed=parsed,
         previous_context=previous_context,
         parser_thoughts=parser_thoughts,
+        clarifier_question=clarifier_question,
+        lang=lang,
     )
 
     # Aggregate usage (stored as dict in state)
@@ -249,31 +271,38 @@ def handle_clarification(state: AgentState) -> dict:
     prev_usage = Usage.model_validate(prev_usage_dict) if prev_usage_dict else Usage()
     total_usage = prev_usage + result.usage
 
+    # Get raw question for history (in user's language)
+    raw_question = get_current_question(state)
+
     update = {
         "response": result.response,
         "messages": [AIMessage(content=result.response)],
         "agents_used": state.get("agents_used", []) + ["clarifier"],
         "usage": total_usage.model_dump(),
+        "clarifier_thoughts": result.thoughts,  # For logging
     }
 
     if result.clarified_query:
-        # Clarifier formed complete query — pass to Parser
+        # Clarifier formed complete query — route to IntentClassifier
         update["clarified_query"] = result.clarified_query
         update["awaiting_clarification"] = False
         update["clarification_history"] = None
         update["original_question"] = None
+        update["clarifier_question"] = None
     else:
         # Still need more info — store state and wait
         update["awaiting_clarification"] = True
+        # Save Clarifier's question for relevance check next time
+        update["clarifier_question"] = result.response
 
         # Store original question on first clarification
         if not original:
-            update["original_question"] = question
+            update["original_question"] = raw_question
 
         # Add to history
         new_history = list(history) if history else []
         if history:  # User responded, add their message
-            new_history.append({"role": "user", "content": question})
+            new_history.append({"role": "user", "content": raw_question})
         new_history.append({"role": "assistant", "content": result.response})
         update["clarification_history"] = new_history
 
@@ -292,15 +321,15 @@ def route_entry(state: AgentState) -> Literal["intent", "clarifier"]:
     return "intent"
 
 
-def route_after_clarification(state: AgentState) -> Literal["parser", "respond"]:
+def route_after_clarification(state: AgentState) -> Literal["intent", "respond"]:
     """
     Router after Clarifier — check if we have clarified_query.
 
-    If yes → go to Parser to parse the reformulated query.
+    If yes → go to IntentClassifier to translate and route.
     If no → respond to user and wait for more input.
     """
     if state.get("clarified_query"):
-        return "parser"
+        return "intent"
     return "respond"
 
 
@@ -327,6 +356,8 @@ def save_memory(state: AgentState) -> dict:
 def handle_executor(state: AgentState) -> dict:
     """
     Executor node — get data and compute result.
+
+    Also resets clarification_attempts on success.
     """
     parsed_dict = state.get("parsed_query", {})
     parsed = ParsedQuery.model_validate(parsed_dict)
@@ -371,7 +402,7 @@ def build_graph() -> StateGraph:
     Flow:
         START → load_memory → route_entry
                                ├── awaiting_clarification → clarifier → route_after_clarification
-                               │                                          ├── has clarified_query → parser (LOOP!)
+                               │                                          ├── has clarified_query → intent → parser
                                │                                          └── need more info → save_memory → END
                                └── new question → intent → route_after_intent
                                                             ├── chitchat → save_memory → END
@@ -431,7 +462,7 @@ def build_graph() -> StateGraph:
         "clarifier",
         route_after_clarification,
         {
-            "parser": "parser",  # Loop! clarified_query → parse it
+            "intent": "intent",  # clarified_query → IntentClassifier → Parser
             "respond": "save_memory",  # No clarified_query → save and wait for user
         }
     )
@@ -666,6 +697,8 @@ class Barb:
             return {
                 "parsed_query": state.get("parsed_query"),
                 "thoughts": state.get("parser_thoughts"),
+                "chunks_used": state.get("parser_chunks_used"),
+                "cached": state.get("parser_cached"),
             }
         elif agent == "executor":
             data = state.get("data") or {}
@@ -683,6 +716,7 @@ class Barb:
             return {
                 "response": state.get("response"),
                 "clarified_query": state.get("clarified_query"),
+                "thoughts": state.get("clarifier_thoughts"),
             }
         elif agent == "responder":
             return {

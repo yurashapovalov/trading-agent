@@ -29,6 +29,11 @@ class TradingState(MessagesState):
     # Parser output
     parsed_query: dict | None
     parser_thoughts: str | None  # Parser's reasoning (for Clarifier)
+    parser_chunks_used: list[str] | None  # RAP chunks used (for logging)
+    parser_cached: bool | None  # Was explicit cache used (for logging)
+
+    # Clarifier output
+    clarifier_thoughts: str | None  # Clarifier's reasoning (for logging)
 
     # Memory
     memory_context: str | None  # Formatted context from ConversationMemory
@@ -45,6 +50,7 @@ class TradingState(MessagesState):
     original_question: str | None  # First question that triggered clarification
     clarification_history: list[dict] | None  # [{role, content}, ...] turns
     clarified_query: str | None  # Final reformulated query (when clarification done)
+    clarifier_question: str | None  # Question Clarifier asked (for relevance check)
 
     # Tracking
     agents_used: list[str]

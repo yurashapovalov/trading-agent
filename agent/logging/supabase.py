@@ -113,6 +113,7 @@ async def complete_chat_log(
     input_tokens: int = 0,
     output_tokens: int = 0,
     thinking_tokens: int = 0,
+    cached_tokens: int = 0,
     cost_usd: float = 0.0,
     duration_ms: int = 0,
     model: str | None = None,
@@ -142,6 +143,7 @@ async def complete_chat_log(
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
             "thinking_tokens": thinking_tokens,
+            "cached_tokens": cached_tokens,
             "cost_usd": cost_usd,
             "duration_ms": duration_ms,
             "model": model,
@@ -232,27 +234,3 @@ def log_trace_step_sync(
         ))
 
 
-def log_completion_sync(
-    request_id: str,
-    user_id: str,
-    session_id: str,
-    question: str,
-    response: str,
-    **kwargs
-):
-    """Synchronous version of log_completion for non-async contexts."""
-    import asyncio
-    try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            asyncio.create_task(log_completion(
-                request_id, user_id, session_id, question, response, **kwargs
-            ))
-        else:
-            loop.run_until_complete(log_completion(
-                request_id, user_id, session_id, question, response, **kwargs
-            ))
-    except RuntimeError:
-        asyncio.run(log_completion(
-            request_id, user_id, session_id, question, response, **kwargs
-        ))
