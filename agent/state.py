@@ -46,6 +46,9 @@ class TradingState(MessagesState):
     agents_used: list[str]
     step_number: int
 
+    # Usage (token counts, cost)
+    usage: dict | None  # Stored as dict, convert with Usage.model_validate()
+
 
 # Alias for compatibility
 AgentState = TradingState

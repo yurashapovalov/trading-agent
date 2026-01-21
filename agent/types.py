@@ -5,7 +5,7 @@ Used as response_schema in Gemini.
 Note: Gemini doesn't support additionalProperties, so no dict types.
 """
 
-from typing import Literal
+from typing import ClassVar, Literal
 from pydantic import BaseModel, Field
 
 
@@ -69,3 +69,55 @@ class ClarificationOutput(BaseModel):
         default=None,
         description="Reformulated query for Parser (only when clarification complete)"
     )
+
+
+class Usage(BaseModel):
+    """Token usage from Gemini API call."""
+    input_tokens: int = 0
+    output_tokens: int = 0
+    thinking_tokens: int = 0
+    cached_tokens: int = 0
+
+    # Gemini pricing per 1M tokens (USD)
+    # https://ai.google.dev/pricing
+    PRICING: ClassVar[dict] = {
+        # Gemini 2.5 Flash (full)
+        "gemini-flash-latest": {"input": 0.30, "output": 2.50, "cached": 0.03},
+        # Gemini 2.5 Flash Lite (cheap)
+        "gemini-flash-lite-latest": {"input": 0.10, "output": 0.40, "cached": 0.01},
+        # Default = lite (what we use)
+        "default": {"input": 0.10, "output": 0.40, "cached": 0.01},
+    }
+
+    def __add__(self, other: "Usage") -> "Usage":
+        """Aggregate usage from multiple calls."""
+        return Usage(
+            input_tokens=self.input_tokens + other.input_tokens,
+            output_tokens=self.output_tokens + other.output_tokens,
+            thinking_tokens=self.thinking_tokens + other.thinking_tokens,
+            cached_tokens=self.cached_tokens + other.cached_tokens,
+        )
+
+    def cost(self, model: str = "default") -> float:
+        """Calculate cost in USD."""
+        prices = self.PRICING.get(model, self.PRICING["default"])
+        # Non-cached input tokens (subtract cached)
+        regular_input = max(0, self.input_tokens - self.cached_tokens)
+        return (
+            (regular_input / 1_000_000) * prices["input"]
+            + (self.output_tokens / 1_000_000) * prices["output"]
+            + (self.cached_tokens / 1_000_000) * prices["cached"]
+        )
+
+    @classmethod
+    def from_response(cls, response) -> "Usage":
+        """Extract usage from Gemini response."""
+        meta = getattr(response, "usage_metadata", None)
+        if not meta:
+            return cls()
+        return cls(
+            input_tokens=getattr(meta, "prompt_token_count", 0) or 0,
+            output_tokens=getattr(meta, "candidates_token_count", 0) or 0,
+            thinking_tokens=getattr(meta, "thoughts_token_count", 0) or 0,
+            cached_tokens=getattr(meta, "cached_content_token_count", 0) or 0,
+        )

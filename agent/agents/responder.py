@@ -12,11 +12,25 @@ Uses:
 - Gemini for LLM calls
 """
 
+from dataclasses import dataclass
+
 from google import genai
 from google.genai import types
 
 import config
+from agent.types import Usage
 from agent.prompts.responder import SYSTEM_PROMPT, USER_PROMPT
+
+
+@dataclass
+class ResponderResult:
+    """Responder result with usage."""
+    text: str
+    usage: Usage = None
+
+    def __post_init__(self):
+        if self.usage is None:
+            self.usage = Usage()
 
 
 class Responder:
@@ -49,7 +63,7 @@ class Responder:
         intent: str = "chitchat",
         subtype: str = "greeting",
         topic: str = "",
-    ) -> str:
+    ) -> ResponderResult:
         """
         Generate response for chitchat or concept query.
 
@@ -60,7 +74,7 @@ class Responder:
             topic: For concept - the term to explain
 
         Returns:
-            Response text
+            ResponderResult with text and usage
         """
         # Build prompts
         system = SYSTEM_PROMPT.format(symbol=self.symbol)
@@ -81,7 +95,8 @@ class Responder:
             ),
         )
 
-        return response.text.strip()
+        usage = Usage.from_response(response)
+        return ResponderResult(text=response.text.strip(), usage=usage)
 
     def _extract_topic(self, question: str) -> str:
         """Extract topic from concept question."""
@@ -103,7 +118,7 @@ def respond(
     subtype: str = "greeting",
     topic: str = "",
     symbol: str = "NQ",
-) -> str:
+) -> ResponderResult:
     """
     Generate response for chitchat or concept.
 
@@ -117,7 +132,7 @@ def respond(
         symbol: Trading symbol
 
     Returns:
-        Response text
+        ResponderResult with text and usage
     """
     responder = Responder(symbol=symbol)
     return responder.respond(question, intent, subtype, topic)

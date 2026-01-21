@@ -33,6 +33,10 @@ User → Parser → Executor → Presenter → Response
 - [data-layer.md](docs/architecture/data-layer.md) — Executor, operations
 - [config.md](docs/architecture/config.md) — паттерны, события, праздники
 
+## Deployment
+
+Auto-deploy on push to `main`. См. [DEPLOY.md](DEPLOY.md)
+
 ## Структура
 
 ```

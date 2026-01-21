@@ -13,11 +13,13 @@ from typing import Literal
 from datetime import date
 import uuid
 
+import config
+
 from langgraph.graph import StateGraph, START, END
 from langchain_core.messages import HumanMessage, AIMessage
 
 from agent.state import AgentState, get_current_question
-from agent.types import ParsedQuery
+from agent.types import ParsedQuery, Usage
 from agent.agents.parser import Parser
 from agent.agents.clarifier import Clarifier
 from agent.agents.responder import Responder
@@ -78,11 +80,17 @@ def parse_question(state: AgentState) -> dict:
     parser = Parser()
     result = parser.parse(question, today=date.today(), context=memory_context)
 
+    # Aggregate usage (stored as dict in state)
+    prev_usage_dict = state.get("usage") or {}
+    prev_usage = Usage.model_validate(prev_usage_dict) if prev_usage_dict else Usage()
+    total_usage = prev_usage + result.usage
+
     return {
         "parsed_query": result.query.model_dump(),
         "parser_thoughts": result.thoughts,
         "agents_used": ["parser"],
         "step_number": state.get("step_number", 0) + 1,
+        "usage": total_usage.model_dump(),
         # Clear clarified_query after using it
         "clarified_query": None,
     }
@@ -115,12 +123,18 @@ def handle_chitchat(state: AgentState) -> dict:
     question = get_current_question(state)
 
     responder = Responder()
-    response = responder.respond(question, intent="chitchat", subtype="greeting")
+    result = responder.respond(question, intent="chitchat", subtype="greeting")
+
+    # Aggregate usage (stored as dict in state)
+    prev_usage_dict = state.get("usage") or {}
+    prev_usage = Usage.model_validate(prev_usage_dict) if prev_usage_dict else Usage()
+    total_usage = prev_usage + result.usage
 
     return {
-        "response": response,
-        "messages": [AIMessage(content=response)],
+        "response": result.text,
+        "messages": [AIMessage(content=result.text)],
         "agents_used": state.get("agents_used", []) + ["responder"],
+        "usage": total_usage.model_dump(),
     }
 
 
@@ -133,12 +147,18 @@ def handle_concept(state: AgentState) -> dict:
     question = get_current_question(state)
 
     responder = Responder()
-    response = responder.respond(question, intent="concept", topic=what)
+    result = responder.respond(question, intent="concept", topic=what)
+
+    # Aggregate usage (stored as dict in state)
+    prev_usage_dict = state.get("usage") or {}
+    prev_usage = Usage.model_validate(prev_usage_dict) if prev_usage_dict else Usage()
+    total_usage = prev_usage + result.usage
 
     return {
-        "response": response,
-        "messages": [AIMessage(content=response)],
+        "response": result.text,
+        "messages": [AIMessage(content=result.text)],
         "agents_used": state.get("agents_used", []) + ["responder"],
+        "usage": total_usage.model_dump(),
     }
 
 
@@ -178,10 +198,16 @@ def handle_clarification(state: AgentState) -> dict:
         parser_thoughts=parser_thoughts,
     )
 
+    # Aggregate usage (stored as dict in state)
+    prev_usage_dict = state.get("usage") or {}
+    prev_usage = Usage.model_validate(prev_usage_dict) if prev_usage_dict else Usage()
+    total_usage = prev_usage + result.usage
+
     update = {
         "response": result.response,
         "messages": [AIMessage(content=result.response)],
         "agents_used": state.get("agents_used", []) + ["clarifier"],
+        "usage": total_usage.model_dump(),
     }
 
     if result.clarified_query:
@@ -371,22 +397,270 @@ def compile_graph():
 
 
 # =============================================================================
+# Barb — SSE Streaming Wrapper
+# =============================================================================
+
+import time
+
+
+class Barb:
+    """
+    AskBar assistant wrapper with SSE streaming.
+
+    Wraps LangGraph and generates events for API:
+    - step_start: agent starting
+    - step_end: agent finished with input/output data
+    - text_delta: streaming text chunks
+    - usage: token counts
+    - done: completion
+    """
+
+    def __init__(self):
+        self._graph = None
+
+    @property
+    def graph(self):
+        """Lazy compile graph."""
+        if self._graph is None:
+            self._graph = compile_graph()
+        return self._graph
+
+    def stream_sse(
+        self,
+        question: str,
+        user_id: str,
+        session_id: str,
+        request_id: str | None = None,
+    ):
+        """
+        Stream SSE events for the question.
+
+        Yields dicts with event data for API to serialize.
+        """
+        start_time = time.time()
+
+        # Initial state
+        initial_state = {
+            "messages": [HumanMessage(content=question)],
+            "session_id": session_id,
+            "user_id": user_id,
+            "agents_used": [],
+            "step_number": 0,
+        }
+
+        # Track which nodes we've seen and their usage
+        seen_nodes = set()
+        node_start_times = {}
+        last_state = {}
+        prev_usage = Usage()  # Track usage before each agent
+
+        try:
+            # Stream through graph nodes
+            for state in self.graph.stream(initial_state, stream_mode="values"):
+                last_state = state
+                agents_used = state.get("agents_used", [])
+
+                # Detect new agents
+                for agent in agents_used:
+                    if agent not in seen_nodes:
+                        seen_nodes.add(agent)
+                        node_start_times[agent] = time.time()
+
+                        # Emit step_start
+                        yield {
+                            "type": "step_start",
+                            "agent": agent,
+                        }
+
+                        # Calculate per-agent usage (delta)
+                        current_usage_dict = state.get("usage") or {}
+                        current_usage = Usage.model_validate(current_usage_dict) if current_usage_dict else Usage()
+                        agent_usage = Usage(
+                            input_tokens=current_usage.input_tokens - prev_usage.input_tokens,
+                            output_tokens=current_usage.output_tokens - prev_usage.output_tokens,
+                            thinking_tokens=current_usage.thinking_tokens - prev_usage.thinking_tokens,
+                            cached_tokens=current_usage.cached_tokens - prev_usage.cached_tokens,
+                        )
+                        prev_usage = current_usage  # Update for next agent
+
+                        # Emit step_end with data including usage
+                        duration_ms = int((time.time() - node_start_times[agent]) * 1000)
+                        output = self._get_agent_output(agent, state)
+                        output["usage"] = {
+                            "input_tokens": agent_usage.input_tokens,
+                            "output_tokens": agent_usage.output_tokens,
+                            "thinking_tokens": agent_usage.thinking_tokens,
+                            "cached_tokens": agent_usage.cached_tokens,
+                            "cost_usd": agent_usage.cost(config.GEMINI_LITE_MODEL),
+                        }
+
+                        yield {
+                            "type": "step_end",
+                            "agent": agent,
+                            "duration_ms": duration_ms,
+                            "input": self._get_agent_input(agent, state),
+                            "output": output,
+                        }
+
+                # Stream response text if available
+                response = state.get("response")
+                if response and not state.get("_response_sent"):
+                    yield {
+                        "type": "text_delta",
+                        "content": response,
+                    }
+                    # Mark as sent to avoid duplicates
+                    state["_response_sent"] = True
+
+            # Final state
+            total_duration_ms = int((time.time() - start_time) * 1000)
+
+            # Usage from aggregated state (stored as dict)
+            usage_dict = last_state.get("usage") or {}
+            usage = Usage.model_validate(usage_dict) if usage_dict else Usage()
+            yield {
+                "type": "usage",
+                "input_tokens": usage.input_tokens,
+                "output_tokens": usage.output_tokens,
+                "thinking_tokens": usage.thinking_tokens,
+                "cached_tokens": usage.cached_tokens,
+                "cost": usage.cost(config.GEMINI_LITE_MODEL),
+            }
+
+            yield {
+                "type": "done",
+                "total_duration_ms": total_duration_ms,
+                "response": last_state.get("response", ""),
+            }
+
+        except Exception as e:
+            yield {
+                "type": "error",
+                "message": str(e),
+            }
+
+    def _get_agent_input(self, agent: str, state: dict) -> dict:
+        """Get input data for agent (for logging)."""
+        if agent == "parser":
+            return {
+                "question": get_current_question(state),
+                "memory_context": state.get("memory_context", "")[:500] if state.get("memory_context") else None,
+                "clarified_query": state.get("clarified_query"),
+            }
+        elif agent == "executor":
+            return {
+                "parsed_query": state.get("parsed_query"),
+            }
+        elif agent == "clarifier":
+            return {
+                "question": get_current_question(state),
+                "parsed_query": state.get("parsed_query"),
+                "parser_thoughts": state.get("parser_thoughts"),
+                "original_question": state.get("original_question"),
+                "clarification_history": state.get("clarification_history"),
+            }
+        elif agent == "responder":
+            return {
+                "question": get_current_question(state),
+                "parsed_query": state.get("parsed_query"),
+            }
+        return {}
+
+    def _get_agent_output(self, agent: str, state: dict) -> dict:
+        """Get output data for agent (for logging)."""
+        if agent == "parser":
+            return {
+                "parsed_query": state.get("parsed_query"),
+                "thoughts": state.get("parser_thoughts"),
+            }
+        elif agent == "executor":
+            data = state.get("data") or {}
+            output = {
+                "row_count": data.get("row_count"),
+                "operation": data.get("operation"),
+                "result": data.get("result"),
+            }
+            # Convert DataFrame to rows/columns for UI
+            df = data.get("data")
+            if df is not None and hasattr(df, "to_dict"):
+                output["full_data"] = self._df_to_dict(df)
+            return output
+        elif agent == "clarifier":
+            return {
+                "response": state.get("response"),
+                "clarified_query": state.get("clarified_query"),
+            }
+        elif agent == "responder":
+            return {
+                "response": state.get("response"),
+            }
+        return {}
+
+    def _df_to_dict(self, df, max_rows: int = 100) -> dict:
+        """Convert DataFrame to dict for JSON serialization."""
+        import math
+
+        total = len(df)
+        df_limited = df.head(max_rows)
+
+        rows = []
+        for _, row in df_limited.iterrows():
+            record = {}
+            for col, val in row.items():
+                if val is None or (isinstance(val, float) and math.isnan(val)):
+                    record[col] = None
+                elif hasattr(val, "isoformat"):
+                    record[col] = val.isoformat()
+                elif isinstance(val, float):
+                    record[col] = round(val, 4)
+                else:
+                    record[col] = val
+            rows.append(record)
+
+        return {
+            "columns": list(df.columns),
+            "rows": rows,
+            "row_count": total,
+            "truncated": total > max_rows,
+        }
+
+    def invoke(self, question: str, **kwargs) -> dict:
+        """Simple invoke without streaming."""
+        state = {
+            "messages": [HumanMessage(content=question)],
+            **kwargs,
+        }
+        return self.graph.invoke(state)
+
+
+# Singleton instance
+barb = Barb()
+
+# Alias for api.py compatibility
+trading_graph = barb
+
+
+# =============================================================================
 # Test
 # =============================================================================
 
 if __name__ == "__main__":
-    app = compile_graph()
-
     tests = [
         "привет",
         "что такое OPEX",
         "статистика за 2024",
-        "волатильность за 2024",
     ]
 
     for q in tests:
         print(f"\n{'='*60}")
         print(f"Q: {q}")
-        result = app.invoke({"messages": [HumanMessage(content=q)]})
-        print(f"A: {result.get('response', 'NO RESPONSE')}")
-        print(f"Agents: {result.get('agents_used', [])}")
+        for event in barb.stream_sse(q, user_id="test", session_id="test"):
+            print(f"  {event['type']}: ", end="")
+            if event["type"] == "step_end":
+                print(f"{event['agent']} ({event['duration_ms']}ms)")
+            elif event["type"] == "text_delta":
+                print(f"{event['content'][:50]}...")
+            elif event["type"] == "done":
+                print(f"total {event['total_duration_ms']}ms")
+            else:
+                print()

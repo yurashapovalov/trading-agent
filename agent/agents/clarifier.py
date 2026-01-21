@@ -10,13 +10,27 @@ Uses:
 - Gemini with response_schema for structured output
 """
 
+from dataclasses import dataclass
+
 from google import genai
 from google.genai import types
 
 import config
-from agent.types import ClarificationOutput
+from agent.types import ClarificationOutput, Usage
 from agent.prompts.clarification import SYSTEM_PROMPT, USER_PROMPT
 from agent.memory.cache import get_cache_manager
+
+
+@dataclass
+class ClarifierResult:
+    """Clarifier result with usage."""
+    response: str
+    clarified_query: str | None
+    usage: Usage = None
+
+    def __post_init__(self):
+        if self.usage is None:
+            self.usage = Usage()
 
 
 class Clarifier:
@@ -68,7 +82,7 @@ class Clarifier:
         parsed: dict,
         previous_context: str = "",
         parser_thoughts: str = "",
-    ) -> ClarificationOutput:
+    ) -> ClarifierResult:
         """
         Generate clarification response or confirm reformulated query.
 
@@ -79,7 +93,7 @@ class Clarifier:
             parser_thoughts: Parser's thinking about what's unclear and why
 
         Returns:
-            ClarificationOutput with response and optional clarified_query
+            ClarifierResult with response, clarified_query, and usage
         """
         # Determine mode based on context
         mode = "confirming" if previous_context else "asking"
@@ -134,7 +148,13 @@ class Clarifier:
                 ),
             )
 
-        return ClarificationOutput.model_validate_json(response.text)
+        output = ClarificationOutput.model_validate_json(response.text)
+        usage = Usage.from_response(response)
+        return ClarifierResult(
+            response=output.response,
+            clarified_query=output.clarified_query,
+            usage=usage,
+        )
 
 
 # =============================================================================
@@ -146,7 +166,7 @@ def clarify(
     parsed: dict,
     previous_context: str = "",
     parser_thoughts: str = "",
-) -> ClarificationOutput:
+) -> ClarifierResult:
     """
     Handle clarification for unclear query.
 
@@ -159,7 +179,7 @@ def clarify(
         parser_thoughts: Parser's reasoning about unclear fields
 
     Returns:
-        ClarificationOutput with response and optional clarified_query
+        ClarifierResult with response, clarified_query, and usage
     """
     clarifier = Clarifier()
     return clarifier.clarify(question, parsed, previous_context, parser_thoughts)

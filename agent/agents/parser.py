@@ -23,7 +23,7 @@ from google import genai
 from google.genai import types
 
 import config
-from agent.types import ParsedQuery
+from agent.types import ParsedQuery, Usage
 from agent.prompts.parser import SYSTEM_PROMPT, USER_PROMPT_TEMPLATE
 from agent.memory.cache import get_cache_manager
 
@@ -36,6 +36,11 @@ class ParseResult:
     query: ParsedQuery
     thoughts: Optional[str] = None
     cached: bool = False
+    usage: Usage = None
+
+    def __post_init__(self):
+        if self.usage is None:
+            self.usage = Usage()
 
 
 class Parser:
@@ -172,12 +177,15 @@ class Parser:
             # Fallback to response.text
             query = ParsedQuery.model_validate_json(response.text)
 
+        # Extract usage
+        usage = Usage.from_response(response)
+
         # Log for debugging
-        logger.info(f"Parsed: intent={query.intent}, cached={cached}")
+        logger.info(f"Parsed: intent={query.intent}, cached={cached}, tokens={usage.input_tokens}+{usage.output_tokens}")
         if thoughts:
             logger.debug(f"Thoughts: {thoughts}")
 
-        return ParseResult(query=query, thoughts=thoughts, cached=cached)
+        return ParseResult(query=query, thoughts=thoughts, cached=cached, usage=usage)
 
 
 # =============================================================================
