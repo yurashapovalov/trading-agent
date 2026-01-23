@@ -19,215 +19,242 @@ from agent.config.patterns.price import PRICE_PATTERNS, list_price_patterns
 
 
 # =============================================================================
-# GENERIC PATTERN DETECTOR (reads rules from config)
+# STATELESS PATTERN DETECTION
 # =============================================================================
 
-class PatternDetector:
-    """Detects patterns based on config rules using numpy."""
+def _prepare_arrays(df: pd.DataFrame) -> dict[str, np.ndarray]:
+    """Prepare numpy arrays for pattern detection.
 
-    def __init__(self, df: pd.DataFrame):
-        """Initialize with OHLC DataFrame."""
-        self.n = len(df)
-        if self.n == 0:
-            return
+    Args:
+        df: DataFrame with open, high, low, close columns
 
-        # Current bar OHLC
-        self.o = df["open"].values.astype(float)
-        self.h = df["high"].values.astype(float)
-        self.l = df["low"].values.astype(float)
-        self.c = df["close"].values.astype(float)
+    Returns:
+        Dict with all computed arrays needed for pattern detection
+    """
+    n = len(df)
+    if n == 0:
+        return {"n": 0}
 
-        # Computed values for current bar
-        self.range = self.h - self.l
-        self.body = np.abs(self.c - self.o)
-        self.upper_shadow = self.h - np.maximum(self.c, self.o)
-        self.lower_shadow = np.minimum(self.c, self.o) - self.l
-        self.is_green = self.c > self.o
-        self.is_red = self.c < self.o
+    # Current bar OHLC
+    o = df["open"].values.astype(float)
+    h = df["high"].values.astype(float)
+    l = df["low"].values.astype(float)
+    c = df["close"].values.astype(float)
 
-        # Ratios (avoid division by zero)
-        safe_range = np.where(self.range > 0, self.range, 1)
-        self.body_ratio = self.body / safe_range
-        self.upper_shadow_ratio = self.upper_shadow / safe_range
-        self.lower_shadow_ratio = self.lower_shadow / safe_range
+    # Computed values for current bar
+    range_ = h - l
+    body = np.abs(c - o)
+    upper_shadow = h - np.maximum(c, o)
+    lower_shadow = np.minimum(c, o) - l
+    is_green = c > o
+    is_red = c < o
 
-        # Previous bar (lag 1)
-        self.prev_o = np.roll(self.o, 1)
-        self.prev_h = np.roll(self.h, 1)
-        self.prev_l = np.roll(self.l, 1)
-        self.prev_c = np.roll(self.c, 1)
-        self.prev_o[0] = self.o[0]
-        self.prev_h[0] = self.h[0]
-        self.prev_l[0] = self.l[0]
-        self.prev_c[0] = self.c[0]
+    # Ratios (avoid division by zero)
+    safe_range = np.where(range_ > 0, range_, 1)
+    body_ratio = body / safe_range
+    upper_shadow_ratio = upper_shadow / safe_range
+    lower_shadow_ratio = lower_shadow / safe_range
 
-        self.prev_body = np.abs(self.prev_c - self.prev_o)
-        self.prev_is_green = self.prev_c > self.prev_o
-        self.prev_is_red = self.prev_c < self.prev_o
-        self.prev_range = self.prev_h - self.prev_l
-        safe_prev_range = np.where(self.prev_range > 0, self.prev_range, 1)
-        self.prev_body_ratio = self.prev_body / safe_prev_range
+    # Previous bar (lag 1)
+    prev_o = np.roll(o, 1)
+    prev_h = np.roll(h, 1)
+    prev_l = np.roll(l, 1)
+    prev_c = np.roll(c, 1)
+    prev_o[0] = o[0]
+    prev_h[0] = h[0]
+    prev_l[0] = l[0]
+    prev_c[0] = c[0]
 
-        # Bar 2 ago (for 3-candle patterns)
-        self.prev2_o = np.roll(self.o, 2)
-        self.prev2_h = np.roll(self.h, 2)
-        self.prev2_l = np.roll(self.l, 2)
-        self.prev2_c = np.roll(self.c, 2)
-        self.prev2_o[:2] = self.o[:2]
-        self.prev2_h[:2] = self.h[:2]
-        self.prev2_l[:2] = self.l[:2]
-        self.prev2_c[:2] = self.c[:2]
+    prev_body = np.abs(prev_c - prev_o)
+    prev_is_green = prev_c > prev_o
+    prev_is_red = prev_c < prev_o
+    prev_range = prev_h - prev_l
+    safe_prev_range = np.where(prev_range > 0, prev_range, 1)
+    prev_body_ratio = prev_body / safe_prev_range
 
-        self.prev2_body = np.abs(self.prev2_c - self.prev2_o)
-        self.prev2_is_green = self.prev2_c > self.prev2_o
-        self.prev2_is_red = self.prev2_c < self.prev2_o
-        self.prev2_range = self.prev2_h - self.prev2_l
-        safe_prev2_range = np.where(self.prev2_range > 0, self.prev2_range, 1)
-        self.prev2_body_ratio = self.prev2_body / safe_prev2_range
+    # Bar 2 ago (for 3-candle patterns)
+    prev2_o = np.roll(o, 2)
+    prev2_h = np.roll(h, 2)
+    prev2_l = np.roll(l, 2)
+    prev2_c = np.roll(c, 2)
+    prev2_o[:2] = o[:2]
+    prev2_h[:2] = h[:2]
+    prev2_l[:2] = l[:2]
+    prev2_c[:2] = c[:2]
 
-    def detect(self, detection: dict, candles: int = 1) -> np.ndarray:
-        """Detect pattern based on config rules.
+    prev2_body = np.abs(prev2_c - prev2_o)
+    prev2_is_green = prev2_c > prev2_o
+    prev2_is_red = prev2_c < prev2_o
+    prev2_range = prev2_h - prev2_l
+    safe_prev2_range = np.where(prev2_range > 0, prev2_range, 1)
+    prev2_body_ratio = prev2_body / safe_prev2_range
 
-        Args:
-            detection: Dict of detection rules from config
-            candles: Number of candles in pattern (1, 2, or 3)
+    return {
+        "n": n,
+        # Current bar
+        "o": o, "h": h, "l": l, "c": c,
+        "range": range_, "body": body,
+        "upper_shadow": upper_shadow, "lower_shadow": lower_shadow,
+        "is_green": is_green, "is_red": is_red,
+        "body_ratio": body_ratio,
+        "upper_shadow_ratio": upper_shadow_ratio,
+        "lower_shadow_ratio": lower_shadow_ratio,
+        # Previous bar
+        "prev_o": prev_o, "prev_h": prev_h, "prev_l": prev_l, "prev_c": prev_c,
+        "prev_body": prev_body, "prev_is_green": prev_is_green, "prev_is_red": prev_is_red,
+        "prev_range": prev_range, "prev_body_ratio": prev_body_ratio,
+        # Bar 2 ago
+        "prev2_o": prev2_o, "prev2_h": prev2_h, "prev2_l": prev2_l, "prev2_c": prev2_c,
+        "prev2_body": prev2_body, "prev2_is_green": prev2_is_green, "prev2_is_red": prev2_is_red,
+        "prev2_range": prev2_range, "prev2_body_ratio": prev2_body_ratio,
+    }
 
-        Returns:
-            Boolean numpy array (True where pattern detected)
-        """
-        if self.n == 0:
-            return np.array([], dtype=bool)
 
-        # Start with all True, then AND conditions
-        mask = np.ones(self.n, dtype=bool)
+def _detect(arrays: dict[str, np.ndarray], detection: dict, candles: int = 1) -> np.ndarray:
+    """Detect pattern based on config rules.
 
-        # Range must be positive for meaningful patterns
-        mask &= self.range > 0
+    Args:
+        arrays: Dict of numpy arrays from _prepare_arrays()
+        detection: Dict of detection rules from config
+        candles: Number of candles in pattern (1, 2, or 3)
 
-        # === SINGLE CANDLE CONDITIONS ===
+    Returns:
+        Boolean numpy array (True where pattern detected)
+    """
+    n = arrays["n"]
+    if n == 0:
+        return np.array([], dtype=bool)
 
-        if "body_ratio_max" in detection:
-            mask &= self.body_ratio < detection["body_ratio_max"]
+    # Start with all True, then AND conditions
+    mask = np.ones(n, dtype=bool)
 
-        if "body_ratio_min" in detection:
-            mask &= self.body_ratio > detection["body_ratio_min"]
+    # Range must be positive for meaningful patterns
+    mask &= arrays["range"] > 0
 
-        if "lower_shadow_ratio_min" in detection:
-            mask &= self.lower_shadow_ratio > detection["lower_shadow_ratio_min"]
+    # === SINGLE CANDLE CONDITIONS ===
 
-        if "lower_shadow_ratio_max" in detection:
-            mask &= self.lower_shadow_ratio < detection["lower_shadow_ratio_max"]
+    if "body_ratio_max" in detection:
+        mask &= arrays["body_ratio"] < detection["body_ratio_max"]
 
-        if "upper_shadow_ratio_min" in detection:
-            mask &= self.upper_shadow_ratio > detection["upper_shadow_ratio_min"]
+    if "body_ratio_min" in detection:
+        mask &= arrays["body_ratio"] > detection["body_ratio_min"]
 
-        if "upper_shadow_ratio_max" in detection:
-            mask &= self.upper_shadow_ratio < detection["upper_shadow_ratio_max"]
+    if "lower_shadow_ratio_min" in detection:
+        mask &= arrays["lower_shadow_ratio"] > detection["lower_shadow_ratio_min"]
 
-        if detection.get("is_green"):
-            mask &= self.is_green
+    if "lower_shadow_ratio_max" in detection:
+        mask &= arrays["lower_shadow_ratio"] < detection["lower_shadow_ratio_max"]
 
-        if detection.get("is_red"):
-            mask &= self.is_red
+    if "upper_shadow_ratio_min" in detection:
+        mask &= arrays["upper_shadow_ratio"] > detection["upper_shadow_ratio_min"]
 
-        # === TWO CANDLE CONDITIONS ===
+    if "upper_shadow_ratio_max" in detection:
+        mask &= arrays["upper_shadow_ratio"] < detection["upper_shadow_ratio_max"]
 
-        if detection.get("prev_red"):
-            mask &= self.prev_is_red
+    if detection.get("is_green"):
+        mask &= arrays["is_green"]
 
-        if detection.get("prev_green"):
-            mask &= self.prev_is_green
+    if detection.get("is_red"):
+        mask &= arrays["is_red"]
 
-        if detection.get("curr_red"):
-            mask &= self.is_red
+    # === TWO CANDLE CONDITIONS ===
 
-        if detection.get("curr_green"):
-            mask &= self.is_green
+    if detection.get("prev_red"):
+        mask &= arrays["prev_is_red"]
 
-        if detection.get("curr_body_engulfs_prev"):
-            # Current body engulfs previous body
-            mask &= (self.o <= self.prev_c) & (self.c >= self.prev_o) | \
-                    (self.o >= self.prev_c) & (self.c <= self.prev_o)
+    if detection.get("prev_green"):
+        mask &= arrays["prev_is_green"]
 
-        if detection.get("curr_opens_below_prev_low"):
-            mask &= self.o < self.prev_l
+    if detection.get("curr_red"):
+        mask &= arrays["is_red"]
 
-        if detection.get("curr_opens_above_prev_high"):
-            mask &= self.o > self.prev_h
+    if detection.get("curr_green"):
+        mask &= arrays["is_green"]
 
-        if detection.get("curr_closes_above_prev_midpoint"):
-            prev_mid = (self.prev_o + self.prev_c) / 2
-            mask &= self.c > prev_mid
+    if detection.get("curr_body_engulfs_prev"):
+        o, c = arrays["o"], arrays["c"]
+        prev_o, prev_c = arrays["prev_o"], arrays["prev_c"]
+        mask &= (o <= prev_c) & (c >= prev_o) | (o >= prev_c) & (c <= prev_o)
 
-        if detection.get("curr_closes_below_prev_midpoint"):
-            prev_mid = (self.prev_o + self.prev_c) / 2
-            mask &= self.c < prev_mid
+    if detection.get("curr_opens_below_prev_low"):
+        mask &= arrays["o"] < arrays["prev_l"]
 
-        if detection.get("highs_match"):
-            tolerance = detection.get("tolerance", 0.001)
-            mask &= np.abs(self.h - self.prev_h) / np.where(self.h > 0, self.h, 1) < tolerance
+    if detection.get("curr_opens_above_prev_high"):
+        mask &= arrays["o"] > arrays["prev_h"]
 
-        if detection.get("lows_match"):
-            tolerance = detection.get("tolerance", 0.001)
-            mask &= np.abs(self.l - self.prev_l) / np.where(self.l > 0, self.l, 1) < tolerance
+    if detection.get("curr_closes_above_prev_midpoint"):
+        prev_mid = (arrays["prev_o"] + arrays["prev_c"]) / 2
+        mask &= arrays["c"] > prev_mid
 
-        # === THREE CANDLE CONDITIONS ===
+    if detection.get("curr_closes_below_prev_midpoint"):
+        prev_mid = (arrays["prev_o"] + arrays["prev_c"]) / 2
+        mask &= arrays["c"] < prev_mid
 
-        if detection.get("first_red"):
-            mask &= self.prev2_is_red
+    if detection.get("highs_match"):
+        tolerance = detection.get("tolerance", 0.001)
+        h = arrays["h"]
+        mask &= np.abs(h - arrays["prev_h"]) / np.where(h > 0, h, 1) < tolerance
 
-        if detection.get("first_green"):
-            mask &= self.prev2_is_green
+    if detection.get("lows_match"):
+        tolerance = detection.get("tolerance", 0.001)
+        l = arrays["l"]
+        mask &= np.abs(l - arrays["prev_l"]) / np.where(l > 0, l, 1) < tolerance
 
-        if "first_body_ratio_min" in detection:
-            mask &= self.prev2_body_ratio > detection["first_body_ratio_min"]
+    # === THREE CANDLE CONDITIONS ===
 
-        if "second_body_ratio_max" in detection:
-            mask &= self.prev_body_ratio < detection["second_body_ratio_max"]
+    if detection.get("first_red"):
+        mask &= arrays["prev2_is_red"]
 
-        if detection.get("third_red"):
-            mask &= self.is_red
+    if detection.get("first_green"):
+        mask &= arrays["prev2_is_green"]
 
-        if detection.get("third_green"):
-            mask &= self.is_green
+    if "first_body_ratio_min" in detection:
+        mask &= arrays["prev2_body_ratio"] > detection["first_body_ratio_min"]
 
-        if detection.get("third_closes_above_first_midpoint"):
-            first_mid = (self.prev2_o + self.prev2_c) / 2
-            mask &= self.c > first_mid
+    if "second_body_ratio_max" in detection:
+        mask &= arrays["prev_body_ratio"] < detection["second_body_ratio_max"]
 
-        if detection.get("third_closes_below_first_midpoint"):
-            first_mid = (self.prev2_o + self.prev2_c) / 2
-            mask &= self.c < first_mid
+    if detection.get("third_red"):
+        mask &= arrays["is_red"]
 
-        if detection.get("all_green"):
-            mask &= self.is_green & self.prev_is_green & self.prev2_is_green
+    if detection.get("third_green"):
+        mask &= arrays["is_green"]
 
-        if detection.get("all_red"):
-            mask &= self.is_red & self.prev_is_red & self.prev2_is_red
+    if detection.get("third_closes_above_first_midpoint"):
+        first_mid = (arrays["prev2_o"] + arrays["prev2_c"]) / 2
+        mask &= arrays["c"] > first_mid
 
-        if detection.get("each_closes_higher"):
-            mask &= (self.c > self.prev_c) & (self.prev_c > self.prev2_c)
+    if detection.get("third_closes_below_first_midpoint"):
+        first_mid = (arrays["prev2_o"] + arrays["prev2_c"]) / 2
+        mask &= arrays["c"] < first_mid
 
-        if detection.get("each_closes_lower"):
-            mask &= (self.c < self.prev_c) & (self.prev_c < self.prev2_c)
+    if detection.get("all_green"):
+        mask &= arrays["is_green"] & arrays["prev_is_green"] & arrays["prev2_is_green"]
 
-        # === PRICE PATTERN CONDITIONS ===
+    if detection.get("all_red"):
+        mask &= arrays["is_red"] & arrays["prev_is_red"] & arrays["prev2_is_red"]
 
-        if detection.get("high_below_prev_high") and detection.get("low_above_prev_low"):
-            # Inside bar
-            mask &= (self.h < self.prev_h) & (self.l > self.prev_l)
+    if detection.get("each_closes_higher"):
+        mask &= (arrays["c"] > arrays["prev_c"]) & (arrays["prev_c"] > arrays["prev2_c"])
 
-        if detection.get("high_above_prev_high") and detection.get("low_below_prev_low"):
-            # Outside bar
-            mask &= (self.h > self.prev_h) & (self.l < self.prev_l)
+    if detection.get("each_closes_lower"):
+        mask &= (arrays["c"] < arrays["prev_c"]) & (arrays["prev_c"] < arrays["prev2_c"])
 
-        # First row(s) can't have valid multi-candle patterns
-        if candles >= 2:
-            mask[0] = False
-        if candles >= 3:
-            mask[1] = False
+    # === PRICE PATTERN CONDITIONS ===
 
-        return mask
+    if detection.get("high_below_prev_high") and detection.get("low_above_prev_low"):
+        mask &= (arrays["h"] < arrays["prev_h"]) & (arrays["l"] > arrays["prev_l"])
+
+    if detection.get("high_above_prev_high") and detection.get("low_below_prev_low"):
+        mask &= (arrays["h"] > arrays["prev_h"]) & (arrays["l"] < arrays["prev_l"])
+
+    # First row(s) can't have valid multi-candle patterns
+    if candles >= 2 and n > 0:
+        mask[0] = False
+    if candles >= 3 and n > 1:
+        mask[1] = False
+
+    return mask
 
 
 # =============================================================================
@@ -256,8 +283,8 @@ def scan_patterns_df(df: pd.DataFrame) -> pd.DataFrame:
     # Make copy to avoid modifying original
     result = df.copy()
 
-    # Initialize detector
-    detector = PatternDetector(df)
+    # Prepare arrays once (stateless)
+    arrays = _prepare_arrays(df)
 
     # Scan candle patterns from config
     for name in list_candle_patterns():
@@ -265,7 +292,7 @@ def scan_patterns_df(df: pd.DataFrame) -> pd.DataFrame:
         detection = config.get("detection", {})
         candles = config.get("candles", 1)
 
-        mask = detector.detect(detection, candles)
+        mask = _detect(arrays, detection, candles)
         result[f"is_{name}"] = mask.astype(int)
 
     # Scan price patterns from config
@@ -273,7 +300,7 @@ def scan_patterns_df(df: pd.DataFrame) -> pd.DataFrame:
         config = PRICE_PATTERNS[name]
         detection = config.get("detection", {})
 
-        mask = detector.detect(detection, candles=2)  # Price patterns need prev bar
+        mask = _detect(arrays, detection, candles=2)
         result[f"is_{name}"] = mask.astype(int)
 
     return result
@@ -334,3 +361,7 @@ def list_supported_patterns() -> list[str]:
     candle = [f"is_{name}" for name in list_candle_patterns()]
     price = [f"is_{name}" for name in list_price_patterns()]
     return candle + price
+
+
+# Legacy alias for backward compatibility
+PatternDetector = None  # Class removed - use stateless functions

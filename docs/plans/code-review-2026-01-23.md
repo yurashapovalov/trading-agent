@@ -12,7 +12,7 @@
 |----------|-------|--------|
 | Critical | 1 | DONE |
 | High | 4 | 3 DONE, 1 WONTFIX |
-| Medium | 6 | 5 DONE, 1 SKIP |
+| Medium | 6 | ALL DONE |
 | Low | 6 | Backlog |
 
 ---
