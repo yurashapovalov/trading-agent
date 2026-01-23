@@ -4,10 +4,12 @@ Semantic parser for trading questions.
 Uses RAP (Retrieval-Augmented Prompting) with Pydantic schema.
 """
 
+import json
 import logging
 from dataclasses import dataclass, field
 
 from google import genai
+from pydantic import ValidationError
 from google.genai import types
 
 import config
@@ -74,9 +76,12 @@ class Parser:
             try:
                 parsed = ParserOutput.model_validate_json(response_text)
                 steps = parsed.steps
-            except Exception as e:
-                logger.error(f"Parse error: {e}")
-                logger.error(f"Response: {response_text}")
+            except json.JSONDecodeError as e:
+                logger.error(f"Invalid JSON from LLM: {e}")
+                logger.debug(f"Response was: {response_text}")
+            except ValidationError as e:
+                logger.error(f"Schema validation failed: {e}")
+                logger.debug(f"Response was: {response_text}")
 
         usage = Usage.from_response(response)
 

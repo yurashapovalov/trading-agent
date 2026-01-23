@@ -2,6 +2,8 @@
 
 import pandas as pd
 
+from agent.rules import get_column
+
 
 def op_compare(df: pd.DataFrame, what: str, params: dict) -> dict:
     """
@@ -17,7 +19,7 @@ def op_compare(df: pd.DataFrame, what: str, params: dict) -> dict:
     if df.empty:
         return {"rows": [], "summary": {"error": "No data"}}
 
-    col = _what_to_column(what)
+    col = get_column(what)
     if col not in df.columns:
         return {"rows": [], "summary": {"error": f"Column {col} not found"}}
 
@@ -64,13 +66,6 @@ def op_compare(df: pd.DataFrame, what: str, params: dict) -> dict:
     }
 
     return {"rows": rows, "summary": summary}
-
-
-def _what_to_column(what: str) -> str:
-    """Map atom.what to DataFrame column."""
-    if what == "volatility":
-        return "range"
-    return what
 
 
 def _get_labels(group_by: str) -> dict:

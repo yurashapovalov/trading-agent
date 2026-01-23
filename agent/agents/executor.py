@@ -9,10 +9,13 @@ Uses rules from agent/rules/ for:
 - Operation requirements (requires_full_data)
 """
 
+import logging
 import re
 from datetime import date, timedelta
 
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 from agent.data import get_bars, enrich
 from agent.operations import OPERATIONS
@@ -256,8 +259,8 @@ def _apply_categorical(df: pd.DataFrame, f: dict, symbol: str) -> pd.DataFrame:
         df = _apply_session_filter(df, f["session"], symbol)
 
     elif f.get("event"):
-        # TODO: implement event filtering
-        pass
+        # Event filtering (fomc, opex, cpi) not yet implemented
+        logger.warning(f"Event filter not implemented: {f.get('event')}")
 
     return df
 

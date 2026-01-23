@@ -6,6 +6,8 @@ Receives FULL data (not pre-filtered) because requires_full_data=True.
 
 import pandas as pd
 
+from agent.rules import get_column
+
 
 def op_streak(df: pd.DataFrame, what: str, params: dict) -> dict:
     """
@@ -78,7 +80,7 @@ def _build_mask(df: pd.DataFrame, condition_filters: list, what: str) -> pd.Seri
     """
     if not condition_filters:
         # Default: use metric from 'what' > 0
-        col = _what_to_column(what)
+        col = get_column(what)
         if col in df.columns:
             return df[col] > 0
         elif "change" in df.columns:
@@ -96,7 +98,7 @@ def _build_mask(df: pd.DataFrame, condition_filters: list, what: str) -> pd.Seri
         return _mask_from_pattern(df, f)
 
     # Fallback
-    col = _what_to_column(what)
+    col = get_column(what)
     if col in df.columns:
         return df[col] > 0
 
@@ -134,10 +136,3 @@ def _mask_from_pattern(df: pd.DataFrame, f: dict) -> pd.Series | None:
         return ~df["is_green"]
 
     return None
-
-
-def _what_to_column(what: str) -> str:
-    """Map atom.what to DataFrame column."""
-    if what == "volatility":
-        return "range"
-    return what

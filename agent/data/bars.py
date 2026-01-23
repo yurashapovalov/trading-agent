@@ -59,12 +59,12 @@ def get_bars(
 def _get_minute_bars(symbol: str, start: str, end: str, minutes: int) -> pd.DataFrame:
     """Get minute bars (1m, 5m, 15m, 30m)."""
     if minutes == 1:
-        sql = f"""
+        sql = """
             SELECT timestamp, open, high, low, close, volume
             FROM ohlcv_1min
-            WHERE symbol = '{symbol}'
-              AND timestamp >= '{start}'
-              AND timestamp < '{end}'
+            WHERE symbol = ?
+              AND timestamp >= ?
+              AND timestamp < ?
             ORDER BY timestamp
         """
     else:
@@ -77,13 +77,13 @@ def _get_minute_bars(symbol: str, start: str, end: str, minutes: int) -> pd.Data
                 LAST(close ORDER BY timestamp) AS close,
                 SUM(volume) AS volume
             FROM ohlcv_1min
-            WHERE symbol = '{symbol}'
-              AND timestamp >= '{start}'
-              AND timestamp < '{end}'
+            WHERE symbol = ?
+              AND timestamp >= ?
+              AND timestamp < ?
             GROUP BY 1
             ORDER BY 1
         """
-    return _query(sql)
+    return _query(sql, [symbol, start, end])
 
 
 def _get_hour_bars(symbol: str, start: str, end: str, hours: int) -> pd.DataFrame:
@@ -97,13 +97,13 @@ def _get_hour_bars(symbol: str, start: str, end: str, hours: int) -> pd.DataFram
             LAST(close ORDER BY timestamp) AS close,
             SUM(volume) AS volume
         FROM ohlcv_1min
-        WHERE symbol = '{symbol}'
-          AND timestamp >= '{start}'
-          AND timestamp < '{end}'
+        WHERE symbol = ?
+          AND timestamp >= ?
+          AND timestamp < ?
         GROUP BY 1
         ORDER BY 1
     """
-    return _query(sql)
+    return _query(sql, [symbol, start, end])
 
 
 def _get_daily_bars(symbol: str, start: str, end: str) -> pd.DataFrame:
@@ -126,15 +126,15 @@ def _get_daily_bars(symbol: str, start: str, end: str) -> pd.DataFrame:
                 LAST(close ORDER BY timestamp) AS close,
                 SUM(volume) AS volume
             FROM ohlcv_1min
-            WHERE symbol = '{symbol}'
-              AND timestamp >= '{start}'
-              AND timestamp < '{end}'
+            WHERE symbol = ?
+              AND timestamp >= ?
+              AND timestamp < ?
             GROUP BY 1
             ORDER BY 1
         """
     else:
         # Stocks: simple calendar day
-        sql = f"""
+        sql = """
             SELECT
                 CAST(timestamp AS DATE) AS date,
                 FIRST(open ORDER BY timestamp) AS open,
@@ -143,14 +143,14 @@ def _get_daily_bars(symbol: str, start: str, end: str) -> pd.DataFrame:
                 LAST(close ORDER BY timestamp) AS close,
                 SUM(volume) AS volume
             FROM ohlcv_1min
-            WHERE symbol = '{symbol}'
-              AND timestamp >= '{start}'
-              AND timestamp < '{end}'
+            WHERE symbol = ?
+              AND timestamp >= ?
+              AND timestamp < ?
             GROUP BY 1
             ORDER BY 1
         """
 
-    df = _query(sql)
+    df = _query(sql, [symbol, start, end])
     if df.empty:
         return df
 
@@ -160,10 +160,13 @@ def _get_daily_bars(symbol: str, start: str, end: str) -> pd.DataFrame:
     return df.reset_index(drop=True)
 
 
-def _query(sql: str) -> pd.DataFrame:
-    """Execute SQL query."""
+def _query(sql: str, params: list | None = None) -> pd.DataFrame:
+    """Execute SQL query with optional parameters."""
     con = duckdb.connect(config.DATABASE_PATH, read_only=True)
-    df = con.execute(sql).fetchdf()
+    if params:
+        df = con.execute(sql, params).fetchdf()
+    else:
+        df = con.execute(sql).fetchdf()
     con.close()
     return df
 

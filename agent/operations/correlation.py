@@ -2,6 +2,8 @@
 
 import pandas as pd
 
+from agent.rules import get_column
+
 
 def op_correlation(df: pd.DataFrame, what: str, params: dict) -> dict:
     """
@@ -21,11 +23,11 @@ def op_correlation(df: pd.DataFrame, what: str, params: dict) -> dict:
     # If no explicit metrics, try to infer from what
     if len(metrics) < 2:
         # Default: correlate what with change
-        col1 = _what_to_column(what)
+        col1 = get_column(what)
         col2 = "change" if what != "change" else "gap"
         metrics = [col1, col2]
     else:
-        metrics = [_what_to_column(m) for m in metrics]
+        metrics = [get_column(m) for m in metrics]
 
     col1, col2 = metrics[0], metrics[1]
 
@@ -65,10 +67,3 @@ def op_correlation(df: pd.DataFrame, what: str, params: dict) -> dict:
     }
 
     return {"rows": [], "summary": summary}
-
-
-def _what_to_column(what: str) -> str:
-    """Map atom.what to DataFrame column."""
-    if what == "volatility":
-        return "range"
-    return what

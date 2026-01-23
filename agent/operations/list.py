@@ -2,6 +2,8 @@
 
 import pandas as pd
 
+from agent.rules import get_column
+
 
 def op_list(df: pd.DataFrame, what: str, params: dict) -> dict:
     """
@@ -18,8 +20,7 @@ def op_list(df: pd.DataFrame, what: str, params: dict) -> dict:
     sort = params.get("sort", "desc")
     ascending = sort == "asc"
 
-    # Map what to column
-    col = _what_to_column(what)
+    col = get_column(what)
     if col not in df.columns:
         return {"error": f"Column {col} not found"}
 
@@ -38,14 +39,6 @@ def op_list(df: pd.DataFrame, what: str, params: dict) -> dict:
             "sort": sort,
         }
     }
-
-
-def _what_to_column(what: str) -> str:
-    """Map atom.what to DataFrame column. Most map 1:1."""
-    # volatility is just range expressed differently
-    if what == "volatility":
-        return "range"
-    return what
 
 
 def _df_to_rows(df: pd.DataFrame) -> list[dict]:

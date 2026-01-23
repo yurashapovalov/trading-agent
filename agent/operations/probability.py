@@ -6,6 +6,8 @@ For event-based probability, looks at the NEXT day after event.
 
 import pandas as pd
 
+from agent.rules import get_column
+
 
 def op_probability(df: pd.DataFrame, what: str, params: dict) -> dict:
     """
@@ -24,7 +26,7 @@ def op_probability(df: pd.DataFrame, what: str, params: dict) -> dict:
     outcome = params.get("outcome", "> 0")
     event_filters = params.get("event_filters", [])
 
-    col = _what_to_column(what)
+    col = get_column(what)
 
     # If event_filters present, find events and look at NEXT day
     if event_filters:
@@ -187,10 +189,3 @@ def _eval_outcome(series: pd.Series, outcome: str) -> pd.Series:
 
     # Default: positive
     return series > 0
-
-
-def _what_to_column(what: str) -> str:
-    """Map atom.what to DataFrame column."""
-    if what == "volatility":
-        return "range"
-    return what
