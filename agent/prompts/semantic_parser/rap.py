@@ -11,10 +11,11 @@ Chunks:
 Also injects instrument-specific market config (sessions, trading day, etc.)
 """
 
+from __future__ import annotations
+
 import json
 import logging
 from pathlib import Path
-from typing import Optional
 
 import numpy as np
 from google import genai
@@ -254,7 +255,7 @@ class SemanticParserRAP:
 
 
 # Singleton
-_rap_instance: Optional[SemanticParserRAP] = None
+_rap_instance: SemanticParserRAP | None = None
 
 
 def get_rap() -> SemanticParserRAP:

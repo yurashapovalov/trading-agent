@@ -22,9 +22,10 @@ Usage:
     )
 """
 
+from __future__ import annotations
+
 import logging
 from datetime import datetime, timezone, timedelta
-from typing import Optional
 
 from google import genai
 from google.genai import types
@@ -61,7 +62,7 @@ class CacheManager:
         content: str,
         ttl_seconds: int = 3600,
         system_instruction: bool = True,
-    ) -> Optional[str]:
+    ) -> str | None:
         """
         Get existing cache or create new one.
 
@@ -94,7 +95,7 @@ class CacheManager:
         content: str,
         ttl_seconds: int,
         system_instruction: bool,
-    ) -> Optional[str]:
+    ) -> str | None:
         """Create new cache."""
         try:
             cache_config = types.CreateCachedContentConfig(
@@ -156,7 +157,7 @@ class CacheManager:
 
 
 # Singleton instance
-_cache_manager: Optional[CacheManager] = None
+_cache_manager: CacheManager | None = None
 
 
 def get_cache_manager() -> CacheManager:

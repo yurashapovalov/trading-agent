@@ -11,10 +11,11 @@ Components:
 - PromptRAP: builds dynamic prompts
 """
 
+from __future__ import annotations
+
 import json
 import logging
 from pathlib import Path
-from typing import Optional
 
 import numpy as np
 from google import genai
@@ -216,7 +217,7 @@ class PromptRAP:
 # Singleton
 # =============================================================================
 
-_rap_instance: Optional[PromptRAP] = None
+_rap_instance: PromptRAP | None = None
 
 
 def get_rap() -> PromptRAP:

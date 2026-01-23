@@ -16,10 +16,11 @@ Usage:
     context = memory.get_context()
 """
 
+from __future__ import annotations
+
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Optional
 
 from google import genai
 from google.genai import types
@@ -69,8 +70,8 @@ class ConversationMemory:
     key_facts: list[str] = field(default_factory=list)
 
     # Internal
-    _client: Optional[genai.Client] = field(default=None, repr=False)
-    _supabase: Optional[object] = field(default=None, repr=False)
+    _client: genai.Client | None = field(default=None, repr=False)
+    _supabase: object | None = field(default=None, repr=False)
     _loaded: bool = field(default=False, repr=False)
     _last_db_id: int | None = field(default=None, repr=False)  # Last chat_logs.id we've seen
 
@@ -388,7 +389,7 @@ class ConversationMemory:
 
         logger.debug(f"Compacted {len(chunk)} messages into summary")
 
-    def _summarize_chunk(self, messages: list[Message]) -> Optional[str]:
+    def _summarize_chunk(self, messages: list[Message]) -> str | None:
         """Generate summary for message chunk."""
         if not messages:
             return None
@@ -419,7 +420,7 @@ Summary:"""
             # Fallback: just note the topics
             return f"Discussed: {messages[0].content[:50]}..."
 
-    def _merge_summaries(self, summaries: list[str]) -> Optional[str]:
+    def _merge_summaries(self, summaries: list[str]) -> str | None:
         """Merge multiple summaries into one."""
         if not summaries:
             return None

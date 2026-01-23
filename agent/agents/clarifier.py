@@ -11,9 +11,10 @@ Uses:
 - Thinking for relevance evaluation
 """
 
+from __future__ import annotations
+
 import logging
 from dataclasses import dataclass
-from typing import Optional
 
 from google import genai
 from google.genai import types
@@ -31,7 +32,7 @@ class ClarifierResult:
     """Clarifier result with usage and thoughts."""
     response: str
     clarified_query: str | None
-    thoughts: Optional[str] = None
+    thoughts: str | None = None
     usage: Usage = None
 
     def __post_init__(self):

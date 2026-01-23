@@ -390,8 +390,8 @@ def find_days_in_streak(df: pd.DataFrame, color: str, min_length: int) -> pd.Dat
 - [x] 2.4 Standardize error responses
 
 ### Phase 3: Polish
-- [ ] 3.1 Type hints consistency
-- [ ] 3.2 Unit tests
+- [x] 3.1 Type hints consistency
+- [x] 3.2 Unit tests
 - [ ] 3.3 State typing
 
 ### Backlog
