@@ -90,15 +90,33 @@ class ChunkEmbedder:
             self._save_cache()
             logger.info(f"Computed and cached {len(self.embeddings)} embeddings")
 
+    # Cache TTL in seconds (7 days)
+    CACHE_TTL = 7 * 24 * 60 * 60
+
     def _cache_valid(self) -> bool:
-        """Check if cache exists and has all chunks."""
+        """Check if cache exists, has all chunks, and is not expired."""
         if not self.cache_path.exists():
             return False
 
         try:
             with open(self.cache_path, "r") as f:
                 cached = json.load(f)
-            return set(cached.get("chunk_ids", [])) == set(self.chunks.keys())
+
+            # Check chunk_ids match
+            if set(cached.get("chunk_ids", [])) != set(self.chunks.keys()):
+                return False
+
+            # Check TTL (if created_at exists)
+            created_at = cached.get("created_at")
+            if created_at:
+                from datetime import datetime
+                created = datetime.fromisoformat(created_at)
+                age_seconds = (datetime.now() - created).total_seconds()
+                if age_seconds > self.CACHE_TTL:
+                    logger.info(f"Cache expired (age: {age_seconds/3600:.1f}h)")
+                    return False
+
+            return True
         except Exception:
             return False
 
@@ -109,10 +127,12 @@ class ChunkEmbedder:
         self.embeddings = data.get("embeddings", {})
 
     def _save_cache(self):
-        """Save embeddings to cache."""
+        """Save embeddings to cache with timestamp."""
+        from datetime import datetime
         data = {
             "chunk_ids": list(self.chunks.keys()),
             "embeddings": self.embeddings,
+            "created_at": datetime.now().isoformat(),
         }
         with open(self.cache_path, "w") as f:
             json.dump(data, f)

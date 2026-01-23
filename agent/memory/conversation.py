@@ -67,10 +67,10 @@ class ConversationMemory:
     chat_id: str | None = None
     user_id: str | None = None
 
-    # Config
-    recent_limit: int = 10  # 5 pairs of (question, response)
-    summary_chunk_size: int = 6  # 3 pairs
-    max_summaries: int = 3
+    # Config (from config.py)
+    recent_limit: int = config.MEMORY_RECENT_LIMIT
+    summary_chunk_size: int = config.MEMORY_SUMMARY_CHUNK_SIZE
+    max_summaries: int = config.MEMORY_MAX_SUMMARIES
 
     # Memory tiers
     recent: list[Message] = field(default_factory=list)

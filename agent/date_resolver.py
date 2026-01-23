@@ -28,6 +28,11 @@ def resolve_date(when: str, today: date | None = None) -> tuple[str, str]:
     Returns:
         Tuple of (start_date, end_date) as YYYY-MM-DD strings
     """
+    # Input validation
+    if not when or len(when) > 100:
+        today = today or date.today()
+        return f"{today.year}-01-01", today.isoformat()
+
     today = today or date.today()
     when_lower = when.lower().strip()
 

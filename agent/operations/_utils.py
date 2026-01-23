@@ -98,3 +98,19 @@ def find_consecutive_events(df: pd.DataFrame, f: dict) -> pd.DataFrame:
         return pd.DataFrame()
 
     return pd.DataFrame(result_rows)
+
+
+def error_result(message: str) -> dict:
+    """
+    Create standardized error result for operations.
+
+    All operations should return this format on error
+    to ensure consistent error handling.
+
+    Args:
+        message: Error description
+
+    Returns:
+        {"rows": [], "summary": {"error": message, "count": 0}}
+    """
+    return {"rows": [], "summary": {"error": message, "count": 0}}

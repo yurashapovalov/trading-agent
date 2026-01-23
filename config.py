@@ -101,3 +101,8 @@ ALLOWED_ORIGINS = settings.allowed_origins.split(",")
 
 # Chat settings
 CHAT_HISTORY_LIMIT = 20
+
+# Memory settings
+MEMORY_RECENT_LIMIT = 10  # 5 pairs of (question, response)
+MEMORY_SUMMARY_CHUNK_SIZE = 6  # 3 pairs per summary
+MEMORY_MAX_SUMMARIES = 3
