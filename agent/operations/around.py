@@ -6,7 +6,7 @@ For simple filters (comparison), events come pre-filtered in df.
 
 import pandas as pd
 
-from agent.operations._utils import find_consecutive_events
+from agent.operations._utils import find_days_in_streak
 
 
 def op_around(df: pd.DataFrame, what: str, params: dict) -> dict:
@@ -67,7 +67,7 @@ def _find_event_days(df: pd.DataFrame, event_filters: list[dict]) -> pd.DataFram
     """
     Find event days from filters.
 
-    For consecutive filter: returns LAST day of each streak (the event day).
+    For consecutive filter: returns ALL days in matching streaks.
     """
     if not event_filters:
         return df
@@ -76,7 +76,7 @@ def _find_event_days(df: pd.DataFrame, event_filters: list[dict]) -> pd.DataFram
     filter_type = f.get("type")
 
     if filter_type == "consecutive":
-        return find_consecutive_events(df, f)
+        return find_days_in_streak(df, f)
 
     # For other event types, return df as-is
     return df

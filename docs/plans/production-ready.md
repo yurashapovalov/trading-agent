@@ -312,6 +312,68 @@ agent/tests/
 
 ---
 
+## Backlog: Semantic Issues
+
+### B.1 Consecutive filter semantics (100% probability bug)
+
+**Проблема:** `find_consecutive_events()` возвращает только ПОСЛЕДНИЙ день каждого стрика. Это даёт 100% probability для вопросов типа "вероятность роста после 2+ красных дней".
+
+```
+Пример стрика: [red, red, red, green]
+                 ↑    ↑    ↑
+                d1   d2   d3 (last) → next_change = green
+
+find_consecutive_events возвращает только d3.
+next_change на d3 = green по определению (иначе стрик бы продолжился).
+```
+
+**Ожидание пользователя:**
+- "После 2+ красных" = любой день в стрике длины ≥2
+- Реальная вероятность: ~55%
+
+**Текущее поведение:**
+- Смотрим только на последний день стрика
+- next_change = зелёный по определению
+- Результат: 100%
+
+**Решение:**
+
+1. **Новая функция** `find_days_in_streak(df, color, min_length)`:
+```python
+def find_days_in_streak(df: pd.DataFrame, color: str, min_length: int) -> pd.DataFrame:
+    """
+    Return ALL days that are part of a streak of given length.
+
+    Example: min_length=2, streak [r,r,r] → returns all 3 days
+    """
+    mask = df["is_green"] if color == "green" else ~df["is_green"]
+    df = df.copy()
+    df["_sid"] = (mask != mask.shift()).cumsum()
+
+    # Get streak lengths
+    lengths = df.groupby("_sid").transform("size")
+
+    # Return all days in streaks meeting length requirement
+    return df[mask & (lengths >= min_length)]
+```
+
+2. **Обновить probability.py и around.py:**
+   - Использовать `find_days_in_streak()` вместо `find_consecutive_events()`
+   - Или добавить параметр `mode: "last_day" | "all_days"`
+
+3. **Оставить `find_consecutive_events()` для streak операции:**
+   - streak операция считает количество стриков → нужен последний день
+   - probability/around считают статистику → нужны все дни
+
+**Файлы:**
+- `agent/operations/_utils.py` — добавить `find_days_in_streak()`
+- `agent/operations/probability.py` — использовать новую функцию
+- `agent/operations/around.py` — использовать новую функцию
+
+**Усилия:** 2 часа
+
+---
+
 ## Checklist
 
 ### Phase 1: Critical
@@ -331,6 +393,9 @@ agent/tests/
 - [ ] 3.1 Type hints consistency
 - [ ] 3.2 Unit tests
 - [ ] 3.3 State typing
+
+### Backlog
+- [x] B.1 Fix consecutive filter semantics (100% probability bug)
 
 ---
 
