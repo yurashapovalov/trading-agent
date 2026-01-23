@@ -1,74 +1,74 @@
-"""Correlation between fields."""
+"""Correlation — correlation between two metrics."""
 
 import pandas as pd
 
 
-def op_correlation(df: pd.DataFrame, params: dict) -> dict:
+def op_correlation(df: pd.DataFrame, what: str, params: dict) -> dict:
     """
-    Calculate correlation between two fields.
+    Calculate correlation between two metrics.
+
+    Expects two atoms with different 'what' values.
+    Or params.metrics = ["gap", "change"]
 
     params:
-        field1: first field
-        field2: second field
-        method: correlation method (pearson, spearman, kendall)
-
-    Example:
-        params = {
-            "field1": "volume",
-            "field2": "change_pct"
-        }
-        → "Correlation between volume and price change"
-
-    Returns:
-        {
-            "correlation": X,
-            "interpretation": "strong positive" / "weak negative" / etc.
-        }
+        metrics: list of two metrics to correlate
     """
     if df.empty:
-        return {"error": "No data"}
+        return {"rows": [], "summary": {"error": "No data"}}
 
-    field1 = params.get("field1")
-    field2 = params.get("field2")
-    method = params.get("method", "pearson")
+    metrics = params.get("metrics", [])
 
-    if not field1 or not field2:
-        return {"error": "'field1' and 'field2' required"}
+    # If no explicit metrics, try to infer from what
+    if len(metrics) < 2:
+        # Default: correlate what with change
+        col1 = _what_to_column(what)
+        col2 = "change" if what != "change" else "gap"
+        metrics = [col1, col2]
+    else:
+        metrics = [_what_to_column(m) for m in metrics]
 
-    if field1 not in df.columns:
-        return {"error": f"Column {field1} not found"}
+    col1, col2 = metrics[0], metrics[1]
 
-    if field2 not in df.columns:
-        return {"error": f"Column {field2} not found"}
+    if col1 not in df.columns:
+        return {"rows": [], "summary": {"error": f"Column {col1} not found"}}
+    if col2 not in df.columns:
+        return {"rows": [], "summary": {"error": f"Column {col2} not found"}}
 
     # Calculate correlation
-    corr = df[field1].corr(df[field2], method=method)
+    valid = df[[col1, col2]].dropna()
+    if len(valid) < 3:
+        return {"rows": [], "summary": {"error": "Not enough data for correlation"}}
 
-    if pd.isna(corr):
-        return {"error": "Could not calculate correlation (insufficient data)"}
+    corr = valid[col1].corr(valid[col2])
 
-    corr = round(corr, 3)
-
-    # Interpret
-    abs_corr = abs(corr)
-    if abs_corr >= 0.7:
-        strength = "strong"
-    elif abs_corr >= 0.4:
-        strength = "moderate"
-    elif abs_corr >= 0.2:
+    # Interpretation
+    if abs(corr) < 0.2:
+        strength = "none"
+    elif abs(corr) < 0.4:
         strength = "weak"
+    elif abs(corr) < 0.6:
+        strength = "moderate"
+    elif abs(corr) < 0.8:
+        strength = "strong"
     else:
-        strength = "very weak"
+        strength = "very strong"
 
-    direction = "positive" if corr > 0 else "negative" if corr < 0 else "no"
+    direction = "positive" if corr > 0 else "negative"
 
-    if abs_corr < 0.1:
-        interpretation = "no correlation"
-    else:
-        interpretation = f"{strength} {direction}"
-
-    return {
-        "correlation": corr,
-        "interpretation": interpretation,
-        "n": len(df[[field1, field2]].dropna()),
+    summary = {
+        "correlation": round(corr, 3),
+        "strength": strength,
+        "direction": direction,
+        "metric1": col1,
+        "metric2": col2,
+        "n": len(valid),
     }
+
+    return {"rows": [], "summary": summary}
+
+
+def _what_to_column(what: str) -> str:
+    """Map atom.what to DataFrame column."""
+    if what == "volatility":
+        return "range"
+    return what

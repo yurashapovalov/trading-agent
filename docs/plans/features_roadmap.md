@@ -174,15 +174,148 @@ SELECT AVG(change_pct) FROM ... WHERE date IN (SELECT date FROM top_days)
 
 ---
 
-## Priority 6: Advanced (future)
+## Priority 5.3: Formation extended events (3-5 дней)
 
-### 6.1 GAP_CLOSE event
+### 5.3.1 Проблема: formation знает только high/low
+
+**Текущее поведение:**
+- `what: high` → находит час максимальной цены ✅
+- `what: low` → находит час минимальной цены ✅
+- `what: gap_fill` → молча fallback на high ❌
+- `what: range_50` → молча fallback на high ❌
+
+**Нужные события:**
+
+1. **gap_fill** — "в какой час обычно закрывается гэп"
+   ```python
+   # Алгоритм:
+   # 1. Для каждого дня берём prev_close
+   # 2. Ищем первую минуту где:
+   #    - gap > 0 и low <= prev_close (gap up filled)
+   #    - gap < 0 и high >= prev_close (gap down filled)
+   # 3. Час этой минуты = gap_fill_hour
+   ```
+
+2. **range_50** — "когда достигается 50% дневного диапазона"
+   ```python
+   # Алгоритм:
+   # 1. Для каждого дня вычисляем daily_range = high - low
+   # 2. target = open ± (daily_range * 0.5)
+   # 3. Ищем первую минуту где цена достигла target
+   ```
+
+**Файл:** `agent/operations/formation.py`
+
+**Быстрый fix:** вернуть ошибку "event not supported" вместо молчаливого fallback.
+
+---
+
+## Priority 5.4: Parser intent improvements (промпты)
+
+### 5.4.1 "distributed across X" → compare, not distribution
+**Вопрос:** "how is volume distributed across weekdays"
+
+**Проблема:** Parser выбрал `distribution` буквально (по слову), но семантика = группировка.
+
+**Правильно:**
+```
+operation: compare
+group_by: weekday
+```
+
+**Решение:** Добавить пример в промпт парсера.
+
+---
+
+### 5.4.2 "gap fill" в probability → outcome: gap_filled
+**Вопрос:** "chance of gap fill on gap down days"
+
+**Сейчас:**
+```
+filter: "gap < 0"
+outcome: "> 0"  ← понял как "green day"
+```
+
+**Правильно:**
+```
+filter: "gap < 0"
+outcome: "gap_filled"  ← или filter: "gap < 0, gap_filled"
+```
+
+**Решение:**
+1. Добавить пример в промпт парсера: "gap fill" → outcome использует gap_filled
+2. Или: probability должен понимать outcome: "gap_filled" (сейчас только >, <, = числа)
+
+---
+
+## Priority 5.5: Gap-filled metric (1 день)
+
+### 5.5.1 Метрика gap_filled
+**Вопрос:** "сколько раз gap закрылся в тот же день"
+
+**Проблема:** Parser понял как `gap = 0` (нет гэпа), а нужно "был гэп, но цена вернулась".
+
+**Файл:** `agent/data/enrich.py`
+
+**Реализация:**
+```python
+# В enrich() добавить:
+prev_close = df["close"].shift(1)
+
+# Gap up filled: открылись выше, но low дошёл до prev_close
+gap_up_filled = (df["gap"] > 0) & (df["low"] <= prev_close)
+
+# Gap down filled: открылись ниже, но high дошёл до prev_close
+gap_down_filled = (df["gap"] < 0) & (df["high"] >= prev_close)
+
+df["gap_filled"] = gap_up_filled | gap_down_filled
+```
+
+**После этого:**
+- Parser: `filter: "gap_filled = true"` или `filter: "gap_filled"`
+- Добавить в `agent/rules/metrics.py` метрику `gap_filled`
+
+---
+
+## Priority 6: Session-specific metrics (3-5 дней)
+
+### 6.1 Метрики по сессиям
+**Вопрос:** "correlation between overnight range and RTH range"
+
+**Проблема:** Сейчас метрики глобальные (gap, change, range). Нет разбивки по сессиям.
+
+**Нужно:**
+- `overnight_range` — range за ночную сессию
+- `rth_range` — range за RTH
+- `morning_range`, `afternoon_range`
+
+**Реализация:**
+```python
+# В enrich() добавить session-specific поля:
+# 1. Агрегировать minute data по дню + сессии
+# 2. Добавить в daily df как колонки
+
+session_metrics = {
+    "overnight_range": "range WHERE session=OVERNIGHT",
+    "rth_range": "range WHERE session=RTH",
+    "morning_range": "range WHERE time 09:30-12:30",
+    "afternoon_range": "range WHERE time 12:30-16:00",
+}
+```
+
+**Сложность:** Требует join daily + intraday данных
+
+---
+
+## Priority 7: Advanced (future)
+
+### 7.1 GAP_CLOSE event
 "Когда закрываются гэпы?"
 
-### 6.2 Conditional sequences
+### 7.2 Conditional sequences
 "Если понедельник красный, какой вторник?"
 
-### 6.3 Backtesting
+### 7.3 Backtesting
 Entry/exit conditions, P&L calculation
 
 ---

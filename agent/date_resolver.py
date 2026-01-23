@@ -61,6 +61,10 @@ def resolve_period(
         quarter_ends = {1: "03-31", 2: "06-30", 3: "09-30", 4: "12-31"}
         return f"{year}-{quarter_starts[q]}", f"{year}-{quarter_ends[q]}"
 
+    if period.type == "all":
+        # All available data — executor will use default range
+        return None
+
     return None
 
 
@@ -148,6 +152,12 @@ def _resolve_relative(
     if value == "last_year":
         prev_year = today.year - 1
         return f"{prev_year}-01-01", f"{prev_year}-12-31"
+
+    if value == "last_n_years":
+        n = period.n or 1
+        start_year = today.year - n
+        end_year = today.year - 1  # Last N complete years
+        return f"{start_year}-01-01", f"{end_year}-12-31"
 
     if value == "this_year":
         return f"{today.year}-01-01", today.isoformat()

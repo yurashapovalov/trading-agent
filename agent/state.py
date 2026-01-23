@@ -38,12 +38,23 @@ class TradingState(MessagesState):
     # Memory
     memory_context: str | None  # Formatted context from ConversationMemory
 
+    # Planner output
+    execution_plan: list[dict] | None
+    plan_errors: list[str] | None
+    plan_warnings: list[str] | None
+
     # Execution results
     data: dict | None
     context: str | None
 
     # Response
     response: str | None
+
+    # Presenter output (for traces)
+    presenter_acknowledge: str | None
+    presenter_title: str | None
+    presenter_summary: str | None
+    presenter_type: str | None
 
     # Clarification flow
     awaiting_clarification: bool  # True = waiting for user to clarify

@@ -5,7 +5,7 @@ Extract what user wants to measure.
 <rules>
 SPECIFIC metric → extract:
 - volatility, range, daily range → metric="range"
-- return, change, performance, move → metric="change"
+- return, change, performance, move, behave → metric="change"
 - volume, trading volume → metric="volume"
 - win rate, green days, positive days → metric="green_pct"
 - gap, opening gap → metric="gap"
@@ -79,4 +79,7 @@ Output: {"metric": "gap", "unclear": ["period"]}
 
 Input: performance
 Output: {"metric": "change", "unclear": ["period"]}
+
+Input: how did NQ behave last year
+Output: {"metric": "change", "period": {"type": "relative", "value": "last_year"}}
 </examples>

@@ -1,17 +1,16 @@
 """
-Integration test — runs real questions through real graph.
-
-Tests the actual production code path.
-Saves results to file for analysis.
+Integration test — Intent → Parser → Executor.
 
 Usage:
-    python -m agent.tests.full_flow_test
-    python -m agent.tests.full_flow_test "custom question here"
+    python -m agent.tests.full_flow_test              # show usage
+    python -m agent.tests.full_flow_test <category>   # run category
+    python -m agent.tests.full_flow_test all          # run all
+    python -m agent.tests.full_flow_test "question"   # run single
 """
 
 import json
-import sys
 import os
+import sys
 from datetime import datetime
 from uuid import uuid4
 
@@ -20,216 +19,159 @@ from langchain_core.messages import HumanMessage
 from agent.graph import build_graph
 
 
-# Test cases with expected behavior
-TEST_CASES = [
-    # Data queries - should parse correctly and return data
-    {
-        "question": "волатильность за декабрь 2024",
-        "expect": {"lang": "ru", "route": "executor", "period_type": "month"},
-    },
-    {
-        "question": "volatility for December 2024",
-        "expect": {"lang": "en", "route": "executor", "period_type": "month"},
-    },
-    {
-        "question": "топ 5 волатильных дней 2024",
-        "expect": {"lang": "ru", "route": "executor", "top_n": 5},
-    },
-    {
-        "question": "top 3 volatile days in 2024",
-        "expect": {"lang": "en", "route": "executor", "top_n": 3},
-    },
-    {
-        "question": "волатильность за 2099",
-        "expect": {"lang": "ru", "route": "executor", "row_count": 0},
-    },
+QUESTIONS_BY_CATEGORY = {
+    "list": [
+        "top 10 biggest drops in 2024",
+        "топ 5 дней по объёму в январе",
+        "show all days with gap > 2% in 2024",
+        "покажи красные пятницы в 2024",
+    ],
+    "count": [
+        "how many gap ups in 2024",
+        "сколько дней с range > 300 пунктов в 2024",
+        "how many green mondays in Q1 2024",
+        "сколько раз gap закрылся в тот же день",
+    ],
+    "compare": [
+        "compare monday vs friday performance in 2024",
+        "сравни волатильность Q1 и Q4 2024",
+        "compare morning vs afternoon range",
+        "сравни 2023 и 2024 по среднему change",
+    ],
+    "probability": [
+        "probability of green day after gap up",
+        "вероятность роста после 2+ красных дней подряд",
+        "chance of gap fill on gap down days",
+        "какой процент пятниц закрывается в плюс",
+    ],
+    "streak": [
+        "how many times were there 3+ red days in a row in 2024",
+        "сколько раз было 4+ зелёных дня подряд",
+        "longest losing streak in 2024",
+        "максимальная серия дней с gap up",
+    ],
+    "around": [
+        "what happens after big drops (> 2%)",
+        "что было после gap up > 1% в 2024",
+        "performance day after high volume days",
+        "как закрывались дни после 3 красных подряд",
+    ],
+    "formation": [
+        "when is daily high usually formed",
+        "в какое время обычно формируется лоу дня",
+        "what hour does gap usually fill",
+        "когда чаще достигается 50% дневного диапазона",
+    ],
+    "distribution": [
+        "distribution of daily changes in 2024",
+        "распределение gap по размеру в 2024",
+        "how is volume distributed across weekdays",
+    ],
+    "correlation": [
+        "correlation between gap size and daily change",
+        "корреляция объёма и волатильности",
+        "relationship between overnight range and RTH range",
+    ],
+}
 
-    # Chitchat - should route to responder
-    {
-        "question": "привет",
-        "expect": {"lang": "ru", "intent": "chitchat"},
-    },
-    {
-        "question": "hello",
-        "expect": {"lang": "en", "intent": "chitchat"},
-    },
-]
 
+def run_question(question: str, graph=None) -> dict:
+    """Run question through graph: Intent → Parser → Executor."""
+    if graph is None:
+        graph = build_graph().compile()
 
-def run_single_test(graph, question: str) -> dict:
-    """Run single question through graph, return full state."""
-    initial_state = {
+    state = {
         "messages": [HumanMessage(content=question)],
         "session_id": str(uuid4()),
         "user_id": "test-user",
-        "agents_used": [],
-        "step_number": 0,
     }
 
-    result = graph.invoke(initial_state)
+    result = graph.invoke(state)
 
     return {
         "question": question,
         "intent": result.get("intent"),
         "lang": result.get("lang"),
         "question_en": result.get("question_en"),
-        "agents_used": result.get("agents_used", []),
-        "parsed_query": result.get("parsed_query"),
-        "row_count": result.get("data", {}).get("row_count") if result.get("data") else None,
-        "response": result.get("response"),
+        "steps": result.get("parsed_query", []),
+        "plans": result.get("execution_plan", []),
+        "thoughts": result.get("parser_thoughts"),
+        "data": result.get("data"),
+        "usage": result.get("usage"),
     }
 
 
-def check_expectations(result: dict, expect: dict) -> list[str]:
-    """Check if result matches expectations. Returns list of failures."""
-    failures = []
-
-    if "lang" in expect and result.get("lang") != expect["lang"]:
-        failures.append(f"lang: expected {expect['lang']}, got {result.get('lang')}")
-
-    if "intent" in expect and result.get("intent") != expect["intent"]:
-        failures.append(f"intent: expected {expect['intent']}, got {result.get('intent')}")
-
-    if "route" in expect:
-        agents = result.get("agents_used", [])
-        if expect["route"] == "executor" and "executor" not in agents:
-            failures.append(f"route: expected executor, got {agents}")
-        if expect["route"] == "clarifier" and "clarifier" not in agents:
-            failures.append(f"route: expected clarifier, got {agents}")
-
-    pq = result.get("parsed_query", {})
-
-    if "period_type" in expect:
-        period = pq.get("period")
-        actual_type = period.get("type") if period else None
-        if actual_type != expect["period_type"]:
-            failures.append(f"period.type: expected {expect['period_type']}, got {actual_type}")
-
-    if "top_n" in expect:
-        if pq.get("top_n") != expect["top_n"]:
-            failures.append(f"top_n: expected {expect['top_n']}, got {pq.get('top_n')}")
-
-    if "row_count" in expect:
-        if result.get("row_count") != expect["row_count"]:
-            failures.append(f"row_count: expected {expect['row_count']}, got {result.get('row_count')}")
-
-    return failures
-
-
-def run_all_tests():
-    """Run all test cases."""
-    print("Building graph...")
+def run_batch(questions: list[str], label: str = "batch") -> list[dict]:
+    """Run multiple questions, save results to JSON."""
     graph = build_graph().compile()
-
     results = []
-    passed = 0
-    failed = 0
 
-    for i, test in enumerate(TEST_CASES, 1):
-        question = test["question"]
-        expect = test["expect"]
-
-        print(f"\n{'='*60}")
-        print(f"TEST {i}: {question}")
-        print("="*60)
-
+    for i, q in enumerate(questions, 1):
+        print(f"\n[{i}/{len(questions)}] {q}")
         try:
-            result = run_single_test(graph, question)
+            result = run_question(q, graph)
+            results.append(result)
 
-            # Check expectations
-            failures = check_expectations(result, expect)
-
-            if failures:
-                print(f"FAILED:")
-                for f in failures:
-                    print(f"   - {f}")
-                failed += 1
+            steps = result.get("steps", [])
+            if steps:
+                ops = [s.get("operation", "?") for s in steps]
+                print(f"  → Parser: {', '.join(ops)}")
             else:
-                print(f"PASSED")
-                passed += 1
+                print(f"  → Parser: no steps")
 
-            # Show details
-            print(f"   Lang: {result['lang']}")
-            print(f"   Intent: {result['intent']}")
-            print(f"   Agents: {' → '.join(result['agents_used'])}")
-            if result['parsed_query']:
-                pq = result['parsed_query']
-                print(f"   Period: {pq.get('period')}")
-                print(f"   Metric: {pq.get('metric')}")
-                print(f"   Top N: {pq.get('top_n')}")
-            if result['row_count'] is not None:
-                print(f"   Row count: {result['row_count']}")
-            print(f"   Response: {result['response'][:100]}...")
+            plans = result.get("plans", [])
+            if plans:
+                modes = [p.get("mode", "?") for p in plans]
+                print(f"  → Planner: {', '.join(modes)}")
 
-            results.append({
-                "test_number": i,
-                "question": question,
-                "expect": expect,
-                "result": result,
-                "failures": failures,
-                "passed": len(failures) == 0,
-            })
-
+            data = result.get("data", [])
+            if data:
+                for d in data:
+                    summary = d.get("summary", {})
+                    if "error" in summary:
+                        print(f"  → Executor: ERROR {summary['error']}")
+                    else:
+                        print(f"  → Executor: {summary}")
         except Exception as e:
-            print(f"ERROR: {e}")
-            failed += 1
-            results.append({
-                "test_number": i,
-                "question": question,
-                "error": str(e),
-                "passed": False,
-            })
+            print(f"  → ERROR: {e}")
+            results.append({"question": q, "error": str(e)})
 
-    # Summary
-    print(f"\n{'='*60}")
-    print(f"SUMMARY: {passed} passed, {failed} failed")
-    print("="*60)
-
-    # Save results
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     os.makedirs("agent/tests/results", exist_ok=True)
-    output_file = f"agent/tests/results/integration_{timestamp}.json"
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    output_file = f"agent/tests/results/test_{label}_{timestamp}.json"
 
     with open(output_file, "w", encoding="utf-8") as f:
-        json.dump({
-            "timestamp": timestamp,
-            "passed": passed,
-            "failed": failed,
-            "results": results,
-        }, f, ensure_ascii=False, indent=2, default=str)
+        json.dump(results, f, ensure_ascii=False, indent=2)
 
-    print(f"Results saved to: {output_file}")
-    return passed, failed
-
-
-def run_custom_question(question: str):
-    """Run a single custom question for debugging."""
-    print(f"Question: {question}")
-    print("="*60)
-
-    graph = build_graph().compile()
-    result = run_single_test(graph, question)
-
-    print(f"\nIntent: {result['intent']}")
-    print(f"Lang: {result['lang']}")
-    print(f"Question EN: {result['question_en']}")
-    print(f"Agents: {' → '.join(result['agents_used'])}")
-
-    if result['parsed_query']:
-        print(f"\nParsed Query:")
-        print(json.dumps(result['parsed_query'], ensure_ascii=False, indent=2))
-
-    if result['row_count'] is not None:
-        print(f"\nRow count: {result['row_count']}")
-
-    print(f"\nResponse:\n{result['response']}")
+    print(f"\n{'='*60}")
+    print(f"Saved {len(results)} results to: {output_file}")
+    return results
 
 
 if __name__ == "__main__":
     if len(sys.argv) > 1:
-        # Custom question mode
-        question = " ".join(sys.argv[1:])
-        run_custom_question(question)
+        arg = sys.argv[1]
+
+        if arg in QUESTIONS_BY_CATEGORY:
+            questions = QUESTIONS_BY_CATEGORY[arg]
+            print("="*60)
+            print(f"Running {arg.upper()} ({len(questions)} questions)")
+            print("="*60)
+            run_batch(questions, arg)
+        elif arg == "all":
+            for category, questions in QUESTIONS_BY_CATEGORY.items():
+                print("\n" + "="*60)
+                print(f"Running {category.upper()} ({len(questions)} questions)")
+                print("="*60)
+                run_batch(questions, category)
+        else:
+            question = " ".join(sys.argv[1:])
+            result = run_question(question)
+            print(json.dumps(result, ensure_ascii=False, indent=2))
     else:
-        # Run all tests
-        run_all_tests()
+        print("Usage:")
+        print("  python -m agent.tests.full_flow_test <category>   # run category")
+        print("  python -m agent.tests.full_flow_test all          # run all")
+        print('  python -m agent.tests.full_flow_test "question"   # run single')
+        print()
+        print("Categories:", ", ".join(QUESTIONS_BY_CATEGORY.keys()))

@@ -1,26 +1,23 @@
 """
 Agent implementations.
 
-Each agent does ONE thing:
-- Parser: extracts entities from question → ParsedQuery
-- Clarifier: asks for missing info → ClarificationOutput
-- Responder: handles chitchat and concepts → str
-- Presenter: formats data for user → DataResponse
+- IntentClassifier: classifies question intent
+- Parser: extracts structured steps from question
+- Planner: creates execution plan from parser output
+- Executor: runs execution plan against data
 """
 
-from agent.agents.parser import Parser, parse
-from agent.agents.clarifier import Clarifier, clarify
-from agent.agents.responder import Responder
-from agent.agents.responder import respond as respond_to
-from agent.agents.presenter import Presenter, present
+from agent.agents.intent import IntentClassifier
+from agent.agents.parser import Parser
+from agent.agents.planner import plan_step, ExecutionPlan, DataRequest
+from agent.agents.executor import execute, execute_step
 
 __all__ = [
+    "IntentClassifier",
     "Parser",
-    "parse",
-    "Clarifier",
-    "clarify",
-    "Responder",
-    "respond_to",
-    "Presenter",
-    "present",
+    "plan_step",
+    "ExecutionPlan",
+    "DataRequest",
+    "execute",
+    "execute_step",
 ]

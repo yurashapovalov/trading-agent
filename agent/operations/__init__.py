@@ -1,42 +1,38 @@
-"""Operations — трансформации данных для ответа на вопросы.
+"""Operations — работают с Parser v2 выходом.
 
-Каждая операция принимает DataFrame и params, возвращает dict с результатом.
-Операции не знают про DuckDB — работают только с pandas DataFrame.
-
-Добавить новую операцию:
-    1. Создать файл operation_name.py с функцией op_operation_name(df, params)
-    2. Добавить импорт и регистрацию в OPERATIONS dict
-
-Интерфейс операции:
-    def op_name(df: pd.DataFrame, params: dict) -> dict:
+Интерфейс:
+    def op_name(df: pd.DataFrame, what: str, params: dict) -> dict:
         '''
         Args:
-            df: DataFrame с OHLCV + enriched полями
-            params: Параметры из DomainSpec.params
+            df: DataFrame с OHLCV + enriched (уже отфильтрован)
+            what: Метрика из atom.what (change, range, volume, gap)
+            params: Параметры из step.params
 
         Returns:
-            dict с результатом (структура зависит от операции)
+            {"rows": [...], "summary": {...}}
         '''
 """
 
-from agent.operations.stats import op_stats
+from agent.operations.list import op_list
+from agent.operations.count import op_count
 from agent.operations.compare import op_compare
-from agent.operations.top_n import op_top_n
-from agent.operations.streak import op_streak
-from agent.operations.sequence import op_sequence
-from agent.operations.distribution import op_distribution
 from agent.operations.correlation import op_correlation
-from agent.operations.seasonality import op_seasonality
+from agent.operations.streak import op_streak
+from agent.operations.distribution import op_distribution
+from agent.operations.probability import op_probability
+from agent.operations.around import op_around
+from agent.operations.formation import op_formation
 
 OPERATIONS = {
-    "stats": op_stats,
+    "list": op_list,
+    "count": op_count,
     "compare": op_compare,
-    "top_n": op_top_n,
-    "streak": op_streak,
-    "sequence": op_sequence,
-    "distribution": op_distribution,
     "correlation": op_correlation,
-    "seasonality": op_seasonality,
+    "streak": op_streak,
+    "distribution": op_distribution,
+    "probability": op_probability,
+    "around": op_around,
+    "formation": op_formation,
 }
 
 __all__ = ["OPERATIONS"]

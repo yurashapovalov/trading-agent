@@ -26,7 +26,7 @@ LLM_PROVIDER = os.getenv("LLM_PROVIDER", "gemini")  # "gemini" or "claude"
 
 # Google Gemini
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-flash-latest")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3-flash-preview")
 GEMINI_LITE_MODEL = os.getenv("GEMINI_LITE_MODEL", "gemini-flash-lite-latest")
 
 # Anthropic Claude (fallback)

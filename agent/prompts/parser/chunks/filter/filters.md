@@ -106,4 +106,16 @@ Output: {"operation": "compare", "compare": ["RTH", "ETH"], "unclear": ["period"
 
 Input: range over 300
 Output: {"operation": "filter", "condition": "range > 300", "unclear": ["period"]}
+
+Input: all Fridays in April 2023
+Output: {"operation": "list", "weekday_filter": ["Friday"], "period": {"type": "month", "value": "2023-04"}}
+
+Input: every Monday in 2024
+Output: {"operation": "list", "weekday_filter": ["Monday"], "period": {"type": "year", "value": "2024"}}
+
+Input: all OPEX days in 2024
+Output: {"operation": "list", "event_filter": "opex", "period": {"type": "year", "value": "2024"}}
+
+Input: each trading day last week
+Output: {"operation": "list", "period": {"type": "relative", "value": "last_week"}}
 </examples>

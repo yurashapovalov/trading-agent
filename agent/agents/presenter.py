@@ -39,7 +39,11 @@ from agent.prompts.presenter import (
     SUMMARY_PROMPT,
     SHORT_SUMMARY_PROMPT,
     NO_DATA_PROMPT,
+    SUMMARY_ANSWER_PROMPT,
+    TABLE_WITH_SUMMARY_PROMPT,
 )
+from agent.utils.formatting import format_summary
+from agent.config.market.instruments import get_instrument
 
 
 # =============================================================================
@@ -281,6 +285,31 @@ class Presenter:
         self.client = genai.Client(api_key=config.GOOGLE_API_KEY)
         self.model = config.GEMINI_LITE_MODEL
         self.symbol = symbol
+        self.instrument = get_instrument(symbol) or {}
+        self.instrument_context = self._build_instrument_context()
+
+    def _build_instrument_context(self) -> str:
+        """Build full instrument context for prompts."""
+        if not self.instrument:
+            return f"Symbol: {self.symbol}"
+
+        # Extract key info for LLM context
+        lines = [
+            f"Symbol: {self.symbol}",
+            f"Name: {self.instrument.get('name', 'Unknown')}",
+            f"Exchange: {self.instrument.get('exchange', 'Unknown')}",
+            f"Tick size: {self.instrument.get('tick_size')} (${self.instrument.get('tick_value')} per tick)",
+            f"Data available: {self.instrument.get('data_start')} to {self.instrument.get('data_end')}",
+            f"Default session: {self.instrument.get('default_session', 'RTH')}",
+        ]
+
+        # Add sessions
+        sessions = self.instrument.get("sessions", {})
+        if sessions:
+            session_strs = [f"{k}: {v[0]}-{v[1]}" for k, v in list(sessions.items())[:4]]
+            lines.append(f"Sessions: {', '.join(session_strs)}")
+
+        return "\n".join(lines)
 
     def present(
         self,
@@ -301,14 +330,21 @@ class Presenter:
         """
         original_question = question
 
-        # Extract rows from executor result
-        # v2 executor puts rows in result["rows"] for list/filter operations
+        # Extract rows and summary from executor result
+        # Operations return {"rows": [...], "summary": {...}}
         result = data.get("result", {})
         rows = result.get("rows", [])
+        summary = result.get("summary")  # Pre-computed answer data
 
         # Get columns from first row if available
         columns = list(rows[0].keys()) if rows else []
         row_count = data.get("row_count", len(rows))
+
+        # If we have summary — use it for answer generation
+        if summary:
+            return self._present_with_summary(
+                original_question, rows, columns, summary, lang
+            )
 
         # No data
         if row_count == 0:
@@ -370,6 +406,94 @@ class Presenter:
             type=DataResponseType.LARGE_DATA,
             row_count=row_count,
         )
+
+    def _present_with_summary(
+        self,
+        question: str,
+        rows: list[dict],
+        columns: list[str],
+        summary: dict,
+        lang: str,
+    ) -> DataResponse:
+        """
+        Present data using pre-computed summary.
+
+        Logic:
+        - rows ≤ 5: acknowledge + table + summary text
+        - rows > 5: acknowledge + summary text (table in UI via DataCard)
+        """
+        row_count = len(rows)
+
+        # Generate acknowledge and summary text
+        acknowledge = self._generate_acknowledge(question, lang)
+        text = self._generate_summary_answer(question, summary, lang)
+
+        # Small table (≤5 rows) — table first, then summary
+        if row_count > 0 and row_count <= self.INLINE_THRESHOLD:
+            table = self._format_table(rows, columns)
+            table_then_text = f"{table}\n\n{text}"
+            return DataResponse(
+                acknowledge=acknowledge,
+                title=None,
+                summary=table_then_text,
+                type=DataResponseType.INLINE,
+                row_count=row_count,
+            )
+
+        # Large table — generate title for DataCard
+        if row_count > self.INLINE_THRESHOLD:
+            title = self._generate_title(question, columns, row_count, lang)
+            return DataResponse(
+                acknowledge=acknowledge,
+                title=title,
+                summary=text,
+                type=DataResponseType.LARGE_DATA,
+                row_count=row_count,
+            )
+
+        # No rows — just text
+        return DataResponse(
+            acknowledge=acknowledge,
+            title=None,
+            summary=text,
+            type=DataResponseType.SINGLE,
+            row_count=row_count,
+        )
+
+    def _generate_summary_answer(
+        self,
+        question: str,
+        summary: dict,
+        lang: str,
+    ) -> str:
+        """Generate text answer from pre-computed summary using LLM."""
+        import json
+        # Format values for display using centralized rules
+        formatted_summary = format_summary(summary)
+        summary_str = json.dumps(formatted_summary, ensure_ascii=False)
+
+        prompt = SUMMARY_ANSWER_PROMPT.format(
+            question=question,
+            summary=summary_str,
+            lang=lang,
+            instrument=self.instrument_context,
+        )
+
+        try:
+            response = self.client.models.generate_content(
+                model=self.model,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    temperature=0.4,
+                    max_output_tokens=100,
+                ),
+            )
+            return response.text.strip()
+        except Exception:
+            # Fallback — return raw summary
+            if lang == "ru":
+                return f"Результат: {summary_str}"
+            return f"Result: {summary_str}"
 
     def _format_table(self, rows: list[dict], columns: list[str]) -> str:
         """Format data as markdown table.

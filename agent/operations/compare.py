@@ -1,73 +1,85 @@
-"""Compare groups (weekdays, months, sessions, etc.)."""
+"""Compare — compare metric across groups."""
 
 import pandas as pd
 
 
-def op_compare(df: pd.DataFrame, params: dict) -> dict:
+def op_compare(df: pd.DataFrame, what: str, params: dict) -> dict:
     """
     Compare metric across groups.
 
+    Expects two atoms with different filters (e.g., monday vs friday).
+    Or uses group parameter from atom.
+
     params:
-        group_by: field to group by (weekday, month, hour, etc.)
-        metric: field to compare (change_pct, range, volume, etc.)
-        agg: aggregation function (mean, median, sum, count, std)
-        groups: optional list of specific groups to compare
-
-    Example:
-        params = {
-            "group_by": "weekday",
-            "metric": "range_pct",
-            "agg": "mean",
-            "groups": [0, 4]  # Monday vs Friday
-        }
-
-    Returns:
-        {
-            "data": {0: 1.23, 4: 1.45},
-            "best": 4,
-            "worst": 0
-        }
+        groups: list of group values to compare
+        group_by: field to group by (weekday, month, year, quarter)
     """
     if df.empty:
-        return {"error": "No data"}
+        return {"rows": [], "summary": {"error": "No data"}}
 
-    group_by = params.get("group_by", "year")  # default: compare by year
-    metric = params.get("metric", "change_pct")  # default: compare returns
-    agg = params.get("agg", "mean")
-    groups = params.get("groups")
+    col = _what_to_column(what)
+    if col not in df.columns:
+        return {"rows": [], "summary": {"error": f"Column {col} not found"}}
+
+    group_by = params.get("group_by", "weekday")
 
     if group_by not in df.columns:
-        return {"error": f"Column {group_by} not found"}
-
-    if metric not in df.columns:
-        return {"error": f"Column {metric} not found"}
+        return {"rows": [], "summary": {"error": f"Group column {group_by} not found"}}
 
     # Group and aggregate
-    grouped = df.groupby(group_by)[metric].agg(agg)
+    grouped = df.groupby(group_by)[col].agg(["mean", "count", "std"])
 
-    # Filter to specific groups if requested
+    # Filter specific groups if requested
+    groups = params.get("groups")
     if groups:
         grouped = grouped.loc[grouped.index.isin(groups)]
 
     if grouped.empty:
-        return {"error": "No data for specified groups"}
+        return {"rows": [], "summary": {"error": "No groups found"}}
 
-    # Convert to dict and round
-    data = {k: round(v, 3) if pd.notna(v) else None for k, v in grouped.items()}
+    # Labels for common groupings
+    labels = _get_labels(group_by)
 
-    result = {
-        "data": data,
-        "best": grouped.idxmax() if not grouped.empty else None,
-        "worst": grouped.idxmin() if not grouped.empty else None,
+    # Build rows
+    rows = []
+    for idx, row in grouped.iterrows():
+        label = labels.get(idx, str(idx))
+        rows.append({
+            "group": label,
+            "avg": round(row["mean"], 3) if pd.notna(row["mean"]) else None,
+            "count": int(row["count"]),
+            "std": round(row["std"], 3) if pd.notna(row["std"]) else None,
+        })
+
+    # Find best/worst
+    best_idx = grouped["mean"].idxmax()
+    worst_idx = grouped["mean"].idxmin()
+
+    summary = {
+        "best": labels.get(best_idx, str(best_idx)),
+        "best_avg": round(grouped.loc[best_idx, "mean"], 3),
+        "worst": labels.get(worst_idx, str(worst_idx)),
+        "worst_avg": round(grouped.loc[worst_idx, "mean"], 3),
+        "group_by": group_by,
     }
 
-    # Add readable labels for common groupings
-    if group_by == "weekday":
-        weekday_names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
-        result["labels"] = {k: weekday_names[k] for k in data.keys() if k < 7}
-    elif group_by == "month":
-        month_names = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-                       "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
-        result["labels"] = {k: month_names[k] for k in data.keys() if 1 <= k <= 12}
+    return {"rows": rows, "summary": summary}
 
-    return result
+
+def _what_to_column(what: str) -> str:
+    """Map atom.what to DataFrame column."""
+    if what == "volatility":
+        return "range"
+    return what
+
+
+def _get_labels(group_by: str) -> dict:
+    """Get human-readable labels for group values."""
+    if group_by == "weekday":
+        return {0: "Mon", 1: "Tue", 2: "Wed", 3: "Thu", 4: "Fri", 5: "Sat", 6: "Sun"}
+    if group_by == "month":
+        return {1: "Jan", 2: "Feb", 3: "Mar", 4: "Apr", 5: "May", 6: "Jun",
+                7: "Jul", 8: "Aug", 9: "Sep", 10: "Oct", 11: "Nov", 12: "Dec"}
+    if group_by == "quarter":
+        return {1: "Q1", 2: "Q2", 3: "Q3", 4: "Q4"}
+    return {}

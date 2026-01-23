@@ -10,6 +10,7 @@ Extract the type of analysis user wants.
 - show days where, find days with, filter → operation="filter"
 - streak, consecutive, in a row → operation="streak"
 - show data, list days, list all → operation="list"
+- all X, every X, each X (with filter) → operation="list"
 </rules>
 
 <examples>
@@ -99,4 +100,16 @@ Output: {"operation": "list", "unclear": ["period"]}
 
 Input: green days percentage for 2024
 Output: {"operation": "stats", "metric": "green_pct", "period": {"type": "year", "value": "2024"}}
+
+Input: volatility for all Fridays in April 2023
+Output: {"operation": "list", "metric": "range", "period": {"type": "month", "value": "2023-04"}, "weekday_filter": ["Friday"]}
+
+Input: all Mondays in 2024
+Output: {"operation": "list", "period": {"type": "year", "value": "2024"}, "weekday_filter": ["Monday"]}
+
+Input: every OPEX day in 2024
+Output: {"operation": "list", "period": {"type": "year", "value": "2024"}, "event_filter": "opex"}
+
+Input: each Friday last month
+Output: {"operation": "list", "period": {"type": "relative", "value": "last_month"}, "weekday_filter": ["Friday"]}
 </examples>

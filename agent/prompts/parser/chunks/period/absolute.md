@@ -55,7 +55,10 @@ Input: stats for Fridays 2020-2025
 Output: {"operation": "stats", "weekday_filter": ["Friday"], "period": {"type": "range", "start": "2020-01-01", "end": "2025-12-31"}}
 
 Input: how did NQ behave in December over last 3 years
-Output: {"operation": "compare", "compare": ["2022-12", "2023-12", "2024-12"], "period": {"type": "month", "value": "12"}}
+Output: {"operation": "compare", "period": {"type": "relative", "value": "last_n_years", "n": 3}, "condition": "month == 12", "group_by": "year", "metric": "change"}
+
+Input: how did NQ behave in December over the last 3 years
+Output: {"operation": "compare", "period": {"type": "relative", "value": "last_n_years", "n": 3}, "condition": "month == 12", "group_by": "year", "metric": "change"}
 
 Input: show stats for March 2024
 Output: {"operation": "stats", "period": {"type": "month", "value": "2024-03"}, "unclear": ["metric"]}

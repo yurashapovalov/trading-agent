@@ -57,21 +57,28 @@ Write ONE short sentence in {lang} confirming you understood and are getting the
 
 
 TITLE_PROMPT = """<role>
-You generate short titles for data cards.
+You generate short titles for data tables.
 </role>
 
 <constraints>
 - 3-6 words maximum
 - MUST be in language: {lang}
-- Descriptive, not generic
+- Describe WHAT data is shown, NOT conclusions or findings
+- Title should work as table header
 </constraints>
 
 <examples>
 Question: волатильность за 2024 (lang: ru)
 Title: Волатильность NQ 2024
 
+Question: в какой месяц лучше всего растёт (lang: ru)
+Title: Сезонность по месяцам
+
 Question: top 5 volatile days (lang: en)
 Title: Top 5 Volatile Days
+
+Question: which month is historically best (lang: en)
+Title: Monthly Seasonality
 
 Question: wie war die letzte Woche? (lang: de)
 Title: NQ Letzte Woche
@@ -85,7 +92,7 @@ Language: {lang}
 </context>
 
 <task>
-Generate a short title in {lang} for this data card.
+Generate a short descriptive title in {lang} for this data table.
 Return ONLY the title, nothing else.
 </task>"""
 
@@ -161,6 +168,106 @@ Response: December 15 was an early close day with a hammer pattern.
 
 <task>
 Write ONE sentence summary in {lang}.
+</task>"""
+
+
+SUMMARY_ANSWER_PROMPT = """<role>
+You are a trading data assistant answering a question using pre-computed results.
+Tone: friendly colleague, confident.
+</role>
+
+<constraints>
+- 1-2 sentences maximum
+- MUST respond in language: {lang}
+- Use the summary data to form your answer
+- Values are already formatted — use them as-is
+- Be direct, don't hedge or add caveats
+</constraints>
+
+<instrument>
+{instrument}
+</instrument>
+
+<context>
+Question: {question}
+Language: {lang}
+</context>
+
+<summary>
+{summary}
+</summary>
+
+<examples>
+Instrument: NQ, Nasdaq 100 E-mini, Data: 2008-2026
+Question: в какой месяц года NQ исторически растёт лучше всего (lang: ru)
+Summary: {{"best": "Jul", "best_value": "+0.2%"}}
+Response: За 17 лет данных Nasdaq лучше всего растёт в июле — в среднем +0.2%.
+
+Instrument: NQ, Nasdaq 100 E-mini, Data: 2008-2026
+Question: which month is historically worst (lang: en)
+Summary: {{"worst": "Sep", "worst_value": "-0.5%"}}
+Response: Based on 17 years of data, September is the weakest month at -0.5%.
+
+Instrument: NQ, Nasdaq 100 E-mini
+Question: как коррелирует объём с изменением цены (lang: ru)
+Summary: {{"correlation": 0.15, "interpretation": "weak positive"}}
+Response: Корреляция между объёмом и движением цены слабая положительная — 0.15.
+
+Instrument: NQ, Nasdaq 100 E-mini
+Question: what's the longest red streak (lang: en)
+Summary: {{"max_length": 7, "count": 5}}
+Response: Longest losing streak was 7 days. There have been 5 streaks of 3+ red days.
+
+Instrument: NQ, Nasdaq 100 E-mini
+Question: топ 3 самых волатильных дня за 2024 (lang: ru)
+Summary: {{"count": 3, "by": "range", "top_items": [{{"date": "2024-12-18", "value": 1076.75}}, {{"date": "2024-08-05", "value": 1039.0}}, {{"date": "2024-08-01", "value": 863.0}}]}}
+Response: Самые волатильные дни 2024: 18 декабря (1077 пт), 5 августа (1039 пт) и 1 августа (863 пт).
+
+Instrument: NQ, Nasdaq 100 E-mini
+Question: top 5 highest volume days (lang: en)
+Summary: {{"count": 5, "by": "volume", "top_items": [{{"date": "2024-03-15", "value": 850000}}, {{"date": "2024-01-22", "value": 780000}}]}}
+Response: Highest volume days: March 15 (850K) and January 22 (780K) lead the list.
+</examples>
+
+<task>
+Answer the question in {lang} using the summary data. Be direct and specific.
+</task>"""
+
+
+TABLE_WITH_SUMMARY_PROMPT = """<role>
+You present data with a brief conclusion from the summary.
+Tone: friendly colleague showing results.
+</role>
+
+<constraints>
+- 1-2 sentences maximum
+- MUST respond in language: {lang}
+- Mention the key finding from summary
+- Reference that full data is in the table
+</constraints>
+
+<context>
+Question: {question}
+Data: {row_count} rows
+Language: {lang}
+</context>
+
+<summary>
+{summary}
+</summary>
+
+<examples>
+Question: какая сезонность по месяцам (lang: ru)
+Summary: {{"best": "April", "best_value": 3.2, "worst": "September", "worst_value": -1.5}}
+Response: Апрель — лучший месяц (+3.2%), сентябрь — худший (-1.5%). Полная разбивка в таблице.
+
+Question: show monthly stats (lang: en)
+Summary: {{"count": 12, "avg_change_pct": 0.8, "green_pct": 58}}
+Response: Average monthly change is +0.8% with 58% green days. Full breakdown in the table.
+</examples>
+
+<task>
+Write 1-2 sentences in {lang} summarizing the key finding and noting the table has full data.
 </task>"""
 
 

@@ -2,75 +2,190 @@
 Pydantic models for Parser output.
 
 Used as response_schema in Gemini.
-Note: Gemini doesn't support additionalProperties, so no dict types.
+Schema validators enforce rules from agent/rules/ — single source of truth.
 """
 
 from typing import ClassVar, Literal
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+
+from agent.rules import (
+    get_atoms_range,
+    get_required_timeframe,
+    get_default_params,
+    requires_daily,
+    detect_filter_type,
+    parse_filters,
+    validate_combination,
+)
 
 
-class Period(BaseModel):
-    """Date/time period specification."""
-    type: Literal["relative", "year", "month", "date", "range", "quarter"] | None = None
-    # For relative: yesterday, today, last_week, last_n_days, ytd, mtd, etc.
-    # For year: "2024"
-    # For month: "2024-01"
-    # For date: "2024-05-15"
-    value: str | None = None
-    n: int | None = Field(default=None, description="For last_n_days, last_n_weeks")
-    # For range type:
-    start: str | None = Field(default=None, description="YYYY-MM-DD for range start")
-    end: str | None = Field(default=None, description="YYYY-MM-DD for range end")
-    # For quarter type:
-    year: int | None = Field(default=None, description="Year for quarter")
-    q: int | None = Field(default=None, description="Quarter number 1-4")
+# =============================================================================
+# Parser Output Models
+# =============================================================================
 
-
-class TimeRange(BaseModel):
-    """Intraday time range."""
-    start: str = Field(description="HH:MM format")
-    end: str = Field(description="HH:MM format")
-
-
-class ParsedQuery(BaseModel):
-    """Parser output — extracted entities from user question."""
-
-    intent: Literal["data", "chitchat", "concept", "unsupported"] = "data"
-    what: str = Field(default="", description="Brief description of what user wants")
-    reason: str | None = Field(default=None, description="Why unsupported: cannot_predict, no_realtime, wrong_instrument")
-    operation: Literal["stats", "compare", "top_n", "seasonality", "filter", "streak", "list"] | None = None
-
-    period: Period | None = None
-    time: TimeRange | None = None
-
-    session: Literal["RTH", "ETH", "OVERNIGHT", "ASIAN", "EUROPEAN"] | None = None
-    weekday_filter: list[str] | None = Field(default=None, description="e.g. Monday, Friday")
-    event_filter: Literal["opex", "fomc", "nfp", "cpi", "quad_witching"] | None = None
-
-    # Metric (what to measure)
-    metric: Literal["range", "change", "volume", "green_pct", "gap"] | None = Field(
-        default=None, description="What to measure: range/volatility, change/return, volume, win rate, gaps"
+class Atom(BaseModel):
+    """Data selection unit: when + what + optional filter/group/timeframe."""
+    when: str = Field(description="Period: 2024, January, last week, Q1 2024")
+    what: str = Field(description="Metric: change, range, volume, gap, high, low")
+    filter: str | None = Field(default=None, description="Condition: change > 0, monday")
+    group: str | None = Field(default=None, description="Grouping: by month, by weekday")
+    timeframe: Literal["1m", "5m", "15m", "30m", "1H", "4H", "1D"] = Field(
+        default="1D",
+        description="Data granularity: 1D for daily, 1H for hourly, 1m for minute"
     )
 
-    # Conditions and modifiers
-    condition: str | None = Field(default=None, description="e.g. range > 300, close > open")
-    top_n: int | None = Field(default=None, description="e.g. 10 for top 10")
-    sort_by: str | None = Field(default=None, description="e.g. range, volume, change_pct")
-    sort_order: Literal["asc", "desc"] | None = Field(default=None, description="asc or desc")
-    group_by: Literal["hour", "weekday", "month", "quarter", "year"] | None = Field(default=None)
+    # -------------------------------------------------------------------------
+    # Rule: session/time filter → intraday timeframe
+    # -------------------------------------------------------------------------
+    @model_validator(mode="after")
+    def fix_timeframe_for_intraday_filter(self):
+        """Session/time filters require time column → use 1H instead of 1D."""
+        if not self.filter:
+            return self
 
-    compare: list[str] | None = Field(default=None, description="e.g. 2023, 2024")
-    unclear: list[str] | None = Field(default=None, description="e.g. year")
+        filter_type = detect_filter_type(self.filter)
+
+        # Time and categorical (session) filters need intraday data
+        needs_intraday = filter_type == "time" or "session" in self.filter.lower()
+
+        if needs_intraday and self.timeframe == "1D":
+            self.timeframe = "1H"
+        return self
+
+    # -------------------------------------------------------------------------
+    # Rule: gap + session filter = conflict (from rules/metrics.py)
+    # -------------------------------------------------------------------------
+    @model_validator(mode="after")
+    def validate_gap_vs_intraday(self):
+        """Gap metric requires daily data, session filter requires intraday — conflict."""
+        if not requires_daily(self.what) or not self.filter:
+            return self
+
+        filter_type = detect_filter_type(self.filter)
+        needs_intraday = filter_type == "time" or "session" in self.filter.lower()
+
+        if needs_intraday:
+            raise ValueError(
+                f"Conflict: '{self.what}' requires daily data, "
+                "but session/time filter requires intraday data. "
+                "Use different metric (change, range, volume) with session filter, "
+                f"or remove session filter when analyzing {self.what}."
+            )
+        return self
 
 
-class ClarificationOutput(BaseModel):
-    """Output from Clarifier agent."""
-    response: str = Field(description="Message to user in their language")
-    clarified_query: str | None = Field(
-        default=None,
-        description="Reformulated query for Parser (only when clarification complete)"
-    )
+class StepParams(BaseModel):
+    """Operation parameters."""
+    n: int | None = Field(default=None, description="Limit to N items")
+    sort: Literal["asc", "desc"] | None = Field(default=None, description="Sort order")
+    outcome: str | None = Field(default=None, description="For probability: > 0, < 0")
+    offset: int | None = Field(default=None, description="For around: +1 (after), -1 (before)")
 
+
+class Step(BaseModel):
+    """Single step in query plan."""
+    id: str = Field(description="Step ID: s1, s2, s3")
+    operation: Literal[
+        "list", "count", "compare", "correlation",
+        "around", "streak", "distribution", "probability", "formation"
+    ] = Field(description="Operation type")
+    atoms: list[Atom] = Field(description="Data atoms for this step")
+    params: StepParams | None = Field(default=None, description="Operation parameters")
+    from_step: str | None = Field(default=None, alias="from", description="Reference to previous step")
+
+    # -------------------------------------------------------------------------
+    # Rule: operation may require specific timeframe (from rules/operations.py)
+    # -------------------------------------------------------------------------
+    @model_validator(mode="after")
+    def fix_timeframe_for_operation(self):
+        """Some operations require specific timeframe (e.g. formation → 1m)."""
+        required_tf = get_required_timeframe(self.operation)
+        if required_tf:
+            for atom in self.atoms:
+                atom.timeframe = required_tf
+        return self
+
+    # -------------------------------------------------------------------------
+    # Rule: validate atoms count (from rules/operations.py)
+    # -------------------------------------------------------------------------
+    @model_validator(mode="after")
+    def validate_atoms_count(self):
+        """Validate atoms count against operation rules."""
+        min_atoms, max_atoms = get_atoms_range(self.operation)
+
+        if len(self.atoms) < min_atoms:
+            raise ValueError(
+                f"'{self.operation}' requires at least {min_atoms} atom(s), "
+                f"got {len(self.atoms)}"
+            )
+
+        if len(self.atoms) > max_atoms:
+            raise ValueError(
+                f"'{self.operation}' allows at most {max_atoms} atom(s), "
+                f"got {len(self.atoms)}"
+            )
+
+        return self
+
+    # -------------------------------------------------------------------------
+    # Rule: validate filter + operation combinations (from rules/semantics.py)
+    # -------------------------------------------------------------------------
+    @model_validator(mode="after")
+    def validate_filter_combinations(self):
+        """Validate that filters are valid for this operation."""
+        for atom in self.atoms:
+            if not atom.filter:
+                continue
+
+            # Parse all filters in the string
+            filters = parse_filters(atom.filter)
+
+            for f in filters:
+                filter_type = f.get("type")
+                if not filter_type:
+                    continue
+
+                is_valid, error_msg = validate_combination(self.operation, filter_type)
+                if not is_valid:
+                    raise ValueError(error_msg)
+
+        return self
+
+    # -------------------------------------------------------------------------
+    # Rule: set default params (from rules/operations.py)
+    # -------------------------------------------------------------------------
+    @model_validator(mode="after")
+    def set_default_params(self):
+        """Set sensible defaults for operation params from rules."""
+        if self.params is None:
+            self.params = StepParams()
+
+        defaults = get_default_params(self.operation)
+
+        # Apply defaults only if not already set
+        if defaults.get("sort") and self.params.sort is None:
+            self.params.sort = defaults["sort"]
+
+        if defaults.get("offset") and self.params.offset is None:
+            self.params.offset = defaults["offset"]
+
+        if defaults.get("outcome") and self.params.outcome is None:
+            self.params.outcome = defaults["outcome"]
+
+        if defaults.get("n") and self.params.n is None:
+            self.params.n = defaults["n"]
+
+        return self
+
+
+class ParserOutput(BaseModel):
+    """Parser output — list of steps."""
+    steps: list[Step] = Field(description="Query steps")
+
+
+# =============================================================================
+# Usage Tracking
+# =============================================================================
 
 class Usage(BaseModel):
     """Token usage from Gemini API call."""
@@ -79,14 +194,9 @@ class Usage(BaseModel):
     thinking_tokens: int = 0
     cached_tokens: int = 0
 
-    # Gemini pricing per 1M tokens (USD)
-    # https://ai.google.dev/pricing
     PRICING: ClassVar[dict] = {
-        # Gemini 2.5 Flash (full)
         "gemini-flash-latest": {"input": 0.30, "output": 2.50, "cached": 0.03},
-        # Gemini 2.5 Flash Lite (cheap)
         "gemini-flash-lite-latest": {"input": 0.10, "output": 0.40, "cached": 0.01},
-        # Default = lite (what we use)
         "default": {"input": 0.10, "output": 0.40, "cached": 0.01},
     }
 
@@ -102,7 +212,6 @@ class Usage(BaseModel):
     def cost(self, model: str = "default") -> float:
         """Calculate cost in USD."""
         prices = self.PRICING.get(model, self.PRICING["default"])
-        # Non-cached input tokens (subtract cached)
         regular_input = max(0, self.input_tokens - self.cached_tokens)
         return (
             (regular_input / 1_000_000) * prices["input"]

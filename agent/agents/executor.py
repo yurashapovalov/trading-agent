@@ -1,0 +1,499 @@
+"""
+Executor — runs ExecutionPlan against data.
+
+Flow: ExecutionPlan → load data → enrich → filter (by semantics) → operation → result
+
+Uses rules from agent/rules/ for:
+- Filter semantics (where/condition/event)
+- Metric column mapping
+- Operation requirements (requires_full_data)
+"""
+
+import re
+from datetime import date, timedelta
+
+import pandas as pd
+
+from agent.data import get_bars, enrich
+from agent.operations import OPERATIONS
+from agent.agents.planner import ExecutionPlan, DataRequest
+from agent.rules import (
+    parse_filters,
+    split_filters_by_semantic,
+    requires_full_data,
+    get_column,
+)
+
+
+# =============================================================================
+# Main API
+# =============================================================================
+
+def execute_plan(plan: ExecutionPlan, symbol: str = "NQ") -> dict:
+    """Execute plan and return result."""
+    executors = {
+        "single": _execute_single,
+        "multi_period": _execute_multi_period,
+        "multi_filter": _execute_multi_filter,
+        "multi_metric": _execute_multi_metric,
+    }
+
+    executor = executors.get(plan.mode)
+    if not executor:
+        return {"error": f"Unknown mode: {plan.mode}"}
+
+    return executor(plan, symbol)
+
+
+# =============================================================================
+# Mode Executors
+# =============================================================================
+
+def _execute_single(plan: ExecutionPlan, symbol: str) -> dict:
+    """Single request, single metric."""
+    req = plan.requests[0]
+
+    # Load data with semantic-aware filtering
+    df, condition_filters, event_filters = _load_data_with_semantics(req, plan.operation, symbol)
+
+    if df.empty:
+        return _empty_result(req, "No data")
+
+    op = OPERATIONS.get(plan.operation)
+    if not op:
+        return {"error": f"Unknown operation: {plan.operation}"}
+
+    # Pass condition/event filters to operation params
+    params = {**plan.params}
+    if condition_filters:
+        params["condition_filters"] = condition_filters
+    if event_filters:
+        params["event_filters"] = event_filters
+
+    result = op(df, plan.metrics[0], params)
+    result["period"] = {"start": req.period[0], "end": req.period[1]}
+    result["filters"] = req.filters
+
+    return result
+
+
+def _execute_multi_period(plan: ExecutionPlan, symbol: str) -> dict:
+    """Multiple periods, compare stats for each."""
+    metric = plan.metrics[0]
+    col = get_column(metric)
+
+    rows = []
+    periods = []
+
+    for req in plan.requests:
+        df, _, _ = _load_data_with_semantics(req, plan.operation, symbol)
+        periods.append({"start": req.period[0], "end": req.period[1]})
+
+        if df.empty:
+            rows.append({"group": req.label, "avg": None, "count": 0})
+            continue
+
+        if col not in df.columns:
+            rows.append({"group": req.label, "avg": None, "count": 0, "error": f"No column {col}"})
+            continue
+
+        rows.append({
+            "group": req.label,
+            "avg": round(df[col].mean(), 3),
+            "count": len(df),
+            "std": round(df[col].std(), 3) if len(df) > 1 else 0,
+        })
+
+    summary = _summarize_comparison(rows)
+    return {"rows": rows, "summary": summary, "periods": periods}
+
+
+def _execute_multi_filter(plan: ExecutionPlan, symbol: str) -> dict:
+    """Same period, different filters, compare stats."""
+    metric = plan.metrics[0]
+    col = get_column(metric)
+
+    rows = []
+
+    for req in plan.requests:
+        df, _, _ = _load_data_with_semantics(req, plan.operation, symbol)
+
+        if df.empty:
+            rows.append({"group": req.label, "avg": None, "count": 0})
+            continue
+
+        if col not in df.columns:
+            rows.append({"group": req.label, "avg": None, "count": 0, "error": f"No column {col}"})
+            continue
+
+        rows.append({
+            "group": req.label,
+            "avg": round(df[col].mean(), 3),
+            "count": len(df),
+            "std": round(df[col].std(), 3) if len(df) > 1 else 0,
+        })
+
+    summary = _summarize_comparison(rows)
+    req = plan.requests[0]
+    return {
+        "rows": rows,
+        "summary": summary,
+        "period": {"start": req.period[0], "end": req.period[1]},
+    }
+
+
+def _execute_multi_metric(plan: ExecutionPlan, symbol: str) -> dict:
+    """Single request, multiple metrics (correlation)."""
+    req = plan.requests[0]
+    df, _, _ = _load_data_with_semantics(req, plan.operation, symbol)
+
+    if df.empty:
+        return _empty_result(req, "No data")
+
+    op = OPERATIONS.get(plan.operation)
+    if not op:
+        return {"error": f"Unknown operation: {plan.operation}"}
+
+    params = {**plan.params, "metrics": plan.metrics}
+    result = op(df, plan.metrics[0], params)
+    result["period"] = {"start": req.period[0], "end": req.period[1]}
+
+    return result
+
+
+# =============================================================================
+# Data Loading with Semantic Filter Handling
+# =============================================================================
+
+def _load_data_with_semantics(
+    req: DataRequest,
+    operation: str,
+    symbol: str
+) -> tuple[pd.DataFrame, list[dict], list[dict]]:
+    """
+    Load data and apply filters based on semantics.
+
+    - WHERE filters: always applied (filter rows)
+    - CONDITION filters: for requires_full_data ops, passed to params
+    - EVENT filters:
+        - consecutive: passed to params (needs special logic to find last day of streak)
+        - comparison/pattern: applied as WHERE (same result, avoids code duplication)
+
+    Returns: (df, condition_filters, event_filters)
+    """
+    period = f"{req.period[0]}:{req.period[1]}"
+    df = get_bars(symbol, period, timeframe=req.timeframe)
+
+    if df.empty:
+        return df, [], []
+
+    df = enrich(df)
+
+    # Parse and split filters by semantics
+    all_condition_filters = []
+    all_event_filters = []
+
+    for filter_str in req.filters:
+        parsed = parse_filters(filter_str)
+        where_filters, condition_filters, event_filters = split_filters_by_semantic(parsed, operation)
+
+        # Always apply WHERE filters
+        df = _apply_where_filters(df, where_filters, symbol)
+
+        # Condition filters: for requires_full_data ops, pass to params
+        if requires_full_data(operation):
+            all_condition_filters.extend(condition_filters)
+        else:
+            df = _apply_where_filters(df, condition_filters, symbol)
+
+        # Event filters: consecutive needs special handling, others apply as WHERE
+        for ef in event_filters:
+            if ef.get("type") == "consecutive":
+                # Consecutive requires special logic in operation (find streaks → last day)
+                all_event_filters.append(ef)
+            else:
+                # comparison, pattern — apply as WHERE (same result, no code duplication)
+                df = _apply_where_filters(df, [ef], symbol)
+
+    return df, all_condition_filters, all_event_filters
+
+
+def _apply_where_filters(df: pd.DataFrame, filters: list[dict], symbol: str) -> pd.DataFrame:
+    """Apply WHERE filters to DataFrame."""
+    if df.empty or not filters:
+        return df
+
+    for f in filters:
+        filter_type = f.get("type")
+
+        if filter_type == "categorical":
+            df = _apply_categorical(df, f, symbol)
+
+        elif filter_type == "comparison":
+            df = _apply_comparison(df, f)
+
+        elif filter_type == "consecutive":
+            df = _apply_consecutive(df, f)
+
+        elif filter_type == "time":
+            df = _apply_time(df, f)
+
+        elif filter_type == "pattern":
+            df = _apply_pattern(df, f)
+
+    return df.reset_index(drop=True)
+
+
+def _apply_categorical(df: pd.DataFrame, f: dict, symbol: str) -> pd.DataFrame:
+    """Apply categorical filter (weekday, session, event)."""
+    if f.get("weekday"):
+        weekday_map = {"monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3, "friday": 4}
+        weekday_num = weekday_map.get(f["weekday"])
+        if weekday_num is not None and "weekday" in df.columns:
+            df = df[df["weekday"] == weekday_num]
+
+    elif f.get("session"):
+        df = _apply_session_filter(df, f["session"], symbol)
+
+    elif f.get("event"):
+        # TODO: implement event filtering
+        pass
+
+    return df
+
+
+def _apply_comparison(df: pd.DataFrame, f: dict) -> pd.DataFrame:
+    """Apply comparison filter (change > 0, etc.)."""
+    col = f.get("metric")
+    op = f.get("op")
+    value = f.get("value")
+
+    if col not in df.columns:
+        return df
+
+    series = df[col]
+    ops = {
+        ">": series > value,
+        "<": series < value,
+        ">=": series >= value,
+        "<=": series <= value,
+        "=": series == value,
+    }
+
+    if op in ops:
+        df = df[ops[op]]
+
+    return df
+
+
+def _apply_consecutive(df: pd.DataFrame, f: dict) -> pd.DataFrame:
+    """Apply consecutive filter (consecutive red >= 2)."""
+    if "is_green" not in df.columns:
+        return df
+
+    color = f.get("color")
+    op = f.get("op", ">=")
+    length = f.get("length", 1)
+
+    mask = df["is_green"] if color == "green" else ~df["is_green"]
+
+    df = df.copy()
+    df["_sid"] = (mask != mask.shift()).cumsum()
+    lengths = df.groupby("_sid").transform("size")
+
+    if op == ">=":
+        df = df[mask & (lengths >= length)]
+    elif op == ">":
+        df = df[mask & (lengths > length)]
+    elif op == "=":
+        df = df[mask & (lengths == length)]
+
+    return df.drop(columns=["_sid"])
+
+
+def _apply_time(df: pd.DataFrame, f: dict) -> pd.DataFrame:
+    """Apply time filter (time >= 09:30)."""
+    if "time" not in df.columns:
+        return df
+
+    op = f.get("op")
+    value = f.get("value")
+
+    ops = {
+        ">=": df["time"] >= value,
+        "<=": df["time"] <= value,
+        ">": df["time"] > value,
+        "<": df["time"] < value,
+    }
+
+    if op in ops:
+        df = df[ops[op]]
+
+    return df
+
+
+def _apply_pattern(df: pd.DataFrame, f: dict) -> pd.DataFrame:
+    """Apply pattern filter (inside_day, doji, etc.)."""
+    pattern = f.get("pattern")
+
+    if pattern == "green" and "is_green" in df.columns:
+        df = df[df["is_green"]]
+    elif pattern == "red" and "is_green" in df.columns:
+        df = df[~df["is_green"]]
+    elif pattern in ("gap_fill", "gap_filled") and "gap_filled" in df.columns:
+        df = df[df["gap_filled"]]
+    # TODO: implement other patterns (inside_day, doji, etc.)
+
+    return df
+
+
+def _apply_session_filter(df: pd.DataFrame, session: str, symbol: str) -> pd.DataFrame:
+    """Filter by trading session (MORNING, RTH, etc.)."""
+    from agent.config.market.instruments import get_session_times
+
+    times = get_session_times(symbol, session)
+    if not times:
+        return df
+
+    start_time, end_time = times
+
+    if "time" not in df.columns:
+        return df
+
+    df = df[(df["time"] >= start_time) & (df["time"] < end_time)]
+    return df
+
+
+def _empty_result(req: DataRequest, error: str) -> dict:
+    """Create empty result with error."""
+    return {
+        "rows": [],
+        "summary": {"error": error},
+        "period": {"start": req.period[0], "end": req.period[1]},
+    }
+
+
+def _summarize_comparison(rows: list[dict]) -> dict:
+    """Find best/worst from comparison rows."""
+    valid = [r for r in rows if r.get("avg") is not None]
+
+    if not valid:
+        return {"error": "No valid data"}
+
+    best = max(valid, key=lambda r: r["avg"])
+    worst = min(valid, key=lambda r: r["avg"])
+
+    return {
+        "best": best["group"],
+        "best_avg": best["avg"],
+        "worst": worst["group"],
+        "worst_avg": worst["avg"],
+    }
+
+
+# =============================================================================
+# Date Resolution
+# =============================================================================
+
+def resolve_date(when: str, today: date | None = None) -> tuple[str, str]:
+    """
+    Resolve 'when' to (start_date, end_date).
+
+    Supports: all, 2024, 2024-01, January 2024, Q1 2024, yesterday, last week, etc.
+    """
+    today = today or date.today()
+    when_lower = when.lower().strip()
+
+    if when_lower == "all":
+        return "2008-01-01", today.isoformat()
+
+    # Year: 2024
+    if re.match(r"^\d{4}$", when):
+        year = int(when)
+        end = date(year, 12, 31) if year < today.year else today
+        return f"{year}-01-01", end.isoformat()
+
+    # Month: 2024-01
+    if m := re.match(r"^(\d{4})-(\d{2})$", when):
+        year, month = int(m.group(1)), int(m.group(2))
+        return date(year, month, 1).isoformat(), _last_day(year, month).isoformat()
+
+    # Month name: January, January 2024
+    months = {
+        "january": 1, "february": 2, "march": 3, "april": 4,
+        "may": 5, "june": 6, "july": 7, "august": 8,
+        "september": 9, "october": 10, "november": 11, "december": 12,
+    }
+    for name, num in months.items():
+        if name in when_lower:
+            year = int(m.group()) if (m := re.search(r"\d{4}", when)) else today.year
+            return date(year, num, 1).isoformat(), _last_day(year, num).isoformat()
+
+    # Quarter: Q1 2024
+    if m := re.match(r"Q([1-4])\s*(\d{4})?", when, re.I):
+        q = int(m.group(1))
+        year = int(m.group(2)) if m.group(2) else today.year
+        start_month = (q - 1) * 3 + 1
+        end_month = start_month + 2
+        return date(year, start_month, 1).isoformat(), _last_day(year, end_month).isoformat()
+
+    # Relative
+    if when_lower == "yesterday":
+        d = today - timedelta(days=1)
+        return d.isoformat(), d.isoformat()
+
+    if when_lower == "today":
+        return today.isoformat(), today.isoformat()
+
+    if when_lower == "last week":
+        start = today - timedelta(days=today.weekday() + 7)
+        return start.isoformat(), (start + timedelta(days=6)).isoformat()
+
+    # Last N days/weeks/months
+    if m := re.match(r"last\s+(\d+)\s+(days?|weeks?|months?)", when_lower):
+        n = int(m.group(1))
+        unit = m.group(2)
+        if "day" in unit:
+            delta = timedelta(days=n)
+        elif "week" in unit:
+            delta = timedelta(weeks=n)
+        else:
+            delta = timedelta(days=n * 30)
+        return (today - delta).isoformat(), today.isoformat()
+
+    # Year range: 2020-2024
+    if m := re.match(r"(\d{4})\s*[-–]\s*(\d{4})", when):
+        start_year, end_year = int(m.group(1)), int(m.group(2))
+        end = date(end_year, 12, 31) if end_year < today.year else today
+        return f"{start_year}-01-01", end.isoformat()
+
+    # Default: current year
+    return f"{today.year}-01-01", today.isoformat()
+
+
+def _last_day(year: int, month: int) -> date:
+    """Last day of month."""
+    if month == 12:
+        return date(year, 12, 31)
+    return date(year, month + 1, 1) - timedelta(days=1)
+
+
+# =============================================================================
+# Legacy API (for backward compatibility)
+# =============================================================================
+
+def execute_step(step, symbol: str = "NQ", today: date | None = None) -> dict:
+    """Execute Step directly (legacy, use execute_plan instead)."""
+    from agent.agents.planner import plan_step
+    plan = plan_step(step, today)
+    return execute_plan(plan, symbol)
+
+
+def execute(steps: list, symbol: str = "NQ", today: date | None = None) -> list[dict]:
+    """Execute all steps (legacy)."""
+    results = []
+    for step in steps:
+        result = execute_step(step, symbol, today)
+        result["step_id"] = step.id
+        results.append(result)
+    return results
