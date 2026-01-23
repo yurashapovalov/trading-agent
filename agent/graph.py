@@ -164,11 +164,17 @@ def compile_graph():
     return build_graph().compile()
 
 
+import threading
+
 _graph = None
+_graph_lock = threading.Lock()
+
 
 def get_graph():
-    """Get singleton graph instance."""
+    """Get singleton graph instance (thread-safe)."""
     global _graph
     if _graph is None:
-        _graph = compile_graph()
+        with _graph_lock:
+            if _graph is None:
+                _graph = compile_graph()
     return _graph

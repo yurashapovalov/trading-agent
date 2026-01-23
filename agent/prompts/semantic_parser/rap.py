@@ -254,15 +254,20 @@ class SemanticParserRAP:
         }
 
 
-# Singleton
+# Singleton with thread-safe initialization
+import threading
+
 _rap_instance: SemanticParserRAP | None = None
+_rap_lock = threading.Lock()
 
 
 def get_rap() -> SemanticParserRAP:
-    """Get singleton SemanticParserRAP instance."""
+    """Get singleton SemanticParserRAP instance (thread-safe)."""
     global _rap_instance
     if _rap_instance is None:
-        _rap_instance = SemanticParserRAP()
+        with _rap_lock:
+            if _rap_instance is None:
+                _rap_instance = SemanticParserRAP()
     return _rap_instance
 
 

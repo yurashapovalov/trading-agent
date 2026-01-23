@@ -12,12 +12,16 @@ Example:
     # Returns {"rows": [...], "row_count": 22, "granularity": "daily"}
 """
 
+import logging
+
 import duckdb
 import numpy as np
 from datetime import datetime, timedelta
 from typing import Any, Literal
 
 import config
+
+logger = logging.getLogger(__name__)
 
 
 def _convert_numpy_types(data: list[dict]) -> list[dict]:
@@ -307,8 +311,8 @@ def fetch(
     if not template:
         return {"error": f"Unknown granularity: {granularity}"}
 
-    # Build actual SQL with params for logging
-    sql_query = template.replace("$1", f"'{symbol}'").replace("$2", f"'{period_start}'").replace("$3", f"'{period_end}'")
+    # Query description for logging (no SQL interpolation for safety)
+    sql_query = f"granularity={granularity}, symbol={symbol}, period={period_start}..{period_end}"
 
     try:
         with duckdb.connect(config.DATABASE_PATH, read_only=True) as conn:
@@ -380,7 +384,8 @@ def get_data_range(symbol: str = "NQ") -> dict[str, Any] | None:
                 row['end_date'] = str(row['end_date'])[:10]
                 return row
             return None
-    except Exception:
+    except Exception as e:
+        logger.error(f"get_data_range failed for {symbol}: {e}")
         return None
 
 
@@ -392,5 +397,6 @@ def get_available_symbols() -> list[str]:
         with duckdb.connect(config.DATABASE_PATH, read_only=True) as conn:
             df = conn.execute(sql).df()
             return df['symbol'].tolist()
-    except Exception:
+    except Exception as e:
+        logger.error(f"get_available_symbols failed: {e}")
         return []

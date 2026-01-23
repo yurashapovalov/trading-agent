@@ -30,6 +30,14 @@ import config
 logger = logging.getLogger(__name__)
 
 
+async def _safe_background(coro, name: str):
+    """Run coroutine and log errors instead of losing them."""
+    try:
+        await coro
+    except Exception as e:
+        logger.error(f"Background task {name} failed: {e}")
+
+
 @dataclass
 class Message:
     """Single conversation message."""
@@ -166,12 +174,12 @@ class ConversationMemory:
         """Synchronous version of load()."""
         import asyncio
         try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                # Can't run async in running loop, do sync version
-                return self._load_sync_impl()
-            return loop.run_until_complete(self.load())
+            # Check if we're in a running async context
+            asyncio.get_running_loop()
+            # We are - use sync implementation
+            return self._load_sync_impl()
         except RuntimeError:
+            # No running loop - run async version
             return asyncio.run(self.load())
 
     def _load_sync_impl(self) -> bool:
@@ -260,12 +268,15 @@ class ConversationMemory:
         """Synchronous version."""
         import asyncio
         try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                asyncio.create_task(self.save_memory_state())
-            else:
-                loop.run_until_complete(self.save_memory_state())
+            # Check if we're in a running async context
+            asyncio.get_running_loop()
+            # We are - schedule with error handling
+            asyncio.create_task(_safe_background(
+                self.save_memory_state(),
+                f"save_memory_state:{self.chat_id}"
+            ))
         except RuntimeError:
+            # No running loop - run synchronously
             asyncio.run(self.save_memory_state())
 
     # =========================================================================

@@ -8,11 +8,14 @@ Both async and sync versions provided for different contexts.
 """
 
 import json
+import logging
 from datetime import datetime
 from typing import Any
 from supabase import create_client
 
 import config
+
+logger = logging.getLogger(__name__)
 
 
 def make_json_serializable(obj: Any) -> Any:
@@ -25,15 +28,20 @@ def make_json_serializable(obj: Any) -> Any:
     except (TypeError, ValueError):
         return str(obj)
 
-# Initialize Supabase client
+# Initialize Supabase client (thread-safe)
+import threading
+
 _supabase = None
+_supabase_lock = threading.Lock()
 
 
 def get_supabase():
-    """Get or create Supabase client."""
+    """Get or create Supabase client (thread-safe)."""
     global _supabase
     if _supabase is None and config.SUPABASE_URL:
-        _supabase = create_client(config.SUPABASE_URL, config.SUPABASE_SERVICE_KEY)
+        with _supabase_lock:
+            if _supabase is None and config.SUPABASE_URL:
+                _supabase = create_client(config.SUPABASE_URL, config.SUPABASE_SERVICE_KEY)
     return _supabase
 
 
@@ -209,6 +217,14 @@ async def update_chat_session_stats(
             print(f"Failed to update chat stats (fallback): {e2}")
 
 
+async def _safe_background(coro, name: str):
+    """Run coroutine and log errors instead of losing them."""
+    try:
+        await coro
+    except Exception as e:
+        logger.error(f"Background task {name} failed: {e}")
+
+
 def log_trace_step_sync(
     request_id: str,
     user_id: str,
@@ -218,19 +234,16 @@ def log_trace_step_sync(
 ):
     """Synchronous version of log_trace_step for non-async contexts."""
     import asyncio
+
+    coro = log_trace_step(request_id, user_id, step_number, agent_name, **kwargs)
+
     try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            asyncio.create_task(log_trace_step(
-                request_id, user_id, step_number, agent_name, **kwargs
-            ))
-        else:
-            loop.run_until_complete(log_trace_step(
-                request_id, user_id, step_number, agent_name, **kwargs
-            ))
+        # Check if we're in a running async context
+        loop = asyncio.get_running_loop()
+        # We are - schedule with error handling
+        asyncio.create_task(_safe_background(coro, f"log_trace_step:{agent_name}"))
     except RuntimeError:
-        asyncio.run(log_trace_step(
-            request_id, user_id, step_number, agent_name, **kwargs
-        ))
+        # No running loop - run synchronously
+        asyncio.run(coro)
 
 
