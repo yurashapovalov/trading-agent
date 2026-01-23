@@ -7,6 +7,7 @@ For event-based probability, looks at the NEXT day after event.
 import pandas as pd
 
 from agent.rules import get_column
+from agent.operations._utils import find_consecutive_events
 
 
 def op_probability(df: pd.DataFrame, what: str, params: dict) -> dict:
@@ -117,51 +118,9 @@ def _find_event_days(df: pd.DataFrame, event_filters: list[dict]) -> pd.DataFram
     filter_type = f.get("type")
 
     if filter_type == "consecutive":
-        return _find_consecutive_events(df, f)
+        return find_consecutive_events(df, f)
 
     return df
-
-
-def _find_consecutive_events(df: pd.DataFrame, f: dict) -> pd.DataFrame:
-    """
-    Find last day of each consecutive streak meeting criteria.
-    """
-    if "is_green" not in df.columns:
-        return pd.DataFrame()
-
-    color = f.get("color")
-    op = f.get("op", ">=")
-    length = f.get("length", 1)
-
-    mask = df["is_green"] if color == "green" else ~df["is_green"]
-
-    df = df.copy()
-    df["_streak_id"] = (mask != mask.shift()).cumsum()
-
-    # Get streak lengths
-    streak_lengths = df.groupby("_streak_id").size()
-
-    # Filter to valid streaks
-    if op == ">=":
-        valid_streaks = streak_lengths[streak_lengths >= length].index
-    elif op == ">":
-        valid_streaks = streak_lengths[streak_lengths > length].index
-    elif op == "=":
-        valid_streaks = streak_lengths[streak_lengths == length].index
-    else:
-        valid_streaks = streak_lengths[streak_lengths >= length].index
-
-    # Get last day of each valid streak
-    result_rows = []
-    for streak_id in valid_streaks:
-        streak_rows = df[(df["_streak_id"] == streak_id) & mask]
-        if not streak_rows.empty:
-            result_rows.append(streak_rows.iloc[-1])
-
-    if not result_rows:
-        return pd.DataFrame()
-
-    return pd.DataFrame(result_rows)
 
 
 def _eval_outcome(series: pd.Series, outcome: str) -> pd.Series:

@@ -6,6 +6,8 @@ For simple filters (comparison), events come pre-filtered in df.
 
 import pandas as pd
 
+from agent.operations._utils import find_consecutive_events
+
 
 def op_around(df: pd.DataFrame, what: str, params: dict) -> dict:
     """
@@ -74,51 +76,7 @@ def _find_event_days(df: pd.DataFrame, event_filters: list[dict]) -> pd.DataFram
     filter_type = f.get("type")
 
     if filter_type == "consecutive":
-        return _find_consecutive_events(df, f)
+        return find_consecutive_events(df, f)
 
     # For other event types, return df as-is
     return df
-
-
-def _find_consecutive_events(df: pd.DataFrame, f: dict) -> pd.DataFrame:
-    """
-    Find last day of each consecutive streak meeting criteria.
-
-    Example: consecutive red >= 3 returns the 3rd (last) red day of each streak.
-    """
-    if "is_green" not in df.columns:
-        return pd.DataFrame()
-
-    color = f.get("color")
-    op = f.get("op", ">=")
-    length = f.get("length", 1)
-
-    mask = df["is_green"] if color == "green" else ~df["is_green"]
-
-    df = df.copy()
-    df["_streak_id"] = (mask != mask.shift()).cumsum()
-
-    # Get streak lengths
-    streak_lengths = df.groupby("_streak_id").size()
-
-    # Filter to valid streaks (meeting length requirement)
-    if op == ">=":
-        valid_streaks = streak_lengths[streak_lengths >= length].index
-    elif op == ">":
-        valid_streaks = streak_lengths[streak_lengths > length].index
-    elif op == "=":
-        valid_streaks = streak_lengths[streak_lengths == length].index
-    else:
-        valid_streaks = streak_lengths[streak_lengths >= length].index
-
-    # Get last day of each valid streak
-    result_rows = []
-    for streak_id in valid_streaks:
-        streak_rows = df[(df["_streak_id"] == streak_id) & mask]
-        if not streak_rows.empty:
-            result_rows.append(streak_rows.iloc[-1])  # Last row of streak
-
-    if not result_rows:
-        return pd.DataFrame()
-
-    return pd.DataFrame(result_rows)

@@ -317,7 +317,7 @@ agent/tests/
 ### Phase 1: Critical
 - [x] 1.1 SQL injection fix → parameterized queries в bars.py
 - [x] 1.2.1 ~~Extract `_what_to_column()` to `_utils.py`~~ → используем `get_column` из rules
-- [ ] 1.2.2 Extract `_find_consecutive_events()` to `_utils.py`
+- [x] 1.2.2 Extract `_find_consecutive_events()` to `_utils.py`
 - [x] 1.3 Parser error handling → конкретные exceptions вместо bare Exception
 - [x] 1.4 Event filtering → warning log вместо silent pass
 
