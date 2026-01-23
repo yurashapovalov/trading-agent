@@ -1,9 +1,13 @@
 """Distribution — distribution of metric values."""
 
+import logging
+
 import pandas as pd
 import numpy as np
 
 from agent.rules import get_column
+
+logger = logging.getLogger(__name__)
 
 
 def op_distribution(df: pd.DataFrame, what: str, params: dict) -> dict:
@@ -14,7 +18,10 @@ def op_distribution(df: pd.DataFrame, what: str, params: dict) -> dict:
         bins: number of bins (default: 10)
         percentiles: list of percentiles to calculate
     """
+    logger.debug(f"op_distribution: what={what}, params={params}, rows={len(df)}")
+
     if df.empty:
+        logger.warning("op_distribution: empty dataframe")
         return {"rows": [], "summary": {"error": "No data"}}
 
     col = get_column(what)

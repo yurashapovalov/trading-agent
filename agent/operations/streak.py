@@ -4,9 +4,13 @@ Uses condition_filters from executor to determine streak condition.
 Receives FULL data (not pre-filtered) because requires_full_data=True.
 """
 
+import logging
+
 import pandas as pd
 
 from agent.rules import get_column
+
+logger = logging.getLogger(__name__)
 
 
 def op_streak(df: pd.DataFrame, what: str, params: dict) -> dict:
@@ -21,7 +25,10 @@ def op_streak(df: pd.DataFrame, what: str, params: dict) -> dict:
         n: minimum streak length (default: 2)
         condition_filters: list of filter dicts defining the condition
     """
+    logger.debug(f"op_streak: what={what}, params={params}, rows={len(df)}")
+
     if df.empty:
+        logger.warning("op_streak: empty dataframe")
         return {"rows": [], "summary": {"count": 0, "total_days": 0}}
 
     min_length = params.get("n", 2)

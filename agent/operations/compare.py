@@ -1,8 +1,12 @@
 """Compare — compare metric across groups."""
 
+import logging
+
 import pandas as pd
 
 from agent.rules import get_column
+
+logger = logging.getLogger(__name__)
 
 
 def op_compare(df: pd.DataFrame, what: str, params: dict) -> dict:
@@ -16,7 +20,10 @@ def op_compare(df: pd.DataFrame, what: str, params: dict) -> dict:
         groups: list of group values to compare
         group_by: field to group by (weekday, month, year, quarter)
     """
+    logger.debug(f"op_compare: what={what}, params={params}, rows={len(df)}")
+
     if df.empty:
+        logger.warning("op_compare: empty dataframe")
         return {"rows": [], "summary": {"error": "No data"}}
 
     col = get_column(what)

@@ -1,8 +1,12 @@
 """List — top N records sorted by metric."""
 
+import logging
+
 import pandas as pd
 
 from agent.rules import get_column
+
+logger = logging.getLogger(__name__)
 
 
 def op_list(df: pd.DataFrame, what: str, params: dict) -> dict:
@@ -13,7 +17,10 @@ def op_list(df: pd.DataFrame, what: str, params: dict) -> dict:
         n: number of records (default: 10)
         sort: "asc" or "desc" (default: "desc")
     """
+    logger.debug(f"op_list: what={what}, params={params}, rows={len(df)}")
+
     if df.empty:
+        logger.warning("op_list: empty dataframe")
         return {"rows": [], "summary": {"count": 0}}
 
     n = params.get("n", 10)

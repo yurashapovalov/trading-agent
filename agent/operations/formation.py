@@ -1,6 +1,10 @@
 """Formation — when is daily high/low formed (requires minute data)."""
 
+import logging
+
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 
 def op_formation(df: pd.DataFrame, what: str, params: dict) -> dict:
@@ -13,7 +17,10 @@ def op_formation(df: pd.DataFrame, what: str, params: dict) -> dict:
         event: "high" or "low" (default from what)
         group_by: "hour" (default)
     """
+    logger.debug(f"op_formation: what={what}, params={params}, rows={len(df)}")
+
     if df.empty:
+        logger.warning("op_formation: empty dataframe")
         return {"rows": [], "summary": {"error": "No data"}}
 
     # Requires minute data

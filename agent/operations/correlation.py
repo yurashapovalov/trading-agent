@@ -1,8 +1,12 @@
 """Correlation — correlation between two metrics."""
 
+import logging
+
 import pandas as pd
 
 from agent.rules import get_column
+
+logger = logging.getLogger(__name__)
 
 
 def op_correlation(df: pd.DataFrame, what: str, params: dict) -> dict:
@@ -15,7 +19,10 @@ def op_correlation(df: pd.DataFrame, what: str, params: dict) -> dict:
     params:
         metrics: list of two metrics to correlate
     """
+    logger.debug(f"op_correlation: what={what}, params={params}, rows={len(df)}")
+
     if df.empty:
+        logger.warning("op_correlation: empty dataframe")
         return {"rows": [], "summary": {"error": "No data"}}
 
     metrics = params.get("metrics", [])

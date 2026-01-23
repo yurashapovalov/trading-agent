@@ -1,8 +1,12 @@
 """Count — count matching records."""
 
+import logging
+
 import pandas as pd
 
 from agent.rules import get_column
+
+logger = logging.getLogger(__name__)
 
 
 def op_count(df: pd.DataFrame, what: str, params: dict) -> dict:
@@ -11,6 +15,7 @@ def op_count(df: pd.DataFrame, what: str, params: dict) -> dict:
 
     Returns count and basic stats.
     """
+    logger.debug(f"op_count: what={what}, params={params}, rows={len(df)}")
     count = len(df)
 
     summary = {"count": count}

@@ -4,9 +4,13 @@ Uses event_filters from executor to find events when needed (e.g. consecutive).
 For simple filters (comparison), events come pre-filtered in df.
 """
 
+import logging
+
 import pandas as pd
 
 from agent.operations._utils import find_days_in_streak
+
+logger = logging.getLogger(__name__)
 
 
 def op_around(df: pd.DataFrame, what: str, params: dict) -> dict:
@@ -17,7 +21,10 @@ def op_around(df: pd.DataFrame, what: str, params: dict) -> dict:
         offset: +1 (day after), -1 (day before)
         event_filters: optional list of event filters (e.g. consecutive)
     """
+    logger.debug(f"op_around: what={what}, params={params}, rows={len(df)}")
+
     if df.empty:
+        logger.warning("op_around: empty dataframe")
         return {"rows": [], "summary": {"error": "No data"}}
 
     offset = params.get("offset", 1)

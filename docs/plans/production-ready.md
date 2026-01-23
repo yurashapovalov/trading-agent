@@ -384,7 +384,7 @@ def find_days_in_streak(df: pd.DataFrame, color: str, min_length: int) -> pd.Dat
 - [x] 1.4 Event filtering → warning log вместо silent pass
 
 ### Phase 2: Hardening
-- [ ] 2.1 Add logging to operations
+- [x] 2.1 Add logging to operations
 - [ ] 2.2 Config validation with Pydantic
 - [ ] 2.3 Fix circular imports
 - [ ] 2.4 Standardize error responses
