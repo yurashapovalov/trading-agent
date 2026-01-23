@@ -252,6 +252,5 @@ def _resolve_filters(filters: list[str], symbol: str = "NQ") -> list[str]:
 
 def _resolve_when(when: str, today: date) -> tuple[str, str]:
     """Resolve 'when' to (start_date, end_date)."""
-    # Import here to avoid circular dependency
-    from agent.agents.executor import resolve_date
+    from agent.date_resolver import resolve_date
     return resolve_date(when, today)

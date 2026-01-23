@@ -29,7 +29,8 @@ def op_list(df: pd.DataFrame, what: str, params: dict) -> dict:
 
     col = get_column(what)
     if col not in df.columns:
-        return {"error": f"Column {col} not found"}
+        logger.warning(f"op_list: column {col} not found")
+        return {"rows": [], "summary": {"error": f"Column {col} not found"}}
 
     # Sort and limit
     df_sorted = df.sort_values(col, ascending=ascending).head(n)

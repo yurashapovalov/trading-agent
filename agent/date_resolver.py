@@ -1,185 +1,105 @@
 """
-Resolve parsed period to absolute dates.
+Resolve date strings to absolute date ranges.
 
-Converts Parser output to start/end dates with trading day logic.
+Converts Parser 'when' strings to (start_date, end_date) tuples.
+Used by Planner to create ExecutionPlan with concrete dates.
 """
 
+import re
 from datetime import date, timedelta
-from agent.types import Period
-from agent.config.market.holidays import is_trading_day
 
 
-def resolve_period(
-    period: Period | None,
-    today: date,
-    symbol: str = "NQ",
-) -> tuple[str, str] | None:
+def resolve_date(when: str, today: date | None = None) -> tuple[str, str]:
     """
-    Convert Period to absolute start/end dates.
+    Resolve 'when' string to (start_date, end_date).
+
+    Supports:
+    - Year: "2024"
+    - Month: "2024-01", "January", "January 2024"
+    - Quarter: "Q1 2024", "Q1"
+    - Range: "2020-2024"
+    - Relative: "yesterday", "today", "last week", "last 5 days"
+    - All: "all"
 
     Args:
-        period: Period from Parser (type, value, n, start, end, year, q)
-        today: Today's date
-        symbol: Instrument for trading day calculation
+        when: Date string from Parser atom (e.g., "Q1 2024", "yesterday")
+        today: Reference date (defaults to date.today())
 
     Returns:
         Tuple of (start_date, end_date) as YYYY-MM-DD strings
-        or None if no period specified
     """
-    if not period or not period.type:
-        return None
+    today = today or date.today()
+    when_lower = when.lower().strip()
 
-    if period.type == "relative":
-        return _resolve_relative(period, today, symbol)
+    if when_lower == "all":
+        return "2008-01-01", today.isoformat()
 
-    if period.type == "year":
-        year = int(period.value)
-        return f"{year}-01-01", f"{year}-12-31"
+    # Year: 2024
+    if re.match(r"^\d{4}$", when):
+        year = int(when)
+        end = date(year, 12, 31) if year < today.year else today
+        return f"{year}-01-01", end.isoformat()
 
-    if period.type == "month":
-        # value like "2024-01"
-        year, month = period.value.split("-")
-        year, month = int(year), int(month)
-        # Last day of month
-        if month == 12:
-            last_day = date(year + 1, 1, 1) - timedelta(days=1)
-        else:
-            last_day = date(year, month + 1, 1) - timedelta(days=1)
-        return f"{year}-{month:02d}-01", last_day.isoformat()
+    # Month: 2024-01
+    if m := re.match(r"^(\d{4})-(\d{2})$", when):
+        year, month = int(m.group(1)), int(m.group(2))
+        return date(year, month, 1).isoformat(), _last_day_of_month(year, month).isoformat()
 
-    if period.type == "date":
-        # Single date
-        return period.value, period.value
+    # Month name: January, January 2024
+    months = {
+        "january": 1, "february": 2, "march": 3, "april": 4,
+        "may": 5, "june": 6, "july": 7, "august": 8,
+        "september": 9, "october": 10, "november": 11, "december": 12,
+    }
+    for name, num in months.items():
+        if name in when_lower:
+            year = int(m.group()) if (m := re.search(r"\d{4}", when)) else today.year
+            return date(year, num, 1).isoformat(), _last_day_of_month(year, num).isoformat()
 
-    if period.type == "range":
-        return period.start, period.end
+    # Quarter: Q1 2024
+    if m := re.match(r"Q([1-4])\s*(\d{4})?", when, re.I):
+        q = int(m.group(1))
+        year = int(m.group(2)) if m.group(2) else today.year
+        start_month = (q - 1) * 3 + 1
+        end_month = start_month + 2
+        return date(year, start_month, 1).isoformat(), _last_day_of_month(year, end_month).isoformat()
 
-    if period.type == "quarter":
-        year = period.year
-        q = period.q
-        quarter_starts = {1: "01-01", 2: "04-01", 3: "07-01", 4: "10-01"}
-        quarter_ends = {1: "03-31", 2: "06-30", 3: "09-30", 4: "12-31"}
-        return f"{year}-{quarter_starts[q]}", f"{year}-{quarter_ends[q]}"
+    # Relative
+    if when_lower == "yesterday":
+        d = today - timedelta(days=1)
+        return d.isoformat(), d.isoformat()
 
-    if period.type == "all":
-        # All available data — executor will use default range
-        return None
-
-    return None
-
-
-def _resolve_relative(
-    period: Period,
-    today: date,
-    symbol: str,
-) -> tuple[str, str]:
-    """Resolve relative period to absolute dates."""
-    value = period.value
-
-    if value == "today":
+    if when_lower == "today":
         return today.isoformat(), today.isoformat()
 
-    if value == "yesterday":
-        yesterday = _prev_trading_day(today, symbol)
-        return yesterday.isoformat(), yesterday.isoformat()
+    if when_lower == "last week":
+        start = today - timedelta(days=today.weekday() + 7)
+        return start.isoformat(), (start + timedelta(days=6)).isoformat()
 
-    if value == "day_before_yesterday":
-        day1 = _prev_trading_day(today, symbol)
-        day2 = _prev_trading_day(day1, symbol)
-        return day2.isoformat(), day2.isoformat()
+    # Last N days/weeks/months
+    if m := re.match(r"last\s+(\d+)\s+(days?|weeks?|months?)", when_lower):
+        n = int(m.group(1))
+        unit = m.group(2)
+        if "day" in unit:
+            delta = timedelta(days=n)
+        elif "week" in unit:
+            delta = timedelta(weeks=n)
+        else:
+            delta = timedelta(days=n * 30)
+        return (today - delta).isoformat(), today.isoformat()
 
-    if value == "last_week":
-        # Mon-Fri of previous week
-        # Find last Friday
-        days_since_friday = (today.weekday() - 4) % 7
-        if days_since_friday == 0:
-            days_since_friday = 7  # If today is Friday, go to last Friday
-        last_friday = today - timedelta(days=days_since_friday)
-        last_monday = last_friday - timedelta(days=4)
-        return last_monday.isoformat(), last_friday.isoformat()
+    # Year range: 2020-2024
+    if m := re.match(r"(\d{4})\s*[-–]\s*(\d{4})", when):
+        start_year, end_year = int(m.group(1)), int(m.group(2))
+        end = date(end_year, 12, 31) if end_year < today.year else today
+        return f"{start_year}-01-01", end.isoformat()
 
-    if value == "this_week":
-        # Mon of this week to today
-        days_since_monday = today.weekday()
-        monday = today - timedelta(days=days_since_monday)
-        return monday.isoformat(), today.isoformat()
-
-    if value == "last_n_days":
-        n = period.n or 5
-        start = _n_trading_days_ago(today, n, symbol)
-        end = _prev_trading_day(today, symbol)
-        return start.isoformat(), end.isoformat()
-
-    if value == "last_n_weeks":
-        n = period.n or 1
-        # n weeks * 5 trading days
-        trading_days = n * 5
-        start = _n_trading_days_ago(today, trading_days, symbol)
-        end = _prev_trading_day(today, symbol)
-        return start.isoformat(), end.isoformat()
-
-    if value == "last_month":
-        # Previous calendar month
-        first_of_this_month = date(today.year, today.month, 1)
-        last_of_prev_month = first_of_this_month - timedelta(days=1)
-        first_of_prev_month = date(last_of_prev_month.year, last_of_prev_month.month, 1)
-        return first_of_prev_month.isoformat(), last_of_prev_month.isoformat()
-
-    if value == "last_n_months":
-        n = period.n or 1
-        # Go back n months
-        month = today.month - n
-        year = today.year
-        while month <= 0:
-            month += 12
-            year -= 1
-        start = date(year, month, 1)
-        end = _prev_trading_day(today, symbol)
-        return start.isoformat(), end.isoformat()
-
-    if value == "this_month":
-        first_of_month = date(today.year, today.month, 1)
-        return first_of_month.isoformat(), today.isoformat()
-
-    if value == "ytd":
-        first_of_year = date(today.year, 1, 1)
-        return first_of_year.isoformat(), today.isoformat()
-
-    if value == "mtd":
-        first_of_month = date(today.year, today.month, 1)
-        return first_of_month.isoformat(), today.isoformat()
-
-    if value == "last_year":
-        prev_year = today.year - 1
-        return f"{prev_year}-01-01", f"{prev_year}-12-31"
-
-    if value == "last_n_years":
-        n = period.n or 1
-        start_year = today.year - n
-        end_year = today.year - 1  # Last N complete years
-        return f"{start_year}-01-01", f"{end_year}-12-31"
-
-    if value == "this_year":
-        return f"{today.year}-01-01", today.isoformat()
-
-    # Fallback
-    return today.isoformat(), today.isoformat()
+    # Default: current year
+    return f"{today.year}-01-01", today.isoformat()
 
 
-def _prev_trading_day(d: date, symbol: str) -> date:
-    """Find previous trading day (skip weekends and holidays)."""
-    d = d - timedelta(days=1)
-    while not is_trading_day(symbol, d):
-        d = d - timedelta(days=1)
-    return d
-
-
-def _n_trading_days_ago(d: date, n: int, symbol: str) -> date:
-    """Find date that is N trading days before d."""
-    count = 0
-    current = d
-    while count < n:
-        current = current - timedelta(days=1)
-        if is_trading_day(symbol, current):
-            count += 1
-    return current
+def _last_day_of_month(year: int, month: int) -> date:
+    """Last day of month."""
+    if month == 12:
+        return date(year, 12, 31)
+    return date(year, month + 1, 1) - timedelta(days=1)

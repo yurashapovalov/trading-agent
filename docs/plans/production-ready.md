@@ -385,9 +385,9 @@ def find_days_in_streak(df: pd.DataFrame, color: str, min_length: int) -> pd.Dat
 
 ### Phase 2: Hardening
 - [x] 2.1 Add logging to operations
-- [ ] 2.2 Config validation with Pydantic
-- [ ] 2.3 Fix circular imports
-- [ ] 2.4 Standardize error responses
+- [x] 2.2 Config validation with Pydantic
+- [x] 2.3 Fix circular imports
+- [x] 2.4 Standardize error responses
 
 ### Phase 3: Polish
 - [ ] 3.1 Type hints consistency
