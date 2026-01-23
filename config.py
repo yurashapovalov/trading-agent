@@ -50,28 +50,4 @@ USE_BARB = os.getenv("USE_BARB", "true").lower() == "true"  # Parser+Composer fl
 ANALYST_FAST_MODE = os.getenv("ANALYST_FAST_MODE", "false").lower() == "true"  # Skip JSON/stats, plain text
 USE_PREVIOUS_PARSED = os.getenv("USE_PREVIOUS_PARSED", "true").lower() == "true"  # Pass previous_parsed to Parser for follow-up context
 
-# Trading symbols config
-SYMBOLS = {
-    "CL": {
-        "name": "Crude Oil",
-        "tick_size": 0.01,
-        "tick_value": 10.0,
-        "exchange": "NYMEX",
-        "trading_hours": "18:00-17:00"
-    },
-    "NQ": {
-        "name": "Nasdaq 100 E-mini",
-        "tick_size": 0.25,
-        "tick_value": 5.0,
-        "exchange": "CME",
-        "trading_hours": "18:00-17:00"
-    },
-    "ES": {
-        "name": "S&P 500 E-mini",
-        "tick_size": 0.25,
-        "tick_value": 12.50,
-        "exchange": "CME",
-        "trading_hours": "18:00-17:00"
-    }
-}
-# Auto-deploy configured
+# Trading symbols: use agent/config/market/instruments.py
