@@ -5,9 +5,54 @@ Uses MessagesState for automatic message accumulation.
 Kept simple — complex state goes to Supabase.
 """
 
+from __future__ import annotations
+
+from typing import TypedDict
+
 from langgraph.graph import MessagesState
 from langchain_core.messages import HumanMessage, AIMessage
 
+
+# =============================================================================
+# Type definitions for nested structures
+# =============================================================================
+
+class StepDict(TypedDict, total=False):
+    """Serialized Step from Parser."""
+    id: str
+    operation: str
+    atoms: list[dict]
+    params: dict | None
+    from_: str | None  # alias for "from"
+
+
+class PlanDict(TypedDict, total=False):
+    """Serialized ExecutionPlan from Planner."""
+    step_id: str
+    mode: str
+    operation: str
+    requests: list[dict]
+    params: dict
+    metrics: list[str]
+
+
+class UsageDict(TypedDict, total=False):
+    """Serialized Usage for token tracking."""
+    input_tokens: int
+    output_tokens: int
+    thinking_tokens: int
+    cached_tokens: int
+
+
+class ClarificationTurn(TypedDict):
+    """Single turn in clarification history."""
+    role: str  # "assistant" or "user"
+    content: str
+
+
+# =============================================================================
+# Main State
+# =============================================================================
 
 class TradingState(MessagesState):
     """
@@ -27,7 +72,7 @@ class TradingState(MessagesState):
     question_en: str | None  # Question translated to English
 
     # Parser output
-    parsed_query: dict | None
+    parsed_query: list[StepDict] | None  # Serialized Steps from Parser
     parser_thoughts: str | None  # Parser's reasoning (for Clarifier)
     parser_chunks_used: list[str] | None  # RAP chunks used (for logging)
     parser_cached: bool | None  # Was explicit cache used (for logging)
@@ -39,12 +84,12 @@ class TradingState(MessagesState):
     memory_context: str | None  # Formatted context from ConversationMemory
 
     # Planner output
-    execution_plan: list[dict] | None
+    execution_plan: list[PlanDict] | None  # Serialized ExecutionPlans
     plan_errors: list[str] | None
     plan_warnings: list[str] | None
 
     # Execution results
-    data: dict | None
+    data: list[dict] | None  # Results from Executor
     context: str | None
 
     # Response
@@ -59,7 +104,7 @@ class TradingState(MessagesState):
     # Clarification flow
     awaiting_clarification: bool  # True = waiting for user to clarify
     original_question: str | None  # First question that triggered clarification
-    clarification_history: list[dict] | None  # [{role, content}, ...] turns
+    clarification_history: list[ClarificationTurn] | None  # Clarification turns
     clarified_query: str | None  # Final reformulated query (when clarification done)
     clarifier_question: str | None  # Question Clarifier asked (for relevance check)
 
@@ -68,7 +113,7 @@ class TradingState(MessagesState):
     step_number: int
 
     # Usage (token counts, cost)
-    usage: dict | None  # Stored as dict, convert with Usage.model_validate()
+    usage: UsageDict | None  # Convert with Usage.model_validate()
 
 
 # Alias for compatibility
