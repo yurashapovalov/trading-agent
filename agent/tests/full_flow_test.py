@@ -1,5 +1,5 @@
 """
-Integration test — Intent → Parser → Executor.
+Integration test — Intent → Understander → Parser → Executor.
 
 Usage:
     python -m agent.tests.full_flow_test              # show usage
@@ -72,6 +72,26 @@ QUESTIONS_BY_CATEGORY = {
         "корреляция объёма и волатильности",
         "relationship between overnight range and RTH range",
     ],
+    "patterns": [
+        "show me all doji candles in 2024",
+        "сколько было молотов за последний год",
+        "probability of reversal after evening star",
+        "когда появлялись inside day в 2024",
+        "what happens next day after bullish engulfing",
+        "покажи топ 10 дней с hammer pattern",
+        "how often does morning star predict growth",
+        "найди все bearish engulfing в Q4 2024",
+    ],
+    "holidays": [
+        "how does market behave before thanksgiving",
+        "какая волатильность в black friday",
+        "compare performance before vs after christmas",
+        "average gap on days after memorial day",
+        "probability of green day before labor day",
+        "show range on independence day eve",
+        "что было в день после нового года в 2024",
+        "performance around fomc days in 2024",
+    ],
 }
 
 
@@ -93,6 +113,12 @@ def run_question(question: str, graph=None) -> dict:
         "intent": result.get("intent"),
         "lang": result.get("lang"),
         "question_en": result.get("question_en"),
+        # Understander
+        "goal": result.get("goal"),
+        "understood": result.get("understood"),
+        "expanded_query": result.get("expanded_query"),
+        "need_clarification": result.get("need_clarification"),
+        # Parser
         "steps": result.get("parsed_query", []),
         "plans": result.get("execution_plan", []),
         "thoughts": result.get("parser_thoughts"),
@@ -112,11 +138,26 @@ def run_batch(questions: list[str], label: str = "batch") -> list[dict]:
             result = run_question(q, graph)
             results.append(result)
 
+            # Understander
+            understood = result.get("understood")
+            goal = result.get("goal")
+            expanded = result.get("expanded_query")
+            clarification = result.get("need_clarification")
+
+            if understood:
+                print(f"  → Understander: ✓ goal={goal}")
+                if expanded:
+                    print(f"     expanded: {expanded[:80]}...")
+            else:
+                print(f"  → Understander: ✗ needs clarification")
+                if clarification:
+                    print(f"     question: {clarification.get('question', '?')}")
+
             steps = result.get("steps", [])
             if steps:
                 ops = [s.get("operation", "?") for s in steps]
                 print(f"  → Parser: {', '.join(ops)}")
-            else:
+            elif understood:
                 print(f"  → Parser: no steps")
 
             plans = result.get("plans", [])

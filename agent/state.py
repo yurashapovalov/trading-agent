@@ -71,6 +71,12 @@ class TradingState(MessagesState):
     lang: str | None  # User's language (ISO 639-1: en, ru, es, etc.)
     question_en: str | None  # Question translated to English
 
+    # Understander output
+    goal: str | None  # Why user needs this (sizing stops, compare days, etc.)
+    understood: bool | None  # True if query is clear enough for Parser
+    expanded_query: str | None  # Clear, unambiguous query for Parser
+    need_clarification: dict | None  # {reason, question} if understood=false
+
     # Parser output
     parsed_query: list[StepDict] | None  # Serialized Steps from Parser
     parser_thoughts: str | None  # Parser's reasoning (for Clarifier)

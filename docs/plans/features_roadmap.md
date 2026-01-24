@@ -279,6 +279,27 @@ df["gap_filled"] = gap_up_filled | gap_down_filled
 
 ## Priority 6: Session-specific metrics (3-5 дней)
 
+### 6.0 BUG: Sessions через полночь (OVERNIGHT, ETH, ASIAN)
+
+**Проблема:** Planner генерирует некорректный фильтр для сессий которые переходят через полночь.
+
+**Пример:** OVERNIGHT = ('18:00', '09:30')
+```
+Генерируется: time >= 18:00, time < 09:30  (AND — нет данных!)
+Нужно:        time >= 18:00 OR time < 09:30
+```
+
+**Затронутые сессии:**
+- OVERNIGHT: 18:00 → 09:30
+- ETH: 18:00 → 17:00 (почти круглосуточно)
+- ASIAN: 18:00 → 03:00
+
+**Сложность:** Pedantic валидации и автозамены — нужно аккуратно менять логику фильтров.
+
+**Файлы:** `agent/agents/planner.py`, возможно `agent/rules/` или `agent/data/filters.py`
+
+---
+
 ### 6.1 Метрики по сессиям
 **Вопрос:** "correlation between overnight range and RTH range"
 

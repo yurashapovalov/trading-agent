@@ -16,6 +16,10 @@ from agent.rules import (
     detect_filter_type,
     parse_filters,
     validate_combination,
+    get_min_timeframe_for_pattern_filter,
+    is_timeframe_valid_for_filter,
+    normalize_pattern_filter,
+    get_metric,
 )
 
 
@@ -33,6 +37,26 @@ class Atom(BaseModel):
         default="1D",
         description="Data granularity: 1D for daily, 1H for hourly, 1m for minute"
     )
+
+    # -------------------------------------------------------------------------
+    # Rule: normalize pattern aliases (inside_day → inside_bar)
+    # -------------------------------------------------------------------------
+    @model_validator(mode="after")
+    def normalize_pattern_aliases(self):
+        """Normalize pattern aliases to canonical names from config."""
+        if self.filter:
+            self.filter = normalize_pattern_filter(self.filter)
+        return self
+
+    # -------------------------------------------------------------------------
+    # Rule: fix invalid metric (formation → change)
+    # -------------------------------------------------------------------------
+    @model_validator(mode="after")
+    def fix_invalid_metric(self):
+        """Fix invalid what field to default metric."""
+        if not get_metric(self.what):
+            self.what = "change"
+        return self
 
     # -------------------------------------------------------------------------
     # Rule: session/time filter → intraday timeframe
@@ -73,6 +97,33 @@ class Atom(BaseModel):
             )
         return self
 
+    # -------------------------------------------------------------------------
+    # Rule: pattern filter → minimum timeframe (from rules/filters.py)
+    # -------------------------------------------------------------------------
+    _TF_ORDER: ClassVar[list[str]] = ["1m", "5m", "15m", "30m", "1H", "4H", "1D", "1W"]
+
+    @model_validator(mode="after")
+    def fix_timeframe_for_pattern_filter(self):
+        """Pattern filters may require minimum timeframe — auto-fix if needed."""
+        if not self.filter:
+            return self
+
+        min_tf = get_min_timeframe_for_pattern_filter(self.filter)
+        if not min_tf:
+            return self
+
+        # Check if current timeframe is below minimum
+        if min_tf not in self._TF_ORDER or self.timeframe not in self._TF_ORDER:
+            return self
+
+        current_idx = self._TF_ORDER.index(self.timeframe)
+        min_idx = self._TF_ORDER.index(min_tf)
+
+        if current_idx < min_idx:
+            self.timeframe = min_tf
+
+        return self
+
 
 class StepParams(BaseModel):
     """Operation parameters."""
@@ -103,6 +154,36 @@ class Step(BaseModel):
         if required_tf:
             for atom in self.atoms:
                 atom.timeframe = required_tf
+        return self
+
+    # -------------------------------------------------------------------------
+    # Rule: operation timeframe vs filter timeframe conflict → fix operation
+    # -------------------------------------------------------------------------
+    @model_validator(mode="after")
+    def fix_operation_filter_timeframe_conflict(self):
+        """
+        Fix impossible combination: operation requires timeframe X but filter requires Y.
+
+        Example: formation (1m) + doji (min 1H) → change operation to list.
+        """
+        required_tf = get_required_timeframe(self.operation)
+        if not required_tf:
+            return self
+
+        for atom in self.atoms:
+            if not atom.filter:
+                continue
+
+            # Check if filter is compatible with operation's required timeframe
+            if not is_timeframe_valid_for_filter(required_tf, atom.filter):
+                # Conflict! Fix operation to list and restore proper timeframe
+                self.operation = "list"
+                # Re-apply pattern timeframe (was overwritten by formation)
+                min_tf = get_min_timeframe_for_pattern_filter(atom.filter)
+                if min_tf:
+                    atom.timeframe = min_tf
+                return self
+
         return self
 
     # -------------------------------------------------------------------------
@@ -181,6 +262,15 @@ class Step(BaseModel):
 class ParserOutput(BaseModel):
     """Parser output — list of steps."""
     steps: list[Step] = Field(description="Query steps")
+
+
+# =============================================================================
+# Clarifier Output
+# =============================================================================
+
+class ClarificationOutput(BaseModel):
+    """Clarifier output — formatted question for user."""
+    question: str = Field(description="Natural, friendly question in user's language")
 
 
 # =============================================================================
