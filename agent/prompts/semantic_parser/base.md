@@ -51,8 +51,8 @@ filter (templates with {op} = >, <, >=, <=, =, combine with comma):
   - weekday              # monday, tuesday, wednesday, thursday, friday
   - session              # from <instrument>
   - event                # from <instrument>
-  # Patterns
-  - inside_day, outside_day, doji, gap_fill, higher_high, lower_low
+  # Patterns — use EXACT names from <available_patterns> section
+  - pattern_name         # doji, hammer, inside_bar, etc. from <available_patterns>
 
 group: by month | by weekday | by year | by quarter | by hour | by session
 
@@ -70,10 +70,10 @@ unit (for around): timeframe (1m, 5m, 15m, 30m, 1H, 2H, 4H, 1D, 1W, 1M) | sessio
 - count: aggregate stats (count, avg, min, max) — use for "average", "mean", "how many"
 - compare: compare periods or filters
 - correlation: relationship between two metrics
-- around: what happens before/after event
+- around: what happens before/after event — use for "pattern predict", "after pattern"
 - streak: consecutive patterns
 - distribution: histogram/buckets
-- probability: chance of outcome
+- probability: chance of outcome on SAME day (not next day)
 - formation: when high/low forms during day
 </operations>
 

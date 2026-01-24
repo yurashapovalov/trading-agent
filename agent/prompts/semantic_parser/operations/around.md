@@ -1,7 +1,7 @@
 # around
 
 <description>
-What happened before or after an event.
+What happened before or after an event. Does pattern predict next day movement.
 </description>
 
 <rules>
@@ -31,4 +31,13 @@ What happened before or after an event.
 
 "RTH session after gap down"
 {"steps": [{"id": "s1", "operation": "around", "atoms": [{"when": "2024", "what": "change", "filter": "gap < 0", "timeframe": "1D"}], "params": {"offset": 1, "unit": "RTH"}}]}
+
+"what happened after hammer pattern"
+{"steps": [{"id": "s1", "operation": "around", "atoms": [{"when": "2024", "what": "change", "filter": "hammer", "timeframe": "1D"}], "params": {"offset": 1, "unit": "1D"}}]}
+
+"how often does morning star predict growth"
+{"steps": [{"id": "s1", "operation": "around", "atoms": [{"when": "all", "what": "change", "filter": "morning_star", "timeframe": "1D"}], "params": {"offset": 1, "unit": "1D"}}]}
+
+"does doji predict next day direction"
+{"steps": [{"id": "s1", "operation": "around", "atoms": [{"when": "all", "what": "change", "filter": "doji", "timeframe": "1D"}], "params": {"offset": 1, "unit": "1D"}}]}
 </examples>

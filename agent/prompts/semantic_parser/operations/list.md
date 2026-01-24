@@ -2,10 +2,11 @@
 
 <description>
 Show data matching the query. Default operation when user wants to see values.
+When did pattern appear, find days with pattern, show matching days.
 </description>
 
 <rules>
-- "show", "list", "what was" → list
+- "show", "list", "what was", "find", "when did appear" → list
 - "top N", "best", "worst" → add params n + sort
 - sort=desc for largest, sort=asc for smallest
 </rules>
@@ -39,4 +40,13 @@ Show data matching the query. Default operation when user wants to see values.
 
 "top 10 drops in 2024, show volume for those days"
 {"steps": [{"id": "s1", "operation": "list", "atoms": [{"when": "2024", "what": "change", "timeframe": "1D"}], "params": {"n": 10, "sort": "asc"}}, {"id": "s2", "operation": "list", "atoms": [{"when": "2024", "what": "volume", "timeframe": "1D"}], "from": "s1"}]}
+
+"show all engulfing patterns in 2024"
+{"steps": [{"id": "s1", "operation": "list", "atoms": [{"when": "2024", "what": "change", "filter": "bullish_engulfing", "timeframe": "1D"}]}]}
+
+"когда появлялись inside day в 2024"
+{"steps": [{"id": "s1", "operation": "list", "atoms": [{"when": "2024", "what": "change", "filter": "inside_bar", "timeframe": "1D"}]}]}
+
+"when did doji appear in 2024"
+{"steps": [{"id": "s1", "operation": "list", "atoms": [{"when": "2024", "what": "change", "filter": "doji", "timeframe": "1D"}]}]}
 </examples>

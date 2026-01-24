@@ -149,8 +149,8 @@ class ChunkEmbedder:
     def _compute_all(self):
         """Compute embeddings for all chunks."""
         for chunk_id, content in self.chunks.items():
-            # Use first 500 chars for embedding
-            embed_text = content[:500]
+            # Use first 1000 chars for embedding (includes description + key examples)
+            embed_text = content[:1000]
             self.embeddings[chunk_id] = self._embed(embed_text)
             logger.debug(f"Embedded chunk: {chunk_id}")
 
@@ -204,6 +204,62 @@ class SemanticParserRAP:
         self.embedder = ChunkEmbedder(self.loader.chunks)
         self.retriever = ChunkRetriever(self.embedder)
         self.base_prompt = BASE_PROMPT_PATH.read_text(encoding="utf-8")
+
+    def _build_patterns_context(self) -> str:
+        """Build available patterns context from config (single source of truth)."""
+        from agent.config.patterns import CANDLE_PATTERNS, PRICE_PATTERNS
+
+        lines = ["<available_patterns>"]
+
+        # Group candle patterns by signal
+        by_signal: dict[str, list[str]] = {"bullish": [], "bearish": [], "neutral": []}
+        for name, cfg in CANDLE_PATTERNS.items():
+            signal = cfg.get("signal", "neutral")
+            if signal == "indecision":
+                signal = "neutral"
+            by_signal.setdefault(signal, []).append(name)
+
+        lines.append("Candle patterns (reversal/continuation signals):")
+        if by_signal["bullish"]:
+            lines.append(f"  Bullish: {', '.join(by_signal['bullish'])}")
+        if by_signal["bearish"]:
+            lines.append(f"  Bearish: {', '.join(by_signal['bearish'])}")
+        if by_signal["neutral"]:
+            lines.append(f"  Neutral: {', '.join(by_signal['neutral'])}")
+
+        lines.append("")
+        lines.append("Price patterns (structural):")
+        price_names = list(PRICE_PATTERNS.keys())
+        lines.append(f"  {', '.join(price_names)}")
+
+        lines.append("")
+        lines.append("Legacy: green, red, gap_fill")
+        lines.append("</available_patterns>")
+
+        return "\n".join(lines)
+
+    def _build_holidays_context(self) -> str:
+        """Build holidays context from config (single source of truth)."""
+        from agent.config.market.holidays import HOLIDAY_NAMES
+
+        lines = ["<holidays>"]
+
+        # Full close holidays
+        full_close = [k for k in HOLIDAY_NAMES.keys()
+                      if not k.endswith("_eve") and k not in ("black_friday",)]
+        lines.append("Full close (market closed):")
+        lines.append(f"  {', '.join(full_close)}")
+
+        # Early close holidays
+        early_close = ["christmas_eve", "new_year_eve", "independence_day_eve", "black_friday"]
+        lines.append("Early close (shortened session):")
+        lines.append(f"  {', '.join(early_close)}")
+
+        lines.append("")
+        lines.append("Use event filter: event = thanksgiving, event = christmas, etc.")
+        lines.append("</holidays>")
+
+        return "\n".join(lines)
 
     def _build_instrument_context(self, instrument: str) -> str:
         """Build instrument-specific context for prompt."""
@@ -259,8 +315,10 @@ class SemanticParserRAP:
         ])
 
         instrument_context = self._build_instrument_context(instrument)
+        patterns_context = self._build_patterns_context()
+        holidays_context = self._build_holidays_context()
 
-        prompt = f"{self.base_prompt}\n\n{instrument_context}\n\n<relevant_examples>\n{chunks_text}\n</relevant_examples>"
+        prompt = f"{self.base_prompt}\n\n{instrument_context}\n\n{patterns_context}\n\n{holidays_context}\n\n<relevant_examples>\n{chunks_text}\n</relevant_examples>"
 
         logger.info(f"Built prompt with chunks: {chunk_ids}, instrument: {instrument}")
         return prompt, chunk_ids

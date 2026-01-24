@@ -43,7 +43,7 @@ class Parser:
 
         # Build prompt with relevant chunks via RAP
         rap = get_rap()
-        base_prompt, chunk_ids = rap.build(question, top_k=3)
+        base_prompt, chunk_ids = rap.build(question, top_k=5)
         logger.info(f"Using chunks: {chunk_ids}")
 
         prompt = f"{base_prompt}\n\nQuestion: {question}"

@@ -38,4 +38,7 @@ None
 
 "average morning session range in 2024"
 {"steps": [{"id": "s1", "operation": "count", "atoms": [{"when": "2024", "what": "range", "filter": "session = MORNING", "timeframe": "1D"}]}]}
+
+"how many morning star patterns in 2024"
+{"steps": [{"id": "s1", "operation": "count", "atoms": [{"when": "2024", "what": "change", "filter": "morning_star", "timeframe": "1D"}]}]}
 </examples>
