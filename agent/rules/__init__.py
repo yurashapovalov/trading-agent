@@ -65,6 +65,9 @@ from agent.rules.filters import (
     is_always_where,
     is_always_event,
     get_examples_for_prompt as get_filter_examples,
+    get_min_timeframe_for_pattern_filter,
+    is_timeframe_valid_for_filter,
+    normalize_pattern_filter,
 )
 
 # Metrics
@@ -112,6 +115,7 @@ __all__ = [
     "is_always_where",
     "is_always_event",
     "get_filter_examples",
+    "normalize_pattern_filter",
 
     # Metrics
     "METRICS",

@@ -77,14 +77,13 @@ FILTER_TYPES: dict[str, FilterTypeDef] = {
     },
 
     "pattern": {
-        "description": "Price patterns",
-        "pattern": r"^(inside_day|outside_day|doji|gap_fill|gap_filled|higher_high|lower_low|green|red)$",
+        "description": "Candle and price patterns",
+        # Pattern regex built dynamically from config — see _build_pattern_regex()
+        "pattern": None,  # Set below
         "examples": [
             "inside_day",
-            "outside_day",
             "doji",
-            "gap_fill",
-            "gap_filled",
+            "hammer",
             "green",
             "red",
         ],
@@ -92,6 +91,54 @@ FILTER_TYPES: dict[str, FilterTypeDef] = {
     },
 
 }
+
+
+# =============================================================================
+# Dynamic pattern list from config (single source of truth)
+# =============================================================================
+
+def _get_all_pattern_names() -> set[str]:
+    """Get all pattern names from config + legacy aliases."""
+    from agent.config.patterns import list_all_patterns
+    patterns = set(list_all_patterns())
+    patterns.update({"green", "red", "gap_fill", "gap_filled"})  # legacy
+    patterns.update(PATTERN_ALIASES.keys())  # accept aliases too
+    return patterns
+
+
+# =============================================================================
+# Pattern aliases (user-friendly → config name)
+# =============================================================================
+
+PATTERN_ALIASES: dict[str, str] = {
+    "inside_day": "inside_bar",
+    "outside_day": "outside_bar",
+}
+
+
+def normalize_pattern_filter(filter_str: str) -> str:
+    """Normalize pattern aliases in filter string to canonical names."""
+    if not filter_str:
+        return filter_str
+
+    result = filter_str
+    for alias, canonical in PATTERN_ALIASES.items():
+        # Case-insensitive replacement
+        import re
+        result = re.sub(rf'\b{alias}\b', canonical, result, flags=re.IGNORECASE)
+
+    return result
+
+
+def _build_pattern_regex() -> str:
+    """Build regex for pattern filter from config."""
+    patterns = _get_all_pattern_names()
+    escaped = [re.escape(p) for p in sorted(patterns)]
+    return r"^(" + "|".join(escaped) + r")$"
+
+
+# Set pattern regex from config
+FILTER_TYPES["pattern"]["pattern"] = _build_pattern_regex()
 
 
 # =============================================================================
@@ -160,9 +207,8 @@ def parse_filter(filter_str: str) -> dict | None:
             time_val = "0" + time_val
         return {"type": "time", "op": m.group(1), "value": time_val}
 
-    # Pattern
-    patterns = ["inside_day", "outside_day", "doji", "gap_fill", "gap_filled", "higher_high", "lower_low", "green", "red"]
-    if filter_str in patterns:
+    # Pattern (from config)
+    if filter_str in _get_all_pattern_names():
         return {"type": "pattern", "pattern": filter_str}
 
     return None
@@ -226,3 +272,66 @@ def get_examples_for_prompt(filter_type: str | None = None) -> list[str]:
     for ft in FILTER_TYPES.values():
         examples.extend(ft.get("examples", []))
     return examples
+
+
+# =============================================================================
+# Pattern timeframe validation
+# =============================================================================
+
+# Timeframe order for comparison (smallest to largest)
+_TF_ORDER = ["1m", "5m", "15m", "30m", "1H", "4H", "1D", "1W"]
+
+
+def get_min_timeframe_for_pattern_filter(filter_str: str) -> str | None:
+    """
+    Get minimum required timeframe if filter contains patterns.
+
+    Returns:
+        Minimum timeframe string (e.g., "1H", "1D") or None if no pattern filter.
+    """
+    if not filter_str:
+        return None
+
+    from agent.config.patterns import get_pattern_min_timeframe, get_pattern_type
+
+    parsed = parse_filters(filter_str)
+    min_tf = None
+
+    for f in parsed:
+        if f.get("type") != "pattern":
+            continue
+
+        pattern_name = f.get("pattern")
+        if not pattern_name:
+            continue
+
+        # Legacy patterns (green, red, gap_fill) work on any timeframe
+        if pattern_name in ("green", "red", "gap_fill", "gap_filled"):
+            continue
+
+        # Get min timeframe from config
+        pattern_type = get_pattern_type(pattern_name)
+        if not pattern_type:
+            continue
+
+        pattern_min = get_pattern_min_timeframe(pattern_name)
+
+        # Track highest minimum
+        if min_tf is None:
+            min_tf = pattern_min
+        elif _TF_ORDER.index(pattern_min) > _TF_ORDER.index(min_tf):
+            min_tf = pattern_min
+
+    return min_tf
+
+
+def is_timeframe_valid_for_filter(timeframe: str, filter_str: str) -> bool:
+    """Check if timeframe is valid for pattern filters."""
+    min_tf = get_min_timeframe_for_pattern_filter(filter_str)
+    if min_tf is None:
+        return True
+
+    if timeframe not in _TF_ORDER or min_tf not in _TF_ORDER:
+        return True
+
+    return _TF_ORDER.index(timeframe) >= _TF_ORDER.index(min_tf)

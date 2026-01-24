@@ -365,3 +365,100 @@ class TestFilterSemanticProperties:
     def test_comparison_not_always_where(self):
         """Comparison filters depend on operation."""
         assert is_always_where("comparison") is False
+
+
+# =============================================================================
+# Pattern Timeframe Validation Tests
+# =============================================================================
+
+class TestPatternTimeframeValidation:
+    """Test pattern filter timeframe validation."""
+
+    def test_min_timeframe_for_pattern_filter_none(self):
+        """No pattern filter returns None."""
+        from agent.rules import get_min_timeframe_for_pattern_filter
+        assert get_min_timeframe_for_pattern_filter("change > 0") is None
+        assert get_min_timeframe_for_pattern_filter("monday") is None
+        assert get_min_timeframe_for_pattern_filter("") is None
+        assert get_min_timeframe_for_pattern_filter(None) is None
+
+    def test_min_timeframe_for_legacy_pattern(self):
+        """Legacy patterns (green, red) work on any timeframe."""
+        from agent.rules import get_min_timeframe_for_pattern_filter
+        assert get_min_timeframe_for_pattern_filter("green") is None
+        assert get_min_timeframe_for_pattern_filter("red") is None
+
+    def test_is_timeframe_valid_no_pattern(self):
+        """Non-pattern filters are always valid for any timeframe."""
+        from agent.rules import is_timeframe_valid_for_filter
+        assert is_timeframe_valid_for_filter("1m", "change > 0") is True
+        assert is_timeframe_valid_for_filter("1D", "monday") is True
+
+
+# =============================================================================
+# Pydantic Validator Tests — formation + pattern conflict
+# =============================================================================
+
+class TestFormationPatternConflict:
+    """Test auto-fix for formation + candle pattern conflict."""
+
+    def test_formation_with_candle_pattern_fixes_to_list(self):
+        """Formation + candle pattern (min 1H+) → auto-fix to list."""
+        from agent.types import Step, Atom
+
+        step = Step(
+            id="s1",
+            operation="formation",
+            atoms=[Atom(when="2024", what="high", filter="doji")]
+        )
+        assert step.operation == "list"
+        assert step.atoms[0].timeframe == "1H"
+
+    def test_formation_with_multi_candle_pattern_fixes_to_list(self):
+        """Formation + 3-candle pattern (min 1D) → auto-fix to list."""
+        from agent.types import Step, Atom
+
+        step = Step(
+            id="s1",
+            operation="formation",
+            atoms=[Atom(when="2024", what="high", filter="morning_star")]
+        )
+        assert step.operation == "list"
+        assert step.atoms[0].timeframe == "1D"
+
+    def test_formation_with_price_pattern_stays_formation(self):
+        """Formation + price pattern (works on 1m) → stays formation."""
+        from agent.types import Step, Atom
+
+        step = Step(
+            id="s1",
+            operation="formation",
+            atoms=[Atom(when="2024", what="high", filter="inside_bar")]
+        )
+        assert step.operation == "formation"
+        assert step.atoms[0].timeframe == "1m"
+
+    def test_formation_without_filter_stays_formation(self):
+        """Formation without filter → stays formation."""
+        from agent.types import Step, Atom
+
+        step = Step(
+            id="s1",
+            operation="formation",
+            atoms=[Atom(when="2024", what="high")]
+        )
+        assert step.operation == "formation"
+        assert step.atoms[0].timeframe == "1m"
+
+    def test_list_with_candle_pattern_stays_list(self):
+        """List + candle pattern → stays list (no conflict)."""
+        from agent.types import Step, Atom
+
+        step = Step(
+            id="s1",
+            operation="list",
+            atoms=[Atom(when="2024", what="change", filter="doji")]
+        )
+        assert step.operation == "list"
+        # Default 1D is valid for doji (min 1H), so stays 1D
+        assert step.atoms[0].timeframe == "1D"

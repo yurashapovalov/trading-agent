@@ -551,3 +551,6 @@ def get_related_patterns(name: str) -> list[str]:
     """Get related patterns."""
     pattern = get_candle_pattern(name)
     return pattern.get("related", []) if pattern else []
+
+
+# Timeframe functions moved to __init__.py for DRY (unified access for all pattern types)
