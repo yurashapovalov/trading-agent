@@ -191,6 +191,11 @@ def _load_data_with_semantics(
 
     df = enrich(df)
 
+    # Scan for patterns on daily data (adds is_* columns)
+    if req.timeframe == "1D" and {"open", "high", "low", "close"}.issubset(df.columns):
+        from agent.patterns import scan_patterns_df
+        df = scan_patterns_df(df)
+
     # Parse and split filters by semantics
     all_condition_filters = []
     all_event_filters = []
@@ -335,17 +340,24 @@ def _apply_time(df: pd.DataFrame, f: dict) -> pd.DataFrame:
 
 
 def _apply_pattern(df: pd.DataFrame, f: dict) -> pd.DataFrame:
-    """Apply pattern filter (inside_day, doji, etc.)."""
+    """Apply pattern filter (inside_day, doji, hammer, etc.)."""
     pattern = f.get("pattern")
 
+    # Legacy patterns (computed in enrich)
     if pattern == "green" and "is_green" in df.columns:
-        df = df[df["is_green"]]
-    elif pattern == "red" and "is_green" in df.columns:
-        df = df[~df["is_green"]]
-    elif pattern in ("gap_fill", "gap_filled") and "gap_filled" in df.columns:
-        df = df[df["gap_filled"]]
-    # TODO: implement other patterns (inside_day, doji, etc.)
+        return df[df["is_green"]]
+    if pattern == "red" and "is_green" in df.columns:
+        return df[~df["is_green"]]
+    if pattern in ("gap_fill", "gap_filled") and "gap_filled" in df.columns:
+        return df[df["gap_filled"]]
 
+    # Scanner patterns (is_* columns from scan_patterns)
+    col = f"is_{pattern}"
+    if col in df.columns:
+        return df[df[col] == 1]
+
+    # Pattern not scanned (wrong timeframe or unknown pattern)
+    logger.warning(f"Pattern column '{col}' not found — check timeframe is 1D")
     return df
 
 

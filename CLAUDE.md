@@ -27,11 +27,13 @@ User → Parser → Executor → Presenter → Response
 
 Подробнее: [docs/architecture/](docs/architecture/)
 - [overview.md](docs/architecture/overview.md) — общая картина
-- [agents.md](docs/architecture/agents.md) — Parser, Clarifier, Responder, Presenter
+- [agents.md](docs/architecture/agents.md) — Intent, Parser, Planner, Executor
 - [graph.md](docs/architecture/graph.md) — LangGraph, роутинг, state
 - [memory.md](docs/architecture/memory.md) — token caching, conversation memory
-- [data-layer.md](docs/architecture/data-layer.md) — Executor, operations
+- [data-layer.md](docs/architecture/data-layer.md) — Executor, 9 операций
 - [config.md](docs/architecture/config.md) — паттерны, события, праздники
+- [rules.md](docs/architecture/rules.md) — валидация и auto-fix ошибок LLM
+- [rap.md](docs/architecture/rap.md) — Retrieval-Augmented Prompting
 
 ## Deployment
 
@@ -42,12 +44,14 @@ Auto-deploy on push to `main`. См. [DEPLOY.md](DEPLOY.md)
 ```
 agent/
 ├── agents/        # Parser, Clarifier, Responder, Presenter
-├── prompts/       # LLM промпты
+├── prompts/       # LLM промпты + RAP
 ├── memory/        # Token cache + conversation
-├── operations/    # stats, top_n, compare...
+├── operations/    # list, count, compare, around...
+├── rules/         # Валидация операций и фильтров
 ├── config/        # patterns, events, holidays
 ├── graph.py       # LangGraph
 ├── executor.py    # Query execution
+├── types.py       # Pydantic models + auto-fix validators
 └── tests/         # pytest + integration
 
 docs/
@@ -111,8 +115,11 @@ return None
 ### Done
 - [x] Cleanup артефактов
 - [x] Token caching (73% savings)
-- [x] Unit tests (60 tests)
+- [x] Unit tests (127 tests)
 - [x] Supabase persistence (conversation memory)
+- [x] Patterns integration (30 patterns: candle + price)
+- [x] RAP system (embeddings 1000 chars)
+- [x] Auto-fix validators (operation/filter conflicts)
 
 ### Next
 - [ ] Anomaly Finder (docs/plans/anomaly_finder.md)

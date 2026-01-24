@@ -81,6 +81,11 @@ def resolve_date(when: str, today: date | None = None) -> tuple[str, str]:
         start = today - timedelta(days=today.weekday() + 7)
         return start.isoformat(), (start + timedelta(days=6)).isoformat()
 
+    # Last year / previous year = previous calendar year
+    if when_lower in ("last year", "previous year"):
+        year = today.year - 1
+        return f"{year}-01-01", f"{year}-12-31"
+
     # Last N days/weeks/months
     if m := re.match(r"last\s+(\d+)\s+(days?|weeks?|months?)", when_lower):
         n = int(m.group(1))

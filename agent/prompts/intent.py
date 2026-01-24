@@ -63,6 +63,15 @@ Output: {"intent": "data", "lang": "de", "question_en": "how was last week?"}
 
 Input: ¿cuál fue la volatilidad ayer?
 Output: {"intent": "data", "lang": "es", "question_en": "what was the volatility yesterday?"}
+
+Input: probability of reversal after evening star
+Output: {"intent": "data", "lang": "en", "question_en": "probability of reversal after evening star"}
+
+Input: what happens after doji pattern
+Output: {"intent": "data", "lang": "en", "question_en": "what happens after doji pattern"}
+
+Input: сколько было молотов в 2024
+Output: {"intent": "data", "lang": "ru", "question_en": "how many hammers in 2024"}
 </examples>"""
 
 USER_PROMPT_TEMPLATE = "Input: {question}\nOutput:"

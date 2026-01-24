@@ -25,12 +25,17 @@ ParsedQuery
        │
        ▼
 ┌─────────────┐
-│ filter      │ weekday=Friday, condition="gap > 0"
+│scan_patterns│ добавляем is_doji, is_hammer, is_inside_bar...
 └──────┬──────┘
        │
        ▼
 ┌─────────────┐
-│ operation   │ stats, top_n, compare, seasonality...
+│ filter      │ weekday=Friday, filter="doji", condition="gap > 0"
+└──────┬──────┘
+       │
+       ▼
+┌─────────────┐
+│ operation   │ list, count, compare, around, probability...
 └──────┬──────┘
        │
        ▼
@@ -39,14 +44,19 @@ ParsedQuery
 
 ## Операции
 
+9 операций для анализа данных:
+
 | Операция | Что делает | Пример |
 |----------|------------|--------|
-| **stats** | Базовая статистика | avg, median, green_pct |
-| **top_n** | Топ N записей | "топ 5 волатильных дней" |
+| **list** | Показать данные | "топ 10 по объёму" |
+| **count** | Агрегация | "сколько gap up в 2024" |
 | **compare** | Сравнение групп | "понедельники vs пятницы" |
-| **seasonality** | Сезонность | "лучший месяц" |
+| **correlation** | Связь метрик | "корреляция объёма и волатильности" |
+| **around** | До/после события | "что было после gap up" |
 | **streak** | Серии | "максимальная серия зелёных" |
 | **distribution** | Распределение | "гистограмма доходности" |
+| **probability** | Вероятность | "шанс роста после doji" |
+| **formation** | Время формирования | "когда формируется high дня" |
 
 ## Date Resolver
 
