@@ -42,3 +42,4 @@ data/*.txt
 # SQLite temp files
 *.db-shm
 *.db-wal
+agent/tests/results/
