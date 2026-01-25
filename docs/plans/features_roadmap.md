@@ -279,7 +279,24 @@ df["gap_filled"] = gap_up_filled | gap_down_filled
 
 ## Priority 6: Session-specific metrics (3-5 дней)
 
-### 6.0 BUG: Sessions через полночь (OVERNIGHT, ETH, ASIAN)
+### 6.0 Event filters (holidays, FOMC, etc.)
+
+**Проблема:** Executor не умеет фильтровать по событиям (holidays).
+
+**Пример:** "насколько опасны пятницы перед длинными выходными?"
+- Understander понял: Fridays before thanksgiving, christmas, new_year
+- Parser создал фильтр: `event = thanksgiving`
+- Executor: `Event filter not implemented`
+
+**Нужно:**
+- Реализовать event filters в Executor
+- Поддержать: thanksgiving, christmas, new_year, independence_day, memorial_day, labor_day, fomc
+
+**Файлы:** `agent/agents/executor.py`, `agent/data/filters.py`
+
+---
+
+### 6.1 BUG: Sessions через полночь (OVERNIGHT, ETH, ASIAN)
 
 **Проблема:** Planner генерирует некорректный фильтр для сессий которые переходят через полночь.
 
