@@ -50,8 +50,9 @@ class Clarifier:
         required: list[dict],
         optional: list[dict],
         context: str,
-        original_question: str,
+        question: str,
         lang: str = "en",
+        memory_context: str | None = None,
     ) -> ClarifierResult:
         """
         Formulate clarification question from tezises.
@@ -60,8 +61,9 @@ class Clarifier:
             required: List of required clarification items from Understander
             optional: List of optional clarification items
             context: What Understander already understood
-            original_question: User's original question
+            question: User's question that triggered clarification
             lang: User's language code (e.g., "ru", "en")
+            memory_context: Known facts from conversation memory (to avoid redundant questions)
 
         Returns:
             ClarifierResult with formatted question and usage
@@ -71,8 +73,9 @@ class Clarifier:
             required=required,
             optional=optional,
             context=context or "None",
-            original_question=original_question,
+            question=question,
             lang=lang,
+            memory_context=memory_context or "None",
         )
 
         # Call LLM
@@ -106,8 +109,9 @@ def clarify(
     required: list[dict],
     optional: list[dict],
     context: str,
-    original_question: str,
+    question: str,
     lang: str = "en",
+    memory_context: str | None = None,
 ) -> ClarifierResult:
     """
     Formulate clarification question from tezises.
@@ -115,4 +119,4 @@ def clarify(
     Simple wrapper for Clarifier class.
     """
     clarifier = Clarifier()
-    return clarifier.clarify(required, optional, context, original_question, lang)
+    return clarifier.clarify(required, optional, context, question, lang, memory_context)

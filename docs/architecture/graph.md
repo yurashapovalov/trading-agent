@@ -44,7 +44,7 @@ START
 
 | Нода | Функция | Выход |
 |------|---------|-------|
-| `intent` | `classify_intent` | intent, lang, question_en |
+| `intent` | `classify_intent` | intent, lang, internal_query |
 | `parser` | `parse_question` | parsed_query (steps), thoughts |
 | `planner` | `plan_execution` | execution_plan (requests) |
 | `executor` | `execute_query` | data (results) |
@@ -72,7 +72,7 @@ class AgentState(TypedDict):
     # Intent
     intent: str               # data, chitchat, concept
     lang: str                 # ru, en
-    question_en: str          # вопрос на английском
+    internal_query: str          # вопрос на английском
 
     # Parser
     parsed_query: list[dict]  # steps с atoms

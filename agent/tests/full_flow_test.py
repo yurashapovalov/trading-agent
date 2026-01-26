@@ -1,5 +1,7 @@
 """
-Integration test — Intent → Understander → Parser → Executor.
+Integration test — full graph flow.
+
+Flow: Intent → Understander → Parser → Planner → Executor → Presenter
 
 Usage:
     python -m agent.tests.full_flow_test              # show usage
@@ -96,7 +98,7 @@ QUESTIONS_BY_CATEGORY = {
 
 
 def run_question(question: str, graph=None) -> dict:
-    """Run question through graph: Intent → Parser → Executor."""
+    """Run question through full graph flow."""
     if graph is None:
         graph = build_graph().compile()
 
@@ -112,17 +114,23 @@ def run_question(question: str, graph=None) -> dict:
         "question": question,
         "intent": result.get("intent"),
         "lang": result.get("lang"),
-        "question_en": result.get("question_en"),
+        "internal_query": result.get("internal_query"),
         # Understander
         "goal": result.get("goal"),
         "understood": result.get("understood"),
         "expanded_query": result.get("expanded_query"),
+        "acknowledge": result.get("acknowledge"),
         "need_clarification": result.get("need_clarification"),
         # Parser
         "steps": result.get("parsed_query", []),
+        "parser_raw_output": result.get("parser_raw_output"),
         "plans": result.get("execution_plan", []),
         "thoughts": result.get("parser_thoughts"),
         "data": result.get("data"),
+        # Presenter
+        "response": result.get("response"),
+        "presenter_type": result.get("presenter_type"),
+        "presenter_acknowledge": result.get("presenter_acknowledge"),
         "usage": result.get("usage"),
     }
 
@@ -148,6 +156,9 @@ def run_batch(questions: list[str], label: str = "batch") -> list[dict]:
                 print(f"  → Understander: ✓ goal={goal}")
                 if expanded:
                     print(f"     expanded: {expanded[:80]}...")
+                ack = result.get("acknowledge")
+                if ack:
+                    print(f"     acknowledge: {ack}")
             else:
                 print(f"  → Understander: ✗ needs clarification")
                 if clarification:
@@ -173,6 +184,13 @@ def run_batch(questions: list[str], label: str = "batch") -> list[dict]:
                         print(f"  → Executor: ERROR {summary['error']}")
                     else:
                         print(f"  → Executor: {summary}")
+
+            # Presenter
+            response = result.get("response")
+            if response:
+                ptype = result.get("presenter_type", "?")
+                preview = response[:100].replace("\n", " ")
+                print(f"  → Presenter ({ptype}): {preview}...")
         except Exception as e:
             print(f"  → ERROR: {e}")
             results.append({"question": q, "error": str(e)})
@@ -209,6 +227,12 @@ if __name__ == "__main__":
             question = " ".join(sys.argv[1:])
             result = run_question(question)
             print(json.dumps(result, ensure_ascii=False, indent=2))
+
+            # Save to file
+            os.makedirs("agent/tests/results", exist_ok=True)
+            with open("agent/tests/results/flow_test.json", "w", encoding="utf-8") as f:
+                json.dump(result, f, ensure_ascii=False, indent=2)
+            print(f"\nSaved to: agent/tests/results/flow_test.json")
     else:
         print("Usage:")
         print("  python -m agent.tests.full_flow_test <category>   # run category")

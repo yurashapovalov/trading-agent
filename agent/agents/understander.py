@@ -63,13 +63,25 @@ class UnderstanderOutput(BaseModel):
     understood: bool = Field(
         description="True if query is clear enough for Parser"
     )
+    topic_changed: bool = Field(
+        default=False,
+        description="True if user changed topic (new question, cancellation, chitchat) instead of answering clarification"
+    )
     expanded_query: str | None = Field(
         default=None,
         description="Clear, unambiguous query for Parser. Include operation, metric, period, filters."
     )
+    acknowledge: str | None = Field(
+        default=None,
+        description="REQUIRED when understood=true. Short confirmation in user's language (5-10 words): 'Понял, смотрим волатильность за 2024...'. null only if understood=false."
+    )
     need_clarification: ClarificationRequest | None = Field(
         default=None,
-        description="If understood=false, what to ask"
+        description="If understood=false, structured tezises for Clarifier"
+    )
+    suggested_title: str | None = Field(
+        default=None,
+        description="Short chat title (2-3 words) in user's language. Only generate when needs_title=true."
     )
 
 
@@ -79,8 +91,11 @@ class UnderstanderResult:
     intent: Literal["data", "chitchat", "concept"]
     goal: str | None = None
     understood: bool = False
+    topic_changed: bool = False
     expanded_query: str | None = None
+    acknowledge: str | None = None
     need_clarification: ClarificationRequest | None = None
+    suggested_title: str | None = None
     usage: Usage = field(default_factory=Usage)
 
 
@@ -151,12 +166,33 @@ Price: {', '.join(price)}
 - formation: when high/low forms during day
 </available_operations>"""
 
-    def _build_prompt(self, question: str, instrument: str = "NQ", lang: str = "en") -> str:
+    def _build_prompt(
+        self,
+        question: str,
+        instrument: str = "NQ",
+        lang: str = "en",
+        needs_title: bool = False,
+    ) -> str:
         """Build full prompt with context."""
         base = self._load_base_prompt()
         instrument_ctx = self._build_instrument_context(instrument)
         patterns_ctx = self._build_patterns_context()
         operations_ctx = self._build_operations_context()
+
+        title_instruction = ""
+        if needs_title:
+            title_instruction = """
+<title_needed>
+true
+</title_needed>
+
+Generate a short chat title (2-3 words) in user's language that captures the main topic.
+Examples:
+- "топ 5 волатильных дней" → "Волатильность 2024"
+- "compare monday vs friday" → "Days comparison"
+- "вероятность gap fill" → "Gap анализ"
+- "what happens after red days" → "After red days"
+"""
 
         return f"""{base}
 
@@ -165,7 +201,7 @@ Price: {', '.join(price)}
 {patterns_ctx}
 
 {operations_ctx}
-
+{title_instruction}
 <user_language>
 {lang}
 </user_language>
@@ -174,7 +210,13 @@ Price: {', '.join(price)}
 {question}
 </user_question>"""
 
-    def understand(self, question: str, instrument: str = "NQ", lang: str = "en") -> UnderstanderResult:
+    def understand(
+        self,
+        question: str,
+        instrument: str = "NQ",
+        lang: str = "en",
+        needs_title: bool = False,
+    ) -> UnderstanderResult:
         """
         Understand user question.
 
@@ -182,11 +224,12 @@ Price: {', '.join(price)}
             question: User question (in English, from Intent)
             instrument: Trading instrument
             lang: User's language for clarification questions (e.g., "ru", "en")
+            needs_title: If True, generate suggested_title for chat session
 
         Returns:
             UnderstanderResult with goal, expanded_query or need_clarification
         """
-        prompt = self._build_prompt(question, instrument, lang)
+        prompt = self._build_prompt(question, instrument, lang, needs_title)
 
         response = self.client.models.generate_content(
             model=self.model,
@@ -212,14 +255,22 @@ Price: {', '.join(price)}
             intent=output.intent,
             goal=output.goal,
             understood=output.understood,
+            topic_changed=output.topic_changed,
             expanded_query=output.expanded_query,
+            acknowledge=output.acknowledge,
             need_clarification=output.need_clarification,
+            suggested_title=output.suggested_title,
             usage=usage,
         )
 
 
 # Simple API
-def understand(question: str, instrument: str = "NQ", lang: str = "en") -> UnderstanderResult:
+def understand(
+    question: str,
+    instrument: str = "NQ",
+    lang: str = "en",
+    needs_title: bool = False,
+) -> UnderstanderResult:
     """Understand user question."""
     understander = Understander()
-    return understander.understand(question, instrument, lang)
+    return understander.understand(question, instrument, lang, needs_title)

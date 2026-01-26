@@ -296,7 +296,26 @@ df["gap_filled"] = gap_up_filled | gap_down_filled
 
 ---
 
-### 6.1 BUG: Sessions через полночь (OVERNIGHT, ETH, ASIAN)
+### 6.1 BUG: "days" → hourly bars вместо daily aggregation
+
+**Проблема:** Запрос "top 5 most volatile days" возвращает топ 5 **часов**, а не дней.
+
+**Пример:** "топ 5 самых волатильных дней 2024"
+- Understander: `expanded_query: "list top 5 days by range descending in 2024 during RTH"`
+- Parser: `timeframe: "1H"` ← должен быть daily или aggregation
+- Результат: 2 записи от одного дня (18 декабря 14:00 и 15:00)
+
+**Ожидаемое поведение:**
+- "days" → агрегация до дневного уровня
+- Один день = одна строка с daily range
+
+**Файлы:** `agent/agents/parser.py`, возможно `agent/agents/planner.py`
+
+**Диагностика:** Добавить в тест вывод промежуточных шагов (validation, pydantic)
+
+---
+
+### 6.2 BUG: Sessions через полночь (OVERNIGHT, ETH, ASIAN)
 
 **Проблема:** Planner генерирует некорректный фильтр для сессий которые переходят через полночь.
 

@@ -21,6 +21,7 @@ from agent.rules import (
     normalize_pattern_filter,
     get_metric,
 )
+from agent.validation_tracking import track_change
 
 
 # =============================================================================
@@ -45,7 +46,16 @@ class Atom(BaseModel):
     def normalize_pattern_aliases(self):
         """Normalize pattern aliases to canonical names from config."""
         if self.filter:
+            old_filter = self.filter
             self.filter = normalize_pattern_filter(self.filter)
+            if self.filter != old_filter:
+                track_change(
+                    validator="normalize_pattern_aliases",
+                    field="filter",
+                    old_value=old_filter,
+                    new_value=self.filter,
+                    reason="normalized pattern alias to canonical name",
+                )
         return self
 
     # -------------------------------------------------------------------------
@@ -55,7 +65,15 @@ class Atom(BaseModel):
     def fix_invalid_metric(self):
         """Fix invalid what field to default metric."""
         if not get_metric(self.what):
+            old_what = self.what
             self.what = "change"
+            track_change(
+                validator="fix_invalid_metric",
+                field="what",
+                old_value=old_what,
+                new_value="change",
+                reason=f"'{old_what}' is not a valid metric",
+            )
         return self
 
     # -------------------------------------------------------------------------
@@ -73,6 +91,13 @@ class Atom(BaseModel):
         needs_intraday = filter_type == "time" or "session" in self.filter.lower()
 
         if needs_intraday and self.timeframe == "1D":
+            track_change(
+                validator="fix_timeframe_for_intraday_filter",
+                field="timeframe",
+                old_value="1D",
+                new_value="1H",
+                reason=f"filter '{self.filter}' requires intraday data",
+            )
             self.timeframe = "1H"
         return self
 
@@ -120,7 +145,15 @@ class Atom(BaseModel):
         min_idx = self._TF_ORDER.index(min_tf)
 
         if current_idx < min_idx:
+            old_tf = self.timeframe
             self.timeframe = min_tf
+            track_change(
+                validator="fix_timeframe_for_pattern_filter",
+                field="timeframe",
+                old_value=old_tf,
+                new_value=min_tf,
+                reason=f"pattern in filter requires minimum timeframe {min_tf}",
+            )
 
         return self
 
@@ -153,7 +186,15 @@ class Step(BaseModel):
         required_tf = get_required_timeframe(self.operation)
         if required_tf:
             for atom in self.atoms:
-                atom.timeframe = required_tf
+                if atom.timeframe != required_tf:
+                    track_change(
+                        validator="fix_timeframe_for_operation",
+                        field="timeframe",
+                        old_value=atom.timeframe,
+                        new_value=required_tf,
+                        reason=f"operation '{self.operation}' requires timeframe {required_tf}",
+                    )
+                    atom.timeframe = required_tf
         return self
 
     # -------------------------------------------------------------------------
@@ -177,11 +218,27 @@ class Step(BaseModel):
             # Check if filter is compatible with operation's required timeframe
             if not is_timeframe_valid_for_filter(required_tf, atom.filter):
                 # Conflict! Fix operation to list and restore proper timeframe
+                old_operation = self.operation
                 self.operation = "list"
+                track_change(
+                    validator="fix_operation_filter_timeframe_conflict",
+                    field="operation",
+                    old_value=old_operation,
+                    new_value="list",
+                    reason=f"filter '{atom.filter}' incompatible with {old_operation} timeframe {required_tf}",
+                )
                 # Re-apply pattern timeframe (was overwritten by formation)
                 min_tf = get_min_timeframe_for_pattern_filter(atom.filter)
                 if min_tf:
+                    old_tf = atom.timeframe
                     atom.timeframe = min_tf
+                    track_change(
+                        validator="fix_operation_filter_timeframe_conflict",
+                        field="timeframe",
+                        old_value=old_tf,
+                        new_value=min_tf,
+                        reason=f"restored timeframe for pattern filter",
+                    )
                 return self
 
         return self
@@ -246,15 +303,43 @@ class Step(BaseModel):
         # Apply defaults only if not already set
         if defaults.get("sort") and self.params.sort is None:
             self.params.sort = defaults["sort"]
+            track_change(
+                validator="set_default_params",
+                field="params.sort",
+                old_value=None,
+                new_value=defaults["sort"],
+                reason=f"default for operation '{self.operation}'",
+            )
 
         if defaults.get("offset") and self.params.offset is None:
             self.params.offset = defaults["offset"]
+            track_change(
+                validator="set_default_params",
+                field="params.offset",
+                old_value=None,
+                new_value=defaults["offset"],
+                reason=f"default for operation '{self.operation}'",
+            )
 
         if defaults.get("outcome") and self.params.outcome is None:
             self.params.outcome = defaults["outcome"]
+            track_change(
+                validator="set_default_params",
+                field="params.outcome",
+                old_value=None,
+                new_value=defaults["outcome"],
+                reason=f"default for operation '{self.operation}'",
+            )
 
         if defaults.get("n") and self.params.n is None:
             self.params.n = defaults["n"]
+            track_change(
+                validator="set_default_params",
+                field="params.n",
+                old_value=None,
+                new_value=defaults["n"],
+                reason=f"default for operation '{self.operation}'",
+            )
 
         return self
 

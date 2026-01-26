@@ -35,8 +35,8 @@ class IntentOutput(BaseModel):
     lang: str = Field(
         description="ISO 639-1 language code (en, ru, es, de, zh, etc.)"
     )
-    question_en: str = Field(
-        description="Question translated to English for internal processing"
+    internal_query: str = Field(
+        description="Question translated to English for inter-agent communication"
     )
 
 
@@ -45,7 +45,7 @@ class IntentResult:
     """Intent classification result with language info."""
     intent: Literal["chitchat", "concept", "data"]
     lang: str  # ISO 639-1 code
-    question_en: str  # Translated to English
+    internal_query: str  # Translated to English for inter-agent communication
     usage: Usage = None
 
     def __post_init__(self):
@@ -92,7 +92,7 @@ class IntentClassifier:
         return IntentResult(
             intent=output.intent,
             lang=output.lang,
-            question_en=output.question_en,
+            internal_query=output.internal_query,
             usage=usage,
         )
 

@@ -1,11 +1,14 @@
 """
-Responder agent — handles chitchat and concept explanations.
+Responder agent — handles non-data queries.
 
-Single responsibility: respond to non-data queries.
+Single responsibility: respond to anything that's not a data query,
+always steering conversation back to the domain.
 
 Handles:
-- chitchat: greetings, thanks, goodbye
-- concept: explain trading terms (OPEX, RTH, volatility, etc.)
+- Greetings, thanks, goodbye
+- Trading concept explanations
+- Cancellations ("забей", "неважно")
+- Off-topic redirects (politely declines, steers back)
 
 Uses:
 - prompts/responder.py for prompt constants
@@ -35,21 +38,15 @@ class ResponderResult:
 
 class Responder:
     """
-    Handles casual conversation and concept explanations.
+    Handles non-data queries with domain focus.
 
-    For non-data queries: chitchat and trading concepts.
-    Data presentation is handled by Presenter.
+    Always steers conversation back to trading/market analysis.
+    Politely declines off-topic questions.
 
     Usage:
         responder = Responder()
-
-        # Chitchat
-        result = responder.respond("привет", intent="chitchat")
-        # → "Привет! Чем помочь с анализом NQ?"
-
-        # Concept
-        result = responder.respond("что такое OPEX", intent="concept", topic="OPEX")
-        # → "OPEX — день экспирации опционов..."
+        result = responder.respond("привет", lang="ru")
+        # → "Привет! Могу помочь с анализом NQ..."
     """
 
     def __init__(self, symbol: str = "NQ", model: str | None = None):
@@ -57,22 +54,12 @@ class Responder:
         self.model = model or config.GEMINI_LITE_MODEL
         self.symbol = symbol
 
-    def respond(
-        self,
-        question: str,
-        intent: str = "chitchat",
-        subtype: str = "greeting",
-        topic: str = "",
-        lang: str = "en",
-    ) -> ResponderResult:
+    def respond(self, question: str, lang: str = "en") -> ResponderResult:
         """
-        Generate response for chitchat or concept query.
+        Generate response for non-data query.
 
         Args:
             question: User's question
-            intent: "chitchat" or "concept"
-            subtype: For chitchat - "greeting", "thanks", "goodbye"
-            topic: For concept - the term to explain
             lang: ISO 639-1 language code (en, ru, es, etc.)
 
         Returns:
@@ -80,13 +67,7 @@ class Responder:
         """
         # Build prompts
         system = SYSTEM_PROMPT.format(symbol=self.symbol)
-        user = USER_PROMPT.format(
-            intent=intent,
-            subtype=subtype,
-            topic=topic or self._extract_topic(question),
-            question=question,
-            lang=lang,
-        )
+        user = USER_PROMPT.format(question=question, lang=lang)
 
         # Call LLM
         response = self.client.models.generate_content(
@@ -101,38 +82,19 @@ class Responder:
         usage = Usage.from_response(response)
         return ResponderResult(text=response.text.strip(), usage=usage)
 
-    def _extract_topic(self, question: str) -> str:
-        """Extract topic from concept question."""
-        # Simple extraction: remove common prefixes
-        q = question.lower()
-        for prefix in ["что такое ", "what is ", "what's ", "explain "]:
-            if q.startswith(prefix):
-                return question[len(prefix):].strip("?").strip()
-        return question
-
 
 # =============================================================================
 # Simple API
 # =============================================================================
 
-def respond(
-    question: str,
-    intent: str = "chitchat",
-    subtype: str = "greeting",
-    topic: str = "",
-    lang: str = "en",
-    symbol: str = "NQ",
-) -> ResponderResult:
+def respond(question: str, lang: str = "en", symbol: str = "NQ") -> ResponderResult:
     """
-    Generate response for chitchat or concept.
+    Generate response for non-data query.
 
     Simple wrapper for Responder class.
 
     Args:
         question: User's question
-        intent: "chitchat" or "concept"
-        subtype: For chitchat - "greeting", "thanks", "goodbye"
-        topic: For concept - the term to explain
         lang: ISO 639-1 language code (en, ru, es, etc.)
         symbol: Trading symbol
 
@@ -140,4 +102,4 @@ def respond(
         ResponderResult with text and usage
     """
     responder = Responder(symbol=symbol)
-    return responder.respond(question, intent, subtype, topic, lang)
+    return responder.respond(question, lang)

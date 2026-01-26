@@ -47,6 +47,7 @@ You receive from Understander:
 6. Keep it SHORT — one question, maybe two
 7. ALWAYS respond in user's language (from <user_language>)
 8. Options should sound natural in user's language, not literal translation
+9. If memory_context contains relevant info, DON'T ask about it — it's already known
 </rules>
 
 <examples>
@@ -116,12 +117,17 @@ Context: {context}
 {lang}
 </user_language>
 
-<original_question>
-{original_question}
-</original_question>
+<question>
+{question}
+</question>
+
+<memory_context>
+{memory_context}
+</memory_context>
 
 Formulate a natural, friendly question based on the tezises above.
 Focus on required items. Use context to frame naturally.
+If memory_context contains info about user preferences — don't ask about those.
 Respond in {lang}.
 
 Return JSON with "question" field."""

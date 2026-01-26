@@ -245,6 +245,9 @@ class DataResponse:
     1. acknowledge - shown before DataCard ("Понял, получаю...")
     2. title - DataCard title
     3. summary - shown after DataCard ("Вот 21 день...")
+
+    Note: If context_compacted=true is passed, the LLM will include a brief
+    warning in the summary about possibly not recalling old conversation details.
     """
 
     acknowledge: str  # "Понял, получаю волатильность за 2024..."
@@ -316,6 +319,7 @@ class Presenter:
         data: dict,
         question: str = "",
         lang: str = "en",
+        context_compacted: bool = False,
     ) -> DataResponse:
         """
         Format data for user presentation.
@@ -324,6 +328,7 @@ class Presenter:
             data: Query result from executor (rows, row_count, result, etc.)
             question: User's original question
             lang: User's language (ISO 639-1 code from IntentClassifier)
+            context_compacted: True if conversation memory was compacted (old messages removed)
 
         Returns:
             DataResponse with acknowledge, title, summary
@@ -343,7 +348,7 @@ class Presenter:
         # If we have summary — use it for answer generation
         if summary:
             return self._present_with_summary(
-                original_question, rows, columns, summary, lang
+                original_question, rows, columns, summary, lang, context_compacted
             )
 
         # No data
@@ -359,7 +364,7 @@ class Presenter:
 
         # Single row — natural summary, no table
         if row_count == 1:
-            summary = self._summarize_single(rows[0], columns, original_question, lang)
+            summary = self._summarize_single(rows[0], columns, original_question, lang, context_compacted)
             return DataResponse(
                 acknowledge=self._generate_acknowledge(original_question, lang),
                 title=None,
@@ -370,7 +375,7 @@ class Presenter:
 
         # Small dataset (2-5 rows) — summary + table
         if row_count <= self.INLINE_THRESHOLD:
-            summary = self._summarize_small(rows, columns, original_question, lang)
+            summary = self._summarize_small(rows, columns, original_question, lang, context_compacted)
             table = self._format_table(rows, columns)
             summary_with_table = f"{summary}\n\n{table}"
             return DataResponse(
@@ -395,7 +400,7 @@ class Presenter:
 
         # Generate summary with LLM using context
         if full_context:
-            text = self._generate_summary(original_question, row_count, full_context, lang)
+            text = self._generate_summary(original_question, row_count, full_context, lang, context_compacted)
         else:
             text = TEMPLATES["large_data"].get(lang, TEMPLATES["large_data"]["en"]).format(row_count=row_count)
 
@@ -414,6 +419,7 @@ class Presenter:
         columns: list[str],
         summary: dict,
         lang: str,
+        context_compacted: bool = False,
     ) -> DataResponse:
         """
         Present data using pre-computed summary.
@@ -426,7 +432,7 @@ class Presenter:
 
         # Generate acknowledge and summary text
         acknowledge = self._generate_acknowledge(question, lang)
-        text = self._generate_summary_answer(question, summary, lang)
+        text = self._generate_summary_answer(question, summary, lang, context_compacted)
 
         # Small table (≤5 rows) — table first, then summary
         if row_count > 0 and row_count <= self.INLINE_THRESHOLD:
@@ -465,6 +471,7 @@ class Presenter:
         question: str,
         summary: dict,
         lang: str,
+        context_compacted: bool = False,
     ) -> str:
         """Generate text answer from pre-computed summary using LLM."""
         import json
@@ -477,6 +484,7 @@ class Presenter:
             summary=summary_str,
             lang=lang,
             instrument=self.instrument_context,
+            context_compacted=str(context_compacted).lower(),
         )
 
         try:
@@ -531,6 +539,7 @@ class Presenter:
         columns: list[str],
         question: str,
         lang: str,
+        context_compacted: bool = False,
     ) -> str:
         """Generate summary for single row using LLM with context."""
         # Count flags from SQL (patterns)
@@ -546,7 +555,7 @@ class Presenter:
 
         if full_context:
             # Use LLM to write natural summary
-            return self._generate_summary_short(question, 1, full_context, lang, date_val)
+            return self._generate_summary_short(question, 1, full_context, lang, date_val, context_compacted)
 
         # Fallback — simple template
         if lang == "ru":
@@ -559,6 +568,7 @@ class Presenter:
         columns: list[str],
         question: str,
         lang: str,
+        context_compacted: bool = False,
     ) -> str:
         """Generate summary for small dataset (2-5 rows) using LLM with context."""
         row_count = len(rows)
@@ -575,7 +585,7 @@ class Presenter:
 
         if full_context:
             # Use LLM to write natural summary
-            return self._generate_summary_short(question, row_count, full_context, lang)
+            return self._generate_summary_short(question, row_count, full_context, lang, None, context_compacted)
 
         # Fallback — simple template
         if lang == "ru":
@@ -589,6 +599,7 @@ class Presenter:
         flags_context: str,
         lang: str,
         date_val: str | None = None,
+        context_compacted: bool = False,
     ) -> str:
         """Generate short summary (1 sentence) for small datasets."""
         date_info = f", date: {date_val}" if date_val else ""
@@ -598,6 +609,7 @@ class Presenter:
             date_info=date_info,
             flags_context=flags_context,
             lang=lang,
+            context_compacted=str(context_compacted).lower(),
         )
 
         try:
@@ -693,6 +705,7 @@ class Presenter:
         row_count: int,
         flags_context: str,
         lang: str,
+        context_compacted: bool = False,
     ) -> str:
         """Generate data summary using LLM with flags as context.
 
@@ -704,6 +717,7 @@ class Presenter:
             row_count=row_count,
             flags_context=flags_context,
             lang=lang,
+            context_compacted=str(context_compacted).lower(),
         )
 
         try:
@@ -725,7 +739,13 @@ class Presenter:
 # SIMPLE API
 # =============================================================================
 
-def present(question: str, data: dict, symbol: str = "NQ", lang: str = "en") -> str:
+def present(
+    question: str,
+    data: dict,
+    symbol: str = "NQ",
+    lang: str = "en",
+    context_compacted: bool = False,
+) -> str:
     """
     Format data for user presentation.
 
@@ -736,6 +756,7 @@ def present(question: str, data: dict, symbol: str = "NQ", lang: str = "en") -> 
         data: Executor result dict
         symbol: Trading symbol
         lang: User's language (ISO 639-1 code)
+        context_compacted: True if conversation memory was compacted
 
     Returns:
         Formatted text string
@@ -764,5 +785,5 @@ def present(question: str, data: dict, symbol: str = "NQ", lang: str = "en") -> 
 
     # Data intent — use Presenter
     presenter = Presenter(symbol=symbol)
-    response = presenter.present(data, question, lang)
+    response = presenter.present(data, question, lang, context_compacted)
     return response.text

@@ -15,6 +15,12 @@ from google.genai import types
 import config
 from agent.types import Usage, ParserOutput, Step
 from agent.prompts.semantic_parser.rap import get_rap
+from agent.validation_tracking import (
+    ValidatorChange,
+    start_tracking,
+    stop_tracking,
+    reconstruct_paths,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +31,9 @@ class ParseResult:
     steps: list[Step] = field(default_factory=list)
     thoughts: str | None = None
     usage: Usage = field(default_factory=Usage)
+    raw_output: dict | None = None  # LLM output before validation
+    validator_changes: list[ValidatorChange] = field(default_factory=list)  # What validators changed
+    chunk_ids: list[str] = field(default_factory=list)  # RAP chunks used for prompt
 
 
 class Parser:
@@ -72,10 +81,36 @@ class Parser:
 
         # Parse response with Pydantic
         steps = []
+        raw_output = None
+        validator_changes = []
+
         if response_text:
             try:
-                parsed = ParserOutput.model_validate_json(response_text)
-                steps = parsed.steps
+                # Save raw output before validation
+                raw_output = json.loads(response_text)
+                logger.debug(f"Raw LLM output: {json.dumps(raw_output, indent=2)}")
+
+                # Track validator changes during Pydantic validation
+                validator_changes = start_tracking()
+                try:
+                    parsed = ParserOutput.model_validate_json(response_text)
+                    steps = parsed.steps
+                finally:
+                    stop_tracking()
+
+                # Reconstruct full paths for changes
+                if validator_changes and raw_output:
+                    validator_changes = reconstruct_paths(raw_output, parsed, validator_changes)
+
+                # Log changes for debugging
+                if validator_changes:
+                    logger.info(f"Validators made {len(validator_changes)} change(s)")
+                    for c in validator_changes:
+                        logger.debug(
+                            f"  [{c.validator}] {c.path or c.field}: "
+                            f"{c.old_value} → {c.new_value} ({c.reason})"
+                        )
+
             except json.JSONDecodeError as e:
                 logger.error(f"Invalid JSON from LLM: {e}")
                 logger.debug(f"Response was: {response_text}")
@@ -85,4 +120,11 @@ class Parser:
 
         usage = Usage.from_response(response)
 
-        return ParseResult(steps=steps, thoughts=thoughts, usage=usage)
+        return ParseResult(
+            steps=steps,
+            thoughts=thoughts,
+            usage=usage,
+            raw_output=raw_output,
+            validator_changes=validator_changes,
+            chunk_ids=chunk_ids,
+        )
