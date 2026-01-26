@@ -65,22 +65,28 @@ class TradingState(MessagesState):
     # Session identification (for Supabase lookups)
     session_id: str
     user_id: str
+    request_id: str | None  # Unique ID for this request (for logging)
 
     # Intent classification
     intent: str | None
     lang: str | None  # User's language (ISO 639-1: en, ru, es, etc.)
-    question_en: str | None  # Question translated to English
+    internal_query: str | None  # Question translated to English
 
     # Understander output
     goal: str | None  # Why user needs this (sizing stops, compare days, etc.)
     understood: bool | None  # True if query is clear enough for Parser
     expanded_query: str | None  # Clear, unambiguous query for Parser
+    acknowledge: str | None  # Short confirmation in user's language (from Understander)
     need_clarification: dict | None  # {reason, question} if understood=false
+    suggested_title: str | None  # Short chat title (2-3 words) from Understander
+    needs_title: bool  # True if chat session needs a title
 
     # Parser output
     parsed_query: list[StepDict] | None  # Serialized Steps from Parser
     parser_thoughts: str | None  # Parser's reasoning (for Clarifier)
+    parser_raw_output: dict | None  # LLM output before Pydantic validation
     parser_chunks_used: list[str] | None  # RAP chunks used (for logging)
+    parser_validator_changes: list[dict] | None  # What Pydantic validators changed
     parser_cached: bool | None  # Was explicit cache used (for logging)
 
     # Clarifier output
@@ -88,6 +94,7 @@ class TradingState(MessagesState):
 
     # Memory
     memory_context: str | None  # Formatted context from ConversationMemory
+    context_compacted: bool  # True if conversation memory was compacted (old messages summarized)
 
     # Planner output
     execution_plan: list[PlanDict] | None  # Serialized ExecutionPlans
@@ -106,6 +113,7 @@ class TradingState(MessagesState):
     presenter_title: str | None
     presenter_summary: str | None
     presenter_type: str | None
+    presenter_row_count: int | None  # Number of rows (for UI logic)
 
     # Clarification flow
     awaiting_clarification: bool  # True = waiting for user to clarify
@@ -113,6 +121,7 @@ class TradingState(MessagesState):
     clarification_history: list[ClarificationTurn] | None  # Clarification turns
     clarified_query: str | None  # Final reformulated query (when clarification done)
     clarifier_question: str | None  # Question Clarifier asked (for relevance check)
+    topic_changed: bool  # True = user changed topic instead of answering clarification
 
     # Tracking
     agents_used: list[str]

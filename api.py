@@ -27,7 +27,6 @@ from typing import Optional
 from supabase import create_client
 
 from data import get_data_info, init_database
-from agent.logging.supabase import init_chat_log, complete_chat_log, log_trace_step
 import config
 
 
@@ -490,78 +489,44 @@ def get_or_create_chat_session(user_id: str, chat_id: str | None) -> str:
     return result.data[0]["id"]
 
 
-async def maybe_generate_chat_title(chat_id: str) -> str | None:
-    """Generate chat title if this is the 2nd or 3rd message and no title yet.
-    Returns the new title if generated, None otherwise."""
+def check_needs_title(chat_id: str) -> bool:
+    """Check if chat session needs a title (title is NULL)."""
     if not supabase:
-        return None
+        return False
 
     try:
-        # Check if title already exists
-        chat_result = supabase.table("chat_sessions") \
+        result = supabase.table("chat_sessions") \
             .select("title") \
             .eq("id", chat_id) \
             .execute()
 
-        current_title = chat_result.data[0].get("title") if chat_result.data else None
-        # Skip if already has a real title (not "New Chat")
-        if current_title and not current_title.startswith("New Chat"):
-            return None  # Already has custom title
+        if not result.data:
+            return False
 
-        # Count messages in this chat
-        count_result = supabase.table("chat_logs") \
-            .select("id", count="exact") \
-            .eq("chat_id", chat_id) \
-            .execute()
+        title = result.data[0].get("title")
+        return title is None or title == ""
+    except Exception as e:
+        print(f"Failed to check title: {e}")
+        return False
 
-        message_count = count_result.count or 0
 
-        # Generate title after 2-3 messages
-        if message_count < 2:
-            return None
+async def save_chat_title(chat_id: str, title: str) -> str | None:
+    """Save suggested title to chat session. Returns title if saved."""
+    if not supabase or not title:
+        return None
 
-        # Get first 3 messages for title generation
-        messages_result = supabase.table("chat_logs") \
-            .select("question, response") \
-            .eq("chat_id", chat_id) \
-            .order("created_at") \
-            .limit(3) \
-            .execute()
+    try:
+        # Truncate to 40 chars
+        title = title.strip()[:40]
 
-        if not messages_result.data:
-            return None
-
-        # Generate title using Gemini
-        from google import genai
-        client = genai.Client(api_key=config.GOOGLE_API_KEY)
-
-        messages_text = "\n".join([
-            f"User: {m['question']}\nAssistant: {m.get('response', '')[:200]}"
-            for m in messages_result.data
-        ])
-
-        response = client.models.generate_content(
-            model="gemini-2.0-flash-lite",  # Fast model for simple task
-            contents=f"""Generate a short title (3-5 words, max 40 chars) for this chat conversation.
-The title should capture the main topic. Use the SAME LANGUAGE as the conversation.
-Reply with ONLY the title, no quotes or explanation.
-
-Conversation:
-{messages_text}""",
-        )
-
-        title = response.text.strip()[:40]
-
-        # Update chat session with title
         supabase.table("chat_sessions") \
             .update({"title": title}) \
             .eq("id", chat_id) \
             .execute()
 
         return title
-
     except Exception as e:
-        print(f"Failed to generate chat title: {e}")
+        print(f"Failed to save chat title: {e}")
         return None
 
 
@@ -603,126 +568,49 @@ async def chat_stream(request: ChatRequest, user_id: str = Depends(require_auth)
     SSE event types:
     - step_start: agent starting work
     - step_end: agent finished
-    - sql_executed: SQL query result
     - text_delta: streaming text
-    - validation: validation result
-    - suggestions: clarification options (quick-reply buttons)
     - usage: token usage
     - done: completion (includes chat_id for frontend)
+
+    Logging is handled by TradingGraph (init_chat_log, log_trace_step, complete_chat_log).
     """
     import asyncio
-    import uuid
-    from agent.graph import trading_graph
+    from agent.trading_graph import trading_graph
 
     # Get or create chat session
     chat_id = get_or_create_chat_session(user_id, request.chat_id)
 
-    # NOTE: chat_history is NOT loaded for LLM context anymore!
-    # Memory module handles conversation context (agent/memory/).
-    # Supabase is only used for UI history display and analytics.
+    # Check if chat needs a title (first message)
+    needs_title = check_needs_title(chat_id)
 
     async def generate():
-        final_text = ""
-        usage_data = {}
-        request_id = str(uuid.uuid4())
-        route = None
-        agents_used = []
-        validation_attempts = 0
-        validation_passed = None
-        step_number = 0
-
-        # Create chat_log entry FIRST so traces can reference it via FK
-        await init_chat_log(
-            request_id=request_id,
-            user_id=user_id,
-            chat_id=chat_id,
-            session_id=chat_id,
-            question=request.message,
-        )
+        suggested_title = None
 
         try:
             for event in trading_graph.stream_sse(
                 question=request.message,
                 user_id=user_id,
-                session_id=chat_id,  # Use chat_id as session_id for memory
-                request_id=request_id,  # Pass request_id so frontend gets the same ID saved to DB
+                session_id=chat_id,
+                chat_id=chat_id,
+                needs_title=needs_title,
             ):
                 yield f"data: {json.dumps(clean_for_json(event), default=str)}\n\n"
                 await asyncio.sleep(0)  # Force flush
 
-                # Collect data for logging
                 event_type = event.get("type")
 
-                if event_type == "step_start":
-                    agent_name = event.get("agent")
-                    agents_used.append(agent_name)
-
-                elif event_type == "step_end":
-                    agent_name = event.get("agent")
-                    step_number += 1
-                    step_duration = event.get("duration_ms", 0)
-                    output = event.get("output") or event.get("result") or {}
-
-                    # Track which agent generates the final response
-                    # (responder for chitchat/concept, clarifier for questions, presenter for data)
-                    if agent_name in ("responder", "clarifier", "presenter") and output.get("response"):
-                        route = agent_name
-
-                    # Log trace step
-                    await log_trace_step(
-                        request_id=request_id,
-                        user_id=user_id,
-                        step_number=step_number,
-                        agent_name=agent_name,
-                        input_data=event.get("input"),
-                        output_data=output,
-                        duration_ms=step_duration,
-                    )
-
-                elif event_type == "text_delta":
-                    final_text += event.get("content", "")
-
-                elif event_type == "data_ready":
-                    # Add separator between preview and summary for proper markdown rendering
-                    if final_text and not final_text.endswith("\n\n"):
-                        final_text += "\n\n"
-
-                elif event_type == "validation":
-                    validation_attempts += 1
-                    validation_passed = event.get("status") == "ok"
-                    # Reset text on rewrite to avoid concatenating multiple attempts
-                    if event.get("status") == "rewrite":
-                        final_text = ""
-
-                elif event_type == "usage":
-                    usage_data = event
+                # Capture suggested_title from Understander for UI
+                if event_type == "step_end":
+                    output = event.get("output") or {}
+                    if event.get("agent") == "understander" and output.get("suggested_title"):
+                        suggested_title = output.get("suggested_title")
 
                 elif event_type == "done":
-                    duration_ms = event.get("total_duration_ms", 0)
-
-                    # Complete chat_log IMMEDIATELY (before any more yields)
-                    # This ensures logging happens even if client disconnects
-                    await complete_chat_log(
-                        request_id=request_id,
-                        chat_id=chat_id,
-                        response=final_text[:10000] if final_text else None,
-                        route=route,
-                        agents_used=list(set(agents_used)) if agents_used else [],
-                        validation_attempts=validation_attempts,
-                        validation_passed=validation_passed,
-                        input_tokens=usage_data.get("input_tokens", 0),
-                        output_tokens=usage_data.get("output_tokens", 0),
-                        thinking_tokens=usage_data.get("thinking_tokens", 0),
-                        cost_usd=usage_data.get("cost", 0),
-                        duration_ms=duration_ms,
-                        model=config.GEMINI_MODEL,
-                        provider="gemini"
-                    )
-
-                    # Generate chat title after 2-3 messages
-                    new_title = await maybe_generate_chat_title(chat_id)
-                    if new_title:
-                        yield f"data: {json.dumps({'type': 'chat_title', 'chat_id': chat_id, 'title': new_title})}\n\n"
+                    # Save suggested title from Understander (first message only)
+                    if suggested_title:
+                        new_title = await save_chat_title(chat_id, suggested_title)
+                        if new_title:
+                            yield f"data: {json.dumps({'type': 'chat_title', 'chat_id': chat_id, 'title': new_title})}\n\n"
 
                     # Include chat_id in done event for frontend
                     yield f"data: {json.dumps({'type': 'chat_id', 'chat_id': chat_id})}\n\n"
