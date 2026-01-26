@@ -3,6 +3,43 @@
 import pandas as pd
 
 
+def df_to_rows(df: pd.DataFrame) -> list[dict]:
+    """
+    Convert DataFrame to list of dicts for JSON serialization.
+
+    Handles:
+    - NaN values (skipped)
+    - Datetime objects (isoformat)
+    - Floats (rounded to 3 decimals)
+    - Numpy types (converted to Python native)
+
+    Args:
+        df: DataFrame to convert
+
+    Returns:
+        List of row dicts
+    """
+    if df.empty:
+        return []
+
+    rows = []
+    for _, row in df.iterrows():
+        record = {}
+        for col, val in row.items():
+            if pd.isna(val):
+                continue
+            elif hasattr(val, "isoformat"):
+                record[col] = val.isoformat()
+            elif isinstance(val, float):
+                record[col] = round(val, 3)
+            elif hasattr(val, "item"):
+                record[col] = val.item()
+            else:
+                record[col] = val
+        rows.append(record)
+    return rows
+
+
 def find_days_in_streak(df: pd.DataFrame, f: dict) -> pd.DataFrame:
     """
     Find days where N+ consecutive days condition is met.

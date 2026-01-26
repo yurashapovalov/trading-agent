@@ -5,6 +5,7 @@ import logging
 import pandas as pd
 
 from agent.rules import get_column
+from agent.operations._utils import df_to_rows
 
 logger = logging.getLogger(__name__)
 
@@ -35,35 +36,12 @@ def op_list(df: pd.DataFrame, what: str, params: dict) -> dict:
     # Sort and limit
     df_sorted = df.sort_values(col, ascending=ascending).head(n)
 
-    # Build rows
-    rows = _df_to_rows(df_sorted)
-
     return {
-        "rows": rows,
+        "rows": df_to_rows(df_sorted),
         "summary": {
-            "count": len(rows),
+            "count": len(df_sorted),
             "total": len(df),
             "by": col,
             "sort": sort,
         }
     }
-
-
-def _df_to_rows(df: pd.DataFrame) -> list[dict]:
-    """Convert DataFrame to list of dicts."""
-    rows = []
-    for _, row in df.iterrows():
-        record = {}
-        for col, val in row.items():
-            if pd.isna(val):
-                continue
-            elif hasattr(val, "isoformat"):
-                record[col] = val.isoformat()
-            elif isinstance(val, float):
-                record[col] = round(val, 3)
-            elif hasattr(val, "item"):
-                record[col] = val.item()
-            else:
-                record[col] = val
-        rows.append(record)
-    return rows

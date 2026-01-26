@@ -8,7 +8,7 @@ import logging
 
 import pandas as pd
 
-from agent.operations._utils import find_days_in_streak
+from agent.operations._utils import find_days_in_streak, df_to_rows
 
 logger = logging.getLogger(__name__)
 
@@ -46,9 +46,11 @@ def op_around(df: pd.DataFrame, what: str, params: dict) -> dict:
         event_df = _find_event_days(df, event_filters)
         if event_df.empty:
             return {"rows": [], "summary": {"count": 0, "error": "No events found"}}
+        result_df = event_df
         values = event_df[col].dropna()
     else:
         # df already filtered to event days
+        result_df = df
         values = df[col].dropna()
 
     if len(values) == 0:
@@ -67,7 +69,7 @@ def op_around(df: pd.DataFrame, what: str, params: dict) -> dict:
         "offset": offset,
     }
 
-    return {"rows": [], "summary": summary}
+    return {"rows": df_to_rows(result_df), "summary": summary}
 
 
 def _find_event_days(df: pd.DataFrame, event_filters: list[dict]) -> pd.DataFrame:

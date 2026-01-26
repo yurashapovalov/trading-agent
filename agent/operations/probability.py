@@ -9,7 +9,7 @@ import logging
 import pandas as pd
 
 from agent.rules import get_column
-from agent.operations._utils import find_days_in_streak
+from agent.operations._utils import find_days_in_streak, df_to_rows
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +61,7 @@ def op_probability(df: pd.DataFrame, what: str, params: dict) -> dict:
         "metric": col,
     }
 
-    return {"rows": [], "summary": summary}
+    return {"rows": df_to_rows(df), "summary": summary}
 
 
 def _probability_after_event(
@@ -109,7 +109,7 @@ def _probability_after_event(
         "event_type": "consecutive",
     }
 
-    return {"rows": [], "summary": summary}
+    return {"rows": df_to_rows(event_df), "summary": summary}
 
 
 def _find_event_days(df: pd.DataFrame, event_filters: list[dict]) -> pd.DataFrame:

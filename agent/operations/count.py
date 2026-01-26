@@ -5,6 +5,7 @@ import logging
 import pandas as pd
 
 from agent.rules import get_column
+from agent.operations._utils import df_to_rows
 
 logger = logging.getLogger(__name__)
 
@@ -13,7 +14,7 @@ def op_count(df: pd.DataFrame, what: str, params: dict) -> dict:
     """
     Count records matching filter.
 
-    Returns count and basic stats.
+    Returns count, basic stats, and all matching rows.
     """
     logger.debug(f"op_count: what={what}, params={params}, rows={len(df)}")
     count = len(df)
@@ -30,6 +31,6 @@ def op_count(df: pd.DataFrame, what: str, params: dict) -> dict:
             summary["max"] = round(values.max(), 3)
 
     return {
-        "rows": [],
+        "rows": df_to_rows(df),
         "summary": summary,
     }

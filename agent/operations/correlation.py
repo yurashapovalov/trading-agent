@@ -5,6 +5,7 @@ import logging
 import pandas as pd
 
 from agent.rules import get_column
+from agent.operations._utils import df_to_rows
 
 logger = logging.getLogger(__name__)
 
@@ -73,4 +74,4 @@ def op_correlation(df: pd.DataFrame, what: str, params: dict) -> dict:
         "n": len(valid),
     }
 
-    return {"rows": [], "summary": summary}
+    return {"rows": df_to_rows(df), "summary": summary}

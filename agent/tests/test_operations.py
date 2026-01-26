@@ -153,14 +153,12 @@ class TestOpCount:
         assert "summary" in result
         assert result["summary"]["count"] == 20
 
-    def test_count_by_weekday(self, grouped_df):
-        """Count grouped by weekday."""
-        result = op_count(grouped_df, "change", {"group_by": "weekday"})
+    def test_count_returns_rows(self, sample_df):
+        """Count returns all matching rows."""
+        result = op_count(sample_df, "change", {})
 
         assert "rows" in result
-        # Each weekday should have 2 entries
-        for row in result["rows"]:
-            assert row["count"] == 2
+        assert len(result["rows"]) == 20  # All rows returned
 
     def test_empty_df(self, empty_df):
         """Empty DataFrame."""
