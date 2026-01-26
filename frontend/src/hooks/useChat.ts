@@ -131,6 +131,7 @@ export function useChat({ chatId, onChatCreated, onTitleUpdated }: UseChatOption
   const [streamingText, setStreamingText] = useState("")
   const [streamingDataCard, setStreamingDataCard] = useState<DataCard | null>(null)
   const abortControllerRef = useRef<AbortController | null>(null)
+  const skipNextHistoryLoadRef = useRef(false)
 
   // Load messages when chatId changes
   useEffect(() => {
@@ -139,6 +140,12 @@ export function useChat({ chatId, onChatCreated, onTitleUpdated }: UseChatOption
     if (!chatId) {
       setMessages([])
       setIsLoadingHistory(false)
+      return
+    }
+
+    // Skip loading if chat was just created (messages already in state)
+    if (skipNextHistoryLoadRef.current) {
+      skipNextHistoryLoadRef.current = false
       return
     }
 
@@ -375,6 +382,8 @@ export function useChat({ chatId, onChatCreated, onTitleUpdated }: UseChatOption
                 } else if (event.type === "chat_id") {
                   // Backend created or resolved chat - notify parent to update state
                   if (event.chat_id && onChatCreated) {
+                    // Skip history reload - we already have messages in state
+                    skipNextHistoryLoadRef.current = true
                     onChatCreated(event.chat_id)
                   }
                 } else if (event.type === "chat_title") {

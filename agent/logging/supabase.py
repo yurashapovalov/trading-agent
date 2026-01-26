@@ -49,7 +49,6 @@ async def init_chat_log(
     request_id: str,
     user_id: str,
     chat_id: str | None,
-    session_id: str,
     question: str,
 ):
     """
@@ -67,7 +66,6 @@ async def init_chat_log(
             "request_id": request_id,
             "user_id": user_id,
             "chat_id": chat_id,
-            "session_id": session_id,
             "question": question,
             "response": None,  # Will be updated at completion
         }).execute()
@@ -266,7 +264,6 @@ def init_chat_log_sync(
     request_id: str,
     user_id: str,
     chat_id: str | None,
-    session_id: str,
     question: str,
 ):
     """Synchronous version - create initial chat_log entry."""
@@ -279,7 +276,6 @@ def init_chat_log_sync(
             "request_id": request_id,
             "user_id": user_id,
             "chat_id": chat_id,
-            "session_id": session_id,
             "question": question,
             "response": None,
         }).execute()

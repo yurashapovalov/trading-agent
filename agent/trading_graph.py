@@ -147,7 +147,6 @@ class TradingGraph:
             request_id=ctx.request_id,
             user_id=user_id,
             chat_id=chat_id,
-            session_id=session_id,
             question=question,
         )
 
