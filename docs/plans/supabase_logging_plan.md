@@ -2,8 +2,8 @@
 
 Полная документация по логированию в Supabase для trading assistant.
 
-**Версия:** 2026-01-26 v17
-**Статус:** Phase 1-4 complete (logging infrastructure + graph integration). Phase 5 (memory) pending.
+**Версия:** 2026-01-26 v18
+**Статус:** ✅ Complete. All phases implemented.
 
 ---
 
@@ -1282,9 +1282,9 @@ context_compacted = len(memory.summaries) > 0
 | 3.9 | Логирование responder | ✅ |
 | 4.1 | TradingGraph: init_chat_log + complete_chat_log | ✅ |
 | 4.2 | TradingGraph: request_id в state | ✅ |
-| 5.1 | Memory загрузка | ⬜ |
-| 5.2 | Memory сохранение | ⬜ |
-| 5.3 | context_compacted из memory | ⬜ |
+| 5.1 | Memory загрузка | ✅ |
+| 5.2 | Memory сохранение | ✅ |
+| 5.3 | context_compacted из memory | ✅ |
 
 ---
 

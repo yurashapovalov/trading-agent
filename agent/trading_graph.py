@@ -17,6 +17,7 @@ from agent.graph import get_graph
 from agent.state import AgentState
 from agent.types import Usage
 from agent.logging.supabase import init_chat_log, complete_chat_log
+from agent.memory.conversation import ConversationMemory
 
 
 @dataclass
@@ -58,6 +59,9 @@ class StreamContext:
     awaiting_clarification: bool = False
     original_question: str | None = None
     clarification_history: list[dict] | None = None
+
+    # Conversation memory (for context and saving)
+    memory: Any = None
 
 
 class TradingGraph:
@@ -122,6 +126,22 @@ class TradingGraph:
             clarification_history=clarification_history,
         )
 
+        # Load conversation memory (for context)
+        memory_context = None
+        context_compacted = False
+
+        if chat_id:
+            try:
+                memory = ConversationMemory(chat_id=chat_id, user_id=user_id)
+                if memory.load_sync():
+                    memory_context = memory.get_context() if (memory.recent or memory.summaries or memory.key_facts) else None
+                    context_compacted = len(memory.summaries) > 0
+                    ctx.memory = memory
+            except Exception as e:
+                # Memory load failed - continue without context
+                import logging
+                logging.getLogger(__name__).warning(f"Failed to load memory: {e}")
+
         # Initialize chat log at the START of request
         import asyncio
         try:
@@ -154,6 +174,8 @@ class TradingGraph:
             "clarification_history": clarification_history or [],
             "needs_title": needs_title,
             "step_number": 0,
+            "memory_context": memory_context,
+            "context_compacted": context_compacted,
         }
 
         # Run graph and yield events
@@ -295,6 +317,16 @@ class TradingGraph:
                 duration_ms=total_duration_ms,
                 usage=usage_for_log,
             ))
+
+        # Update conversation memory with this exchange
+        if ctx.memory and response:
+            try:
+                ctx.memory.add_message("user", ctx.question)
+                ctx.memory.add_message("assistant", response)
+                # Note: compaction and save happen automatically in add_message if needed
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning(f"Failed to update memory: {e}")
 
     def _build_input_data(self, agent_name: str, state: dict) -> dict:
         """Build input_data for logging based on agent type."""
