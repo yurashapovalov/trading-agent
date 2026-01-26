@@ -196,6 +196,10 @@ def _load_data_with_semantics(
         from agent.patterns import scan_patterns_df
         df = scan_patterns_df(df)
 
+    # Apply session filter if specified (from Planner)
+    if req.session:
+        df = _apply_session_filter(df, req.session, symbol)
+
     # Parse and split filters by semantics
     all_condition_filters = []
     all_event_filters = []
@@ -362,7 +366,13 @@ def _apply_pattern(df: pd.DataFrame, f: dict) -> pd.DataFrame:
 
 
 def _apply_session_filter(df: pd.DataFrame, session: str, symbol: str) -> pd.DataFrame:
-    """Filter by trading session (MORNING, RTH, etc.)."""
+    """
+    Filter by trading session (MORNING, RTH, OVERNIGHT, etc.).
+
+    Handles cross-midnight sessions correctly:
+    - RTH (09:30-17:00): time >= 09:30 AND time < 17:00
+    - OVERNIGHT (18:00-09:30): time >= 18:00 OR time < 09:30
+    """
     from agent.config.market.instruments import get_session_times
 
     times = get_session_times(symbol, session)
@@ -374,7 +384,12 @@ def _apply_session_filter(df: pd.DataFrame, session: str, symbol: str) -> pd.Dat
     if "time" not in df.columns:
         return df
 
-    df = df[(df["time"] >= start_time) & (df["time"] < end_time)]
+    # Cross-midnight session: start_time > end_time (e.g., 18:00 > 09:30)
+    if start_time > end_time:
+        df = df[(df["time"] >= start_time) | (df["time"] < end_time)]
+    else:
+        df = df[(df["time"] >= start_time) & (df["time"] < end_time)]
+
     return df
 
 

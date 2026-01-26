@@ -20,6 +20,7 @@ class DataRequest:
     timeframe: str
     filters: list[str]
     label: str
+    session: str | None = None  # Trading session (RTH, OVERNIGHT, etc.)
 
 
 @dataclass
@@ -74,11 +75,14 @@ def _plan_single(step: Step, today: date, symbol: str) -> ExecutionPlan:
     start, end = _resolve_when(atom.when, today)
 
     raw_filters = [atom.filter] if atom.filter else []
+    session, clean_filters = _extract_session(raw_filters)
+
     request = DataRequest(
         period=(start, end),
         timeframe=atom.timeframe,
-        filters=_resolve_filters(raw_filters, symbol),
+        filters=clean_filters,
         label=atom.when,
+        session=session,
     )
 
     params = _extract_params(step, atom)
@@ -99,11 +103,14 @@ def _plan_multi_period(step: Step, today: date, symbol: str) -> ExecutionPlan:
     for atom in step.atoms:
         start, end = _resolve_when(atom.when, today)
         raw_filters = [atom.filter] if atom.filter else []
+        session, clean_filters = _extract_session(raw_filters)
+
         requests.append(DataRequest(
             period=(start, end),
             timeframe=atom.timeframe,
-            filters=_resolve_filters(raw_filters, symbol),
+            filters=clean_filters,
             label=atom.when,
+            session=session,
         ))
 
     # All atoms should have same 'what'
@@ -128,11 +135,14 @@ def _plan_multi_filter(step: Step, today: date, symbol: str) -> ExecutionPlan:
     requests = []
     for a in step.atoms:
         raw_filters = [a.filter] if a.filter else []
+        session, clean_filters = _extract_session(raw_filters)
+
         requests.append(DataRequest(
             period=(start, end),
             timeframe=a.timeframe,
-            filters=_resolve_filters(raw_filters, symbol),
+            filters=clean_filters,
             label=a.filter or "all",
+            session=session,
         ))
 
     params = _extract_params(step, atom)
@@ -152,11 +162,14 @@ def _plan_multi_metric(step: Step, today: date, symbol: str) -> ExecutionPlan:
     start, end = _resolve_when(atom.when, today)
 
     raw_filters = [atom.filter] if atom.filter else []
+    session, clean_filters = _extract_session(raw_filters)
+
     request = DataRequest(
         period=(start, end),
         timeframe=atom.timeframe,
-        filters=_resolve_filters(raw_filters, symbol),
+        filters=clean_filters,
         label=atom.when,
+        session=session,
     )
 
     metrics = [a.what for a in step.atoms]
@@ -207,47 +220,37 @@ def _parse_group(group: str) -> str:
     return group
 
 
-def _resolve_session_filter(filter_str: str, symbol: str = "NQ") -> str:
+def _extract_session(filters: list[str]) -> tuple[str | None, list[str]]:
     """
-    Resolve session filter to time filter using instrument config.
+    Extract session from filters list.
 
-    'session = MORNING' → 'time >= 09:30, time < 12:30'
+    Returns (session, clean_filters) where session is extracted
+    and clean_filters has session removed.
+
+    Example:
+        ["session = RTH", "gap > 0"] → ("RTH", ["gap > 0"])
+        ["gap > 0, session = OVERNIGHT"] → ("OVERNIGHT", ["gap > 0"])
+        ["monday", "change > 0"] → (None, ["monday", "change > 0"])
     """
     import re
-    from agent.config.market.instruments import get_session_times
 
-    filter_lower = filter_str.lower()
+    session = None
+    clean_filters = []
 
-    # Match session = XXX pattern
-    match = re.search(r"session\s*=\s*(\w+)", filter_lower)
-    if not match:
-        return filter_str
+    for f in filters:
+        # Check if this filter contains session
+        match = re.search(r"session\s*=\s*(\w+)", f, re.IGNORECASE)
+        if match:
+            session = match.group(1).upper()
+            # Remove session part from filter
+            cleaned = re.sub(r",?\s*session\s*=\s*\w+\s*,?", "", f, flags=re.I).strip()
+            cleaned = cleaned.strip(",").strip()
+            if cleaned:
+                clean_filters.append(cleaned)
+        else:
+            clean_filters.append(f)
 
-    session_name = match.group(1).upper()
-    times = get_session_times(symbol, session_name)
-
-    if not times:
-        return filter_str  # Unknown session, leave as-is
-
-    start_time, end_time = times
-
-    # Replace session filter with time filter
-    time_filter = f"time >= {start_time}, time < {end_time}"
-
-    # Remove the session = XXX part and add time filter
-    result = re.sub(r",?\s*session\s*=\s*\w+\s*,?\s*", "", filter_str, flags=re.I).strip()
-    result = result.strip(",").strip()  # Clean up trailing/leading commas
-    if result:
-        result = f"{result}, {time_filter}"
-    else:
-        result = time_filter
-
-    return result
-
-
-def _resolve_filters(filters: list[str], symbol: str = "NQ") -> list[str]:
-    """Resolve all session filters to time filters."""
-    return [_resolve_session_filter(f, symbol) for f in filters]
+    return session, clean_filters
 
 
 def _resolve_when(when: str, today: date) -> tuple[str, str]:

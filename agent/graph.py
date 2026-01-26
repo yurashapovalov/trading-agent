@@ -452,6 +452,7 @@ def plan_execution(state: AgentState) -> dict:
                         "timeframe": r.timeframe,
                         "filters": r.filters,
                         "label": r.label,
+                        "session": r.session,
                     }
                     for r in plan.requests
                 ],
@@ -512,6 +513,7 @@ def execute_query(state: AgentState) -> dict:
                     timeframe=r["timeframe"],
                     filters=r["filters"],
                     label=r["label"],
+                    session=r.get("session"),
                 )
                 for r in plan_dict["requests"]
             ],
@@ -612,7 +614,6 @@ def present_response(state: AgentState) -> dict:
         r = responses[0]
         output = {
             "response": r.summary,
-            "presenter_acknowledge": r.acknowledge,
             "presenter_title": r.title,
             "presenter_summary": r.summary,
             "presenter_type": r.type.value,
@@ -624,7 +625,6 @@ def present_response(state: AgentState) -> dict:
         total_rows = sum(r.row_count for r in responses)
         output = {
             "response": combined,
-            "presenter_acknowledge": responses[0].acknowledge if responses else "",
             "presenter_summary": combined,
             "presenter_type": "multi",
             "presenter_row_count": total_rows,
@@ -651,7 +651,6 @@ def present_response(state: AgentState) -> dict:
                 "context_compacted": context_compacted,
             },
             output_data={
-                "acknowledge": output.get("presenter_acknowledge"),
                 "title": output.get("presenter_title"),
                 "summary": output.get("presenter_summary"),
                 "type": output.get("presenter_type"),
@@ -662,6 +661,7 @@ def present_response(state: AgentState) -> dict:
         )
 
     output["step_number"] = step_number
+    output["usage"] = total_usage.model_dump()
     return output
 
 
