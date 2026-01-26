@@ -77,13 +77,9 @@ function AppShellContent() {
     sendMessage(suggestion)
   }, [sendMessage])
 
-  const handleNewChat = useCallback(async () => {
-    await createChat()
+  const handleNewChat = useCallback(() => {
+    createChat()
   }, [createChat])
-
-  const handleDeleteChat = useCallback(async (id: string) => {
-    await deleteChat(id)
-  }, [deleteChat])
 
   const handleSettings = useCallback(() => {
     // TODO: Navigate to settings
@@ -110,7 +106,6 @@ function AppShellContent() {
         currentChatId={currentChatId}
         onSelectChat={selectChat}
         onNewChat={handleNewChat}
-        onDeleteChat={handleDeleteChat}
         onSettings={handleSettings}
         onSignOut={signOut}
       />

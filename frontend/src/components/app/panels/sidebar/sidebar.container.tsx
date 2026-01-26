@@ -22,7 +22,6 @@ type SidebarContainerProps = {
   // Actions from AppShell
   onSelectChat: (id: string) => void
   onNewChat: () => void
-  onDeleteChat: (id: string) => void
   onSettings: () => void
   onSignOut: () => void
 }
@@ -32,7 +31,6 @@ export function SidebarContainer({
   currentChatId,
   onSelectChat,
   onNewChat,
-  onDeleteChat,
   onSettings,
   onSignOut,
 }: SidebarContainerProps) {
@@ -68,7 +66,6 @@ export function SidebarContainer({
       currentChatId={currentChatId}
       onSelectChat={handleSelectChat}
       onNewChat={onNewChat}
-      onDeleteChat={onDeleteChat}
       onClose={() => setLeftOpen(false)}
       onSettings={onSettings}
       onSignOut={onSignOut}

@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
-import { useParams, useRouter, usePathname } from "next/navigation"
+import { useParams, useRouter } from "next/navigation"
 import { useAuth } from "@/providers"
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
@@ -24,7 +24,6 @@ export function useChats() {
   const { session } = useAuth()
   const router = useRouter()
   const params = useParams()
-  const pathname = usePathname()
   const [chats, setChats] = useState<ChatSession[]>([])
   const [isLoading, setIsLoading] = useState(true)
 
@@ -43,55 +42,23 @@ export function useChats() {
         const data = await response.json()
         const chatList: ChatSession[] = Array.isArray(data) ? data : []
         setChats(chatList)
-
-        // Auto-redirect to last chat if on root and we have chats
-        // (no auto-create - new chat created on first message or via button)
-        if (chatList.length > 0 && !currentChatId && pathname === "/") {
-          router.replace(`/chat/${chatList[0].id}`)
-        }
+        // No auto-redirect: / = new chat screen
       }
     } catch (e) {
       console.error("Failed to fetch chats:", e)
     } finally {
       setIsLoading(false)
     }
-  }, [session?.access_token, currentChatId, pathname, router])
+  }, [session?.access_token])
 
   useEffect(() => {
     fetchChats()
   }, [fetchChats])
 
-  // Create new chat in API (used by "New Chat" button)
-  const createChat = useCallback(async (): Promise<string | null> => {
-    if (!session?.access_token) return null
-
-    try {
-      const response = await fetch(`${API_URL}/chats`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${session.access_token}`,
-        },
-        body: JSON.stringify({ title: "New Chat" }),
-      })
-      if (response.ok) {
-        const data = await response.json()
-        const newChat: ChatSession = {
-          id: data.id,
-          title: "New Chat",
-          stats: null,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        }
-        setChats((prev) => [newChat, ...prev])
-        router.push(`/chat/${newChat.id}`)
-        return newChat.id
-      }
-    } catch (e) {
-      console.error("Failed to create chat:", e)
-    }
-    return null
-  }, [session?.access_token, router])
+  // Start new chat (navigates to /, chat created on first message)
+  const createChat = useCallback(() => {
+    router.push("/")
+  }, [router])
 
   const deleteChat = useCallback(async (chatId: string) => {
     if (!session?.access_token) return

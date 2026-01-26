@@ -21,7 +21,6 @@ import {
   PageHeaderLeft,
   PageHeaderRight,
 } from "@/components/app/page-header/page-header"
-import { SidebarItem } from "./sidebar-item"
 import type { ChatItem } from "@/types/chat"
 
 type SidebarProps = {
@@ -33,7 +32,6 @@ type SidebarProps = {
   // Actions
   onSelectChat: (id: string) => void
   onNewChat: () => void
-  onDeleteChat: (id: string) => void
   onClose: () => void
   onSettings: () => void
   onSignOut: () => void
@@ -46,7 +44,6 @@ export function Sidebar({
   currentChatId,
   onSelectChat,
   onNewChat,
-  onDeleteChat,
   onClose,
   onSettings,
   onSignOut,
@@ -62,9 +59,6 @@ export function Sidebar({
           <span className="text-sm font-semibold">Trading Agent</span>
         </PageHeaderLeft>
         <PageHeaderRight>
-          <Button variant="ghost" size="icon-sm" onClick={onNewChat}>
-            <PlusIcon />
-          </Button>
           <Button variant="ghost" size="icon-sm" onClick={onClose}>
             <ChevronsLeft />
           </Button>
@@ -77,20 +71,24 @@ export function Sidebar({
           <span className="px-2 text-xs font-medium text-muted-foreground">History</span>
         </div>
         <div className="flex flex-col gap-1">
-          <SidebarItem
-            icon={PlusIcon}
-            label="New Chat"
+          <Button
+            variant="ghost"
+            className="justify-start gap-2 px-2"
             onClick={onNewChat}
-          />
+          >
+            <PlusIcon className="size-4" />
+            <span>New Chat</span>
+          </Button>
           {chats.map((chat) => (
-            <SidebarItem
+            <Button
               key={chat.id}
-              icon={MessageSquareIcon}
-              label={chat.title || "Untitled"}
+              variant="ghost"
+              className={`justify-start gap-2 px-2 ${chat.id === currentChatId ? "bg-accent" : ""}`}
               onClick={() => onSelectChat(chat.id)}
-              isActive={chat.id === currentChatId}
-              onDelete={() => onDeleteChat(chat.id)}
-            />
+            >
+              <MessageSquareIcon className="size-4" />
+              <span className="truncate">{chat.title || "Untitled"}</span>
+            </Button>
           ))}
         </div>
       </div>

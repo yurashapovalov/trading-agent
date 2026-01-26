@@ -7,7 +7,7 @@ type ChatsContextType = {
   chats: ChatSession[]
   currentChatId: string | null
   isLoading: boolean
-  createChat: () => Promise<string | null>
+  createChat: () => void
   deleteChat: (chatId: string) => Promise<void>
   selectChat: (chatId: string) => void
   updateChatTitle: (chatId: string, title: string) => void
