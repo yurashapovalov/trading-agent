@@ -32,6 +32,8 @@ jobs:
             docker compose down
             # Kill any process holding port 8000 (in case uvicorn was started manually)
             fuser -k 8000/tcp 2>/dev/null || true
+            # Clean stale Docker build cache to avoid snapshot errors
+            docker builder prune -f 2>/dev/null || true
             docker compose up --build -d
 
             # Health check - wait for service to be ready
