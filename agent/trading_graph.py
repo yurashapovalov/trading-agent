@@ -16,7 +16,7 @@ from langchain_core.messages import HumanMessage
 from agent.graph import get_graph
 from agent.state import AgentState
 from agent.types import Usage
-from agent.logging.supabase import init_chat_log, complete_chat_log
+from agent.logging.supabase import init_chat_log_sync, complete_chat_log_sync
 from agent.memory.conversation import ConversationMemory
 
 
@@ -143,25 +143,13 @@ class TradingGraph:
                 logging.getLogger(__name__).warning(f"Failed to load memory: {e}")
 
         # Initialize chat log at the START of request
-        import asyncio
-        try:
-            loop = asyncio.get_running_loop()
-            asyncio.create_task(init_chat_log(
-                request_id=ctx.request_id,
-                user_id=user_id,
-                chat_id=chat_id,
-                session_id=session_id,
-                question=question,
-            ))
-        except RuntimeError:
-            # No running loop - run synchronously
-            asyncio.run(init_chat_log(
-                request_id=ctx.request_id,
-                user_id=user_id,
-                chat_id=chat_id,
-                session_id=session_id,
-                question=question,
-            ))
+        init_chat_log_sync(
+            request_id=ctx.request_id,
+            user_id=user_id,
+            chat_id=chat_id,
+            session_id=session_id,
+            question=question,
+        )
 
         # Build initial state with request_id for node logging
         state: AgentState = {
@@ -294,29 +282,15 @@ class TradingGraph:
         }
         usage_for_log["total"] = total_usage.to_dict()
 
-        import asyncio
-        try:
-            loop = asyncio.get_running_loop()
-            asyncio.create_task(complete_chat_log(
-                request_id=ctx.request_id,
-                chat_id=ctx.chat_id,
-                response=response,
-                route=route,
-                agents_used=list(agents_seen),
-                duration_ms=total_duration_ms,
-                usage=usage_for_log,
-            ))
-        except RuntimeError:
-            # No running loop - run synchronously
-            asyncio.run(complete_chat_log(
-                request_id=ctx.request_id,
-                chat_id=ctx.chat_id,
-                response=response,
-                route=route,
-                agents_used=list(agents_seen),
-                duration_ms=total_duration_ms,
-                usage=usage_for_log,
-            ))
+        complete_chat_log_sync(
+            request_id=ctx.request_id,
+            chat_id=ctx.chat_id,
+            response=response,
+            route=route,
+            agents_used=list(agents_seen),
+            duration_ms=total_duration_ms,
+            usage=usage_for_log,
+        )
 
         # Update conversation memory with this exchange
         if ctx.memory and response:

@@ -233,20 +233,147 @@ def log_trace_step_sync(
     user_id: str,
     step_number: int,
     agent_name: str,
-    **kwargs
+    input_data: dict | None = None,
+    output_data: dict | None = None,
+    usage: dict | None = None,
+    duration_ms: int = 0,
 ):
-    """Synchronous version of log_trace_step for non-async contexts."""
-    import asyncio
-
-    coro = log_trace_step(request_id, user_id, step_number, agent_name, **kwargs)
+    """Synchronous version of log_trace_step."""
+    supabase = get_supabase()
+    if not supabase:
+        return
 
     try:
-        # Check if we're in a running async context
-        loop = asyncio.get_running_loop()
-        # We are - schedule with error handling
-        asyncio.create_task(_safe_background(coro, f"log_trace_step:{agent_name}"))
-    except RuntimeError:
-        # No running loop - run synchronously
-        asyncio.run(coro)
+        serializable_input = make_json_serializable(input_data)
+        serializable_output = make_json_serializable(output_data)
+        serializable_usage = make_json_serializable(usage)
+
+        supabase.table("request_traces").insert({
+            "request_id": request_id,
+            "user_id": user_id,
+            "step_number": step_number,
+            "agent_name": agent_name,
+            "input_data": serializable_input,
+            "output_data": serializable_output,
+            "usage": serializable_usage,
+            "duration_ms": duration_ms,
+        }).execute()
+    except Exception as e:
+        print(f"Failed to log trace step: {e}")
+
+
+def init_chat_log_sync(
+    request_id: str,
+    user_id: str,
+    chat_id: str | None,
+    session_id: str,
+    question: str,
+):
+    """Synchronous version - create initial chat_log entry."""
+    supabase = get_supabase()
+    if not supabase:
+        return
+
+    try:
+        supabase.table("chat_logs").insert({
+            "request_id": request_id,
+            "user_id": user_id,
+            "chat_id": chat_id,
+            "session_id": session_id,
+            "question": question,
+            "response": None,
+        }).execute()
+    except Exception as e:
+        print(f"Failed to init chat log: {e}")
+
+
+def complete_chat_log_sync(
+    request_id: str,
+    chat_id: str | None = None,
+    response: str = "",
+    route: str | None = None,
+    agents_used: list[str] | None = None,
+    duration_ms: int = 0,
+    usage: dict | None = None,
+):
+    """Synchronous version - complete chat_log entry."""
+    supabase = get_supabase()
+    if not supabase:
+        return
+
+    try:
+        # Truncate response if too long
+        if response and len(response) > 10000:
+            response = response[:10000] + "... [truncated]"
+
+        supabase.table("chat_logs").update({
+            "response": response,
+            "route": route,
+            "agents_used": agents_used or [],
+            "duration_ms": duration_ms,
+            "usage": usage,
+        }).eq("request_id", request_id).execute()
+
+        # Update chat_sessions stats if chat_id provided
+        if chat_id and usage:
+            total = usage.get("total", {})
+            _update_chat_session_stats_sync(
+                chat_id=chat_id,
+                input_tokens=total.get("input_tokens", 0),
+                output_tokens=total.get("output_tokens", 0),
+                thinking_tokens=total.get("thinking_tokens", 0),
+                cached_tokens=total.get("cached_tokens", 0),
+                cost_usd=total.get("cost_usd", 0),
+            )
+
+    except Exception as e:
+        print(f"Failed to complete chat log: {e}")
+
+
+def _update_chat_session_stats_sync(
+    chat_id: str,
+    input_tokens: int = 0,
+    output_tokens: int = 0,
+    thinking_tokens: int = 0,
+    cached_tokens: int = 0,
+    cost_usd: float = 0.0,
+):
+    """Synchronous version - increment chat_sessions stats."""
+    supabase = get_supabase()
+    if not supabase:
+        return
+
+    try:
+        supabase.rpc("increment_chat_stats", {
+            "p_chat_id": chat_id,
+            "p_input_tokens": input_tokens,
+            "p_output_tokens": output_tokens,
+            "p_thinking_tokens": thinking_tokens,
+            "p_cached_tokens": cached_tokens,
+            "p_cost_usd": cost_usd,
+        }).execute()
+    except Exception:
+        # Fallback: read-modify-write
+        try:
+            result = supabase.table("chat_sessions") \
+                .select("stats") \
+                .eq("id", chat_id) \
+                .execute()
+
+            if result.data:
+                stats = result.data[0].get("stats") or {}
+                stats["message_count"] = (stats.get("message_count") or 0) + 1
+                stats["input_tokens"] = (stats.get("input_tokens") or 0) + input_tokens
+                stats["output_tokens"] = (stats.get("output_tokens") or 0) + output_tokens
+                stats["thinking_tokens"] = (stats.get("thinking_tokens") or 0) + thinking_tokens
+                stats["cached_tokens"] = (stats.get("cached_tokens") or 0) + cached_tokens
+                stats["cost_usd"] = (stats.get("cost_usd") or 0) + cost_usd
+
+                supabase.table("chat_sessions") \
+                    .update({"stats": stats, "updated_at": "now()"}) \
+                    .eq("id", chat_id) \
+                    .execute()
+        except Exception as e2:
+            print(f"Failed to update chat stats (fallback): {e2}")
 
 
