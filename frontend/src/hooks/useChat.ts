@@ -21,13 +21,19 @@ function tracesToAgentSteps(traces: any[]): AgentStep[] {
   if (!traces || traces.length === 0) return []
 
   const agentMessages: Record<string, string> = {
-    // Barb architecture agents
+    // Current architecture
+    intent: "Classifying question...",
+    understander: "Understanding context...",
+    parser: "Parsing request...",
+    planner: "Planning queries...",
+    executor: "Executing queries...",
+    presenter: "Formatting response...",
+    clarifier: "Preparing clarification...",
+    // Legacy (for old logs)
     barb: "Understanding question...",
     data_fetcher: "Fetching data...",
     analyst: "Analyzing data...",
     validator: "Validating response...",
-    // legacy (for old logs)
-    understander: "Understanding question...",
     router: "Determining question type...",
     data_agent: "Fetching data...",
     educator: "Preparing explanation...",

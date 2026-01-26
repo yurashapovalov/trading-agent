@@ -13,7 +13,6 @@ import {
   MoonIcon,
   PlusIcon,
   SettingsIcon,
-  TrashIcon,
   ChevronsLeft,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -22,6 +21,7 @@ import {
   PageHeaderLeft,
   PageHeaderRight,
 } from "@/components/app/page-header/page-header"
+import { SidebarItem } from "./sidebar-item"
 import type { ChatItem } from "@/types/chat"
 
 type SidebarProps = {
@@ -76,37 +76,23 @@ export function Sidebar({
         <div className="py-2">
           <span className="px-2 text-xs font-medium text-muted-foreground">History</span>
         </div>
-        {chats.length === 0 ? (
-          <div className="px-2 py-4 text-center text-sm text-muted-foreground">
-            No chats yet
-          </div>
-        ) : (
-          <div className="flex flex-col gap-1">
-            {chats.map((chat) => (
-              <div
-                key={chat.id}
-                className={`group flex items-center gap-2 rounded-md px-2 py-1.5 text-sm cursor-pointer hover:bg-accent ${
-                  chat.id === currentChatId ? "bg-accent" : ""
-                }`}
-                onClick={() => onSelectChat(chat.id)}
-              >
-                <MessageSquareIcon className="size-4 shrink-0 text-muted-foreground" />
-                <span className="flex-1 truncate">{chat.title}</span>
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  className="size-6 opacity-0 group-hover:opacity-100"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    onDeleteChat(chat.id)
-                  }}
-                >
-                  <TrashIcon className="size-3" />
-                </Button>
-              </div>
-            ))}
-          </div>
-        )}
+        <div className="flex flex-col gap-1">
+          <SidebarItem
+            icon={PlusIcon}
+            label="New Chat"
+            onClick={onNewChat}
+          />
+          {chats.map((chat) => (
+            <SidebarItem
+              key={chat.id}
+              icon={MessageSquareIcon}
+              label={chat.title || "Untitled"}
+              onClick={() => onSelectChat(chat.id)}
+              isActive={chat.id === currentChatId}
+              onDelete={() => onDeleteChat(chat.id)}
+            />
+          ))}
+        </div>
       </div>
 
       {/* Footer */}
