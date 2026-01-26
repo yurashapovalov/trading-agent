@@ -530,6 +530,61 @@ async def save_chat_title(chat_id: str, title: str) -> str | None:
         return None
 
 
+def get_clarification_state(chat_id: str) -> dict | None:
+    """
+    Check if last message was a clarification request.
+
+    Returns dict with clarification data if awaiting response, None otherwise.
+    """
+    if not supabase or not chat_id:
+        return None
+
+    try:
+        # Get last chat_log for this chat
+        result = supabase.table("chat_logs") \
+            .select("request_id, route, question") \
+            .eq("chat_id", chat_id) \
+            .order("created_at", desc=True) \
+            .limit(1) \
+            .execute()
+
+        if not result.data:
+            return None
+
+        last_log = result.data[0]
+        if last_log.get("route") != "clarify":
+            return None
+
+        # Get clarifier trace for original question and history
+        request_id = last_log.get("request_id")
+        if not request_id:
+            return None
+
+        trace_result = supabase.table("request_traces") \
+            .select("input_data, output_data") \
+            .eq("request_id", request_id) \
+            .eq("agent_name", "clarifier") \
+            .execute()
+
+        if not trace_result.data:
+            return None
+
+        trace = trace_result.data[0]
+        input_data = trace.get("input_data") or {}
+        output_data = trace.get("output_data") or {}
+
+        return {
+            "awaiting_clarification": True,
+            "original_question": input_data.get("question"),
+            "clarification_history": [
+                {"role": "assistant", "content": output_data.get("response", "")}
+            ],
+        }
+    except Exception as e:
+        print(f"Failed to get clarification state: {e}")
+        return None
+
+
 def get_recent_chat_history(user_id: str, limit: int = config.CHAT_HISTORY_LIMIT) -> list[dict]:
     """Fetch recent chat history from Supabase for context."""
     if not supabase:
@@ -583,6 +638,9 @@ async def chat_stream(request: ChatRequest, user_id: str = Depends(require_auth)
     # Check if chat needs a title (first message)
     needs_title = check_needs_title(chat_id)
 
+    # Check if we're awaiting clarification response
+    clarification_state = get_clarification_state(chat_id)
+
     async def generate():
         suggested_title = None
 
@@ -593,6 +651,9 @@ async def chat_stream(request: ChatRequest, user_id: str = Depends(require_auth)
                 session_id=chat_id,
                 chat_id=chat_id,
                 needs_title=needs_title,
+                awaiting_clarification=clarification_state.get("awaiting_clarification", False) if clarification_state else False,
+                original_question=clarification_state.get("original_question") if clarification_state else None,
+                clarification_history=clarification_state.get("clarification_history") if clarification_state else None,
             ):
                 yield f"data: {json.dumps(clean_for_json(event), default=str)}\n\n"
                 await asyncio.sleep(0)  # Force flush
