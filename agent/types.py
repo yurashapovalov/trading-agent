@@ -6,7 +6,7 @@ Schema validators enforce rules from agent/rules/ — single source of truth.
 """
 
 from typing import ClassVar, Literal
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, model_validator, computed_field
 
 from agent.rules import (
     get_atoms_range,
@@ -375,6 +375,18 @@ class Usage(BaseModel):
         "default": {"input": 0.10, "output": 0.40, "cached": 0.01},
     }
 
+    @computed_field
+    @property
+    def cost_usd(self) -> float:
+        """Calculate cost in USD (included in model_dump)."""
+        prices = self.PRICING["default"]
+        regular_input = max(0, self.input_tokens - self.cached_tokens)
+        return (
+            (regular_input / 1_000_000) * prices["input"]
+            + (self.output_tokens / 1_000_000) * prices["output"]
+            + (self.cached_tokens / 1_000_000) * prices["cached"]
+        )
+
     def __add__(self, other: "Usage") -> "Usage":
         """Aggregate usage from multiple calls."""
         return Usage(
@@ -385,7 +397,7 @@ class Usage(BaseModel):
         )
 
     def cost(self, model: str = "default") -> float:
-        """Calculate cost in USD."""
+        """Calculate cost in USD (with model override)."""
         prices = self.PRICING.get(model, self.PRICING["default"])
         regular_input = max(0, self.input_tokens - self.cached_tokens)
         return (

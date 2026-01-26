@@ -34,16 +34,15 @@ from agent.config.market.holidays import HOLIDAY_NAMES, check_dates_for_holidays
 from agent.config.patterns.candle import get_candle_pattern
 from agent.prompts.presenter import (
     TEMPLATES,
-    ACKNOWLEDGE_PROMPT,
     TITLE_PROMPT,
     SUMMARY_PROMPT,
     SHORT_SUMMARY_PROMPT,
     NO_DATA_PROMPT,
     SUMMARY_ANSWER_PROMPT,
-    TABLE_WITH_SUMMARY_PROMPT,
 )
 from agent.utils.formatting import format_summary
 from agent.config.market.instruments import get_instrument
+from agent.types import Usage
 
 
 # =============================================================================
@@ -241,26 +240,28 @@ class DataResponseType(str, Enum):
 class DataResponse:
     """Response from Presenter.
 
-    Three parts for frontend:
-    1. acknowledge - shown before DataCard ("Понял, получаю...")
-    2. title - DataCard title
-    3. summary - shown after DataCard ("Вот 21 день...")
+    Two parts for frontend:
+    1. title - DataCard title
+    2. summary - main response text
 
-    Note: If context_compacted=true is passed, the LLM will include a brief
+    Note: acknowledge comes from Understander, not Presenter.
+    If context_compacted=true is passed, the LLM will include a brief
     warning in the summary about possibly not recalling old conversation details.
     """
 
-    acknowledge: str  # "Понял, получаю волатильность за 2024..."
     title: str | None  # DataCard title
     summary: str  # "Вот 21 день. Было раннее закрытие..."
     type: DataResponseType
     row_count: int = 0
+    usage: Usage = None
+
+    def __post_init__(self):
+        if self.usage is None:
+            self.usage = Usage()
 
     @property
     def text(self) -> str:
         """Combined text for backwards compatibility."""
-        if self.title:
-            return f"{self.acknowledge}\n\n{self.summary}"
         return self.summary
 
 
@@ -290,6 +291,31 @@ class Presenter:
         self.symbol = symbol
         self.instrument = get_instrument(symbol) or {}
         self.instrument_context = self._build_instrument_context()
+        # Track usage across all LLM calls in a single present() call
+        self._usage = Usage()
+
+    def _call_llm(
+        self,
+        prompt: str,
+        temperature: float = 0.4,
+        max_output_tokens: int = 100,
+        fallback: str = "",
+    ) -> str:
+        """Call LLM and track usage. Returns text, updates self._usage."""
+        try:
+            response = self.client.models.generate_content(
+                model=self.model,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    temperature=temperature,
+                    max_output_tokens=max_output_tokens,
+                ),
+            )
+            # Track usage
+            self._usage = self._usage + Usage.from_response(response)
+            return response.text.strip()
+        except Exception:
+            return fallback
 
     def _build_instrument_context(self) -> str:
         """Build full instrument context for prompts."""
@@ -331,8 +357,11 @@ class Presenter:
             context_compacted: True if conversation memory was compacted (old messages removed)
 
         Returns:
-            DataResponse with acknowledge, title, summary
+            DataResponse with acknowledge, title, summary, usage
         """
+        # Reset usage tracking for this call
+        self._usage = Usage()
+
         original_question = question
 
         # Extract rows and summary from executor result
@@ -355,22 +384,22 @@ class Presenter:
         if row_count == 0:
             summary = self._generate_no_data(original_question, lang)
             return DataResponse(
-                acknowledge="",
                 title=None,
                 summary=summary,
                 type=DataResponseType.NO_DATA,
                 row_count=0,
+                usage=self._usage,
             )
 
         # Single row — natural summary, no table
         if row_count == 1:
             summary = self._summarize_single(rows[0], columns, original_question, lang, context_compacted)
             return DataResponse(
-                acknowledge=self._generate_acknowledge(original_question, lang),
                 title=None,
                 summary=summary,
                 type=DataResponseType.SINGLE,
                 row_count=1,
+                usage=self._usage,
             )
 
         # Small dataset (2-5 rows) — summary + table
@@ -379,11 +408,11 @@ class Presenter:
             table = self._format_table(rows, columns)
             summary_with_table = f"{summary}\n\n{table}"
             return DataResponse(
-                acknowledge=self._generate_acknowledge(original_question, lang),
                 title=None,
                 summary=summary_with_table,
                 type=DataResponseType.INLINE,
                 row_count=row_count,
+                usage=self._usage,
             )
 
         # Large dataset (>5 rows) — DataCard + offer analysis
@@ -405,11 +434,11 @@ class Presenter:
             text = TEMPLATES["large_data"].get(lang, TEMPLATES["large_data"]["en"]).format(row_count=row_count)
 
         return DataResponse(
-            acknowledge=self._generate_acknowledge(original_question, lang),
             title=title,
             summary=text,
             type=DataResponseType.LARGE_DATA,
             row_count=row_count,
+            usage=self._usage,
         )
 
     def _present_with_summary(
@@ -425,13 +454,10 @@ class Presenter:
         Present data using pre-computed summary.
 
         Logic:
-        - rows ≤ 5: acknowledge + table + summary text
-        - rows > 5: acknowledge + summary text (table in UI via DataCard)
+        - rows ≤ 5: table + summary text
+        - rows > 5: summary text (table in UI via DataCard)
         """
         row_count = len(rows)
-
-        # Generate acknowledge and summary text
-        acknowledge = self._generate_acknowledge(question, lang)
         text = self._generate_summary_answer(question, summary, lang, context_compacted)
 
         # Small table (≤5 rows) — table first, then summary
@@ -439,31 +465,31 @@ class Presenter:
             table = self._format_table(rows, columns)
             table_then_text = f"{table}\n\n{text}"
             return DataResponse(
-                acknowledge=acknowledge,
                 title=None,
                 summary=table_then_text,
                 type=DataResponseType.INLINE,
                 row_count=row_count,
+                usage=self._usage,
             )
 
         # Large table — generate title for DataCard
         if row_count > self.INLINE_THRESHOLD:
             title = self._generate_title(question, columns, row_count, lang)
             return DataResponse(
-                acknowledge=acknowledge,
                 title=title,
                 summary=text,
                 type=DataResponseType.LARGE_DATA,
                 row_count=row_count,
+                usage=self._usage,
             )
 
         # No rows — just text
         return DataResponse(
-            acknowledge=acknowledge,
             title=None,
             summary=text,
             type=DataResponseType.SINGLE,
             row_count=row_count,
+            usage=self._usage,
         )
 
     def _generate_summary_answer(
@@ -475,7 +501,6 @@ class Presenter:
     ) -> str:
         """Generate text answer from pre-computed summary using LLM."""
         import json
-        # Format values for display using centralized rules
         formatted_summary = format_summary(summary)
         summary_str = json.dumps(formatted_summary, ensure_ascii=False)
 
@@ -487,21 +512,8 @@ class Presenter:
             context_compacted=str(context_compacted).lower(),
         )
 
-        try:
-            response = self.client.models.generate_content(
-                model=self.model,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    temperature=0.4,
-                    max_output_tokens=100,
-                ),
-            )
-            return response.text.strip()
-        except Exception:
-            # Fallback — return raw summary
-            if lang == "ru":
-                return f"Результат: {summary_str}"
-            return f"Result: {summary_str}"
+        fallback = f"Результат: {summary_str}" if lang == "ru" else f"Result: {summary_str}"
+        return self._call_llm(prompt, temperature=0.4, max_output_tokens=100, fallback=fallback)
 
     def _format_table(self, rows: list[dict], columns: list[str]) -> str:
         """Format data as markdown table.
@@ -612,64 +624,14 @@ class Presenter:
             context_compacted=str(context_compacted).lower(),
         )
 
-        try:
-            response = self.client.models.generate_content(
-                model=self.model,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    temperature=0.4,
-                    max_output_tokens=80,
-                ),
-            )
-            return response.text.strip()
-        except Exception:
-            if lang == "ru":
-                return f"Вот данные, {row_count} строк."
-            return f"Here's the data, {row_count} rows."
-
-    def _generate_acknowledge(self, question: str, lang: str) -> str:
-        """Generate acknowledge message using LLM.
-
-        Returns short confirmation like "Понял, получаю волатильность за 2024..."
-        """
-        prompt = ACKNOWLEDGE_PROMPT.format(question=question, lang=lang)
-
-        try:
-            response = self.client.models.generate_content(
-                model=self.model,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    temperature=0.3,
-                    max_output_tokens=50,
-                ),
-            )
-            return response.text.strip()
-        except Exception:
-            # Fallback
-            if lang == "ru":
-                return "Понял, получаю данные..."
-            return "Got it, fetching data..."
+        fallback = f"Вот данные, {row_count} строк." if lang == "ru" else f"Here's the data, {row_count} rows."
+        return self._call_llm(prompt, temperature=0.4, max_output_tokens=80, fallback=fallback)
 
     def _generate_no_data(self, question: str, lang: str) -> str:
-        """Generate no-data response using LLM.
-
-        Returns context-aware message like "Данных за 2099 год нет — попробуй другой период."
-        """
+        """Generate no-data response using LLM."""
         prompt = NO_DATA_PROMPT.format(question=question, lang=lang)
-
-        try:
-            response = self.client.models.generate_content(
-                model=self.model,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    temperature=0.3,
-                    max_output_tokens=60,
-                ),
-            )
-            return response.text.strip()
-        except Exception:
-            # Fallback
-            return TEMPLATES["no_data"].get(lang, TEMPLATES["no_data"]["en"])
+        fallback = TEMPLATES["no_data"].get(lang, TEMPLATES["no_data"]["en"])
+        return self._call_llm(prompt, temperature=0.3, max_output_tokens=60, fallback=fallback)
 
     def _generate_title(
         self,
@@ -686,18 +648,8 @@ class Presenter:
             lang=lang,
         )
 
-        try:
-            response = self.client.models.generate_content(
-                model=self.model,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    temperature=0.3,
-                    max_output_tokens=30,
-                ),
-            )
-            return response.text.strip().strip('"\'')
-        except Exception:
-            return f"{self.symbol} Data"
+        result = self._call_llm(prompt, temperature=0.3, max_output_tokens=30, fallback=f"{self.symbol} Data")
+        return result.strip('"\'')  # Remove quotes if present
 
     def _generate_summary(
         self,
@@ -707,11 +659,7 @@ class Presenter:
         lang: str,
         context_compacted: bool = False,
     ) -> str:
-        """Generate data summary using LLM with flags as context.
-
-        LLM writes summary in natural language using pre-computed flags
-        as hints — doesn't interpret raw data, just formulates nicely.
-        """
+        """Generate data summary using LLM with flags as context."""
         prompt = SUMMARY_PROMPT.format(
             question=question,
             row_count=row_count,
@@ -720,19 +668,8 @@ class Presenter:
             context_compacted=str(context_compacted).lower(),
         )
 
-        try:
-            response = self.client.models.generate_content(
-                model=self.model,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    temperature=0.5,
-                    max_output_tokens=150,
-                ),
-            )
-            return response.text.strip()
-        except Exception:
-            # Fallback to simple template
-            return TEMPLATES["large_data"].get(lang, TEMPLATES["large_data"]["en"]).format(row_count=row_count)
+        fallback = TEMPLATES["large_data"].get(lang, TEMPLATES["large_data"]["en"]).format(row_count=row_count)
+        return self._call_llm(prompt, temperature=0.5, max_output_tokens=150, fallback=fallback)
 
 
 # =============================================================================

@@ -1,25 +1,349 @@
 """
-Integration test — full graph flow.
+Integration test — full graph flow with Supabase logging capture.
 
-Flow: Intent → Understander → Parser → Planner → Executor → Presenter
+Runs the REAL TradingGraph.stream_sse() and captures all data
+that would be logged to Supabase (without actually writing).
 
 Usage:
     python -m agent.tests.full_flow_test              # show usage
     python -m agent.tests.full_flow_test <category>   # run category
     python -m agent.tests.full_flow_test all          # run all
     python -m agent.tests.full_flow_test "question"   # run single
+    python -m agent.tests.full_flow_test -i           # interactive mode
 """
 
 import json
 import os
 import sys
+from dataclasses import dataclass, field
 from datetime import datetime
+from typing import Any
+from unittest.mock import patch, AsyncMock
 from uuid import uuid4
 
-from langchain_core.messages import HumanMessage
 
-from agent.graph import build_graph
+# =============================================================================
+# Supabase Logging Capture
+# =============================================================================
 
+@dataclass
+class CapturedLog:
+    """Captured Supabase logging data."""
+    # chat_logs (init)
+    init_chat_log: dict | None = None
+
+    # request_traces (per-agent steps)
+    trace_steps: list[dict] = field(default_factory=list)
+
+    # chat_logs (complete)
+    complete_chat_log: dict | None = None
+
+
+def create_logging_mocks(captured: CapturedLog):
+    """Create mock functions that capture logging data."""
+
+    async def mock_init_chat_log(request_id, user_id, chat_id, session_id, question):
+        captured.init_chat_log = {
+            "request_id": request_id,
+            "user_id": user_id,
+            "chat_id": chat_id,
+            "session_id": session_id,
+            "question": question,
+        }
+
+    def mock_log_trace_step_sync(request_id, user_id, step_number, agent_name, **kwargs):
+        captured.trace_steps.append({
+            "request_id": request_id,
+            "user_id": user_id,
+            "step_number": step_number,
+            "agent_name": agent_name,
+            "input_data": kwargs.get("input_data"),
+            "output_data": kwargs.get("output_data"),
+            "usage": kwargs.get("usage"),
+            "duration_ms": kwargs.get("duration_ms", 0),
+        })
+
+    async def mock_complete_chat_log(request_id, chat_id=None, response="", route=None,
+                                      agents_used=None, duration_ms=0, usage=None):
+        captured.complete_chat_log = {
+            "request_id": request_id,
+            "chat_id": chat_id,
+            "response": response[:500] + "..." if response and len(response) > 500 else response,
+            "route": route,
+            "agents_used": agents_used,
+            "duration_ms": duration_ms,
+            "usage": usage,
+        }
+
+    return mock_init_chat_log, mock_log_trace_step_sync, mock_complete_chat_log
+
+
+# =============================================================================
+# Display Functions
+# =============================================================================
+
+def print_separator(char="=", width=80):
+    print(char * width)
+
+
+def print_header(title: str):
+    print_separator()
+    print(f"  {title}")
+    print_separator()
+
+
+def print_section(title: str):
+    print(f"\n{'─'*40}")
+    print(f"  {title}")
+    print(f"{'─'*40}")
+
+
+def format_usage(usage: dict | None) -> str:
+    """Format usage dict for display."""
+    if not usage:
+        return "—"
+    return (
+        f"in={usage.get('input_tokens', 0):,} "
+        f"out={usage.get('output_tokens', 0):,} "
+        f"think={usage.get('thinking_tokens', 0):,} "
+        f"cache={usage.get('cached_tokens', 0):,}"
+    )
+
+
+def display_captured_logs(captured: CapturedLog, show_full: bool = False):
+    """Display captured Supabase logging data."""
+
+    # Init chat log
+    print_section("chat_logs (INIT)")
+    if captured.init_chat_log:
+        init = captured.init_chat_log
+        print(f"  request_id: {init['request_id']}")
+        print(f"  user_id:    {init['user_id']}")
+        print(f"  chat_id:    {init['chat_id']}")
+        print(f"  session_id: {init['session_id']}")
+        print(f"  question:   {init['question'][:100]}{'...' if len(init['question']) > 100 else ''}")
+    else:
+        print("  (not captured)")
+
+    # Trace steps
+    print_section("request_traces (STEPS)")
+    if captured.trace_steps:
+        for step in captured.trace_steps:
+            agent = step["agent_name"]
+            step_num = step["step_number"]
+            duration = step["duration_ms"]
+            usage = format_usage(step.get("usage"))
+
+            print(f"\n  [{step_num}] {agent} ({duration}ms)")
+            print(f"      usage: {usage}")
+
+            # Input summary
+            input_data = step.get("input_data") or {}
+            if input_data:
+                print(f"      input:")
+                for k, v in input_data.items():
+                    if v is not None:
+                        v_str = str(v)[:80] + "..." if len(str(v)) > 80 else str(v)
+                        print(f"        {k}: {v_str}")
+
+            # Output summary
+            output_data = step.get("output_data") or {}
+            if output_data and show_full:
+                print(f"      output:")
+                for k, v in output_data.items():
+                    if v is not None and k not in ("usage", "messages"):
+                        v_str = str(v)[:80] + "..." if len(str(v)) > 80 else str(v)
+                        print(f"        {k}: {v_str}")
+    else:
+        print("  (no steps captured)")
+
+    # Complete chat log
+    print_section("chat_logs (COMPLETE)")
+    if captured.complete_chat_log:
+        comp = captured.complete_chat_log
+        print(f"  request_id:  {comp['request_id']}")
+        print(f"  chat_id:     {comp['chat_id']}")
+        print(f"  route:       {comp['route']}")
+        print(f"  agents_used: {comp['agents_used']}")
+        print(f"  duration_ms: {comp['duration_ms']}")
+
+        # Usage by agent
+        usage = comp.get("usage") or {}
+        if usage:
+            print(f"  usage:")
+            for agent_name, agent_usage in usage.items():
+                if agent_name != "total" and isinstance(agent_usage, dict):
+                    print(f"    {agent_name}: {format_usage(agent_usage)}")
+            if "total" in usage:
+                total = usage["total"]
+                cost = total.get("cost_usd", 0)
+                print(f"    ───────────")
+                print(f"    TOTAL: {format_usage(total)} (${cost:.4f})")
+
+        # Response preview
+        response = comp.get("response", "")
+        if response:
+            print(f"\n  response:")
+            for line in response.split("\n")[:10]:
+                print(f"    {line[:100]}")
+            if len(response.split("\n")) > 10:
+                print(f"    ... ({len(response)} chars total)")
+    else:
+        print("  (not captured)")
+
+
+def display_sse_events(events: list[dict]):
+    """Display SSE events summary."""
+    print_section("SSE Events")
+
+    for event in events:
+        etype = event.get("type")
+
+        if etype == "step_start":
+            agent = event.get("agent")
+            step = event.get("step")
+            print(f"  step_start: [{step}] {agent}")
+
+        elif etype == "step_end":
+            agent = event.get("agent")
+            step = event.get("step")
+            duration = event.get("duration_ms")
+            print(f"  step_end:   [{step}] {agent} ({duration}ms)")
+
+        elif etype == "text_delta":
+            content = event.get("content", "")[:50]
+            agent = event.get("agent")
+            print(f"  text_delta: ({agent}) {content}...")
+
+        elif etype == "usage":
+            total = event.get("total", {})
+            cost = event.get("cost", 0)
+            print(f"  usage:      {format_usage(total)} (${cost:.4f})")
+
+        elif etype == "done":
+            duration = event.get("total_duration_ms")
+            agents = event.get("agents_used", [])
+            print(f"  done:       {duration}ms, agents={agents}")
+
+
+# =============================================================================
+# Test Runner
+# =============================================================================
+
+def run_question(question: str, user_id: str = "test-user", show_events: bool = False) -> dict:
+    """
+    Run question through real TradingGraph with Supabase logging capture.
+
+    Returns dict with captured logs and SSE events.
+    """
+    from agent.trading_graph import TradingGraph
+
+    # Create fresh graph instance
+    graph = TradingGraph()
+
+    # Capture logging calls
+    captured = CapturedLog()
+    mock_init, mock_trace, mock_complete = create_logging_mocks(captured)
+
+    # Collect SSE events
+    events = []
+
+    session_id = str(uuid4())
+    chat_id = str(uuid4())
+
+    with patch("agent.trading_graph.init_chat_log", mock_init), \
+         patch("agent.trading_graph.complete_chat_log", mock_complete), \
+         patch("agent.graph.log_trace_step_sync", mock_trace):
+
+        for event in graph.stream_sse(
+            question=question,
+            user_id=user_id,
+            session_id=session_id,
+            chat_id=chat_id,
+            needs_title=True,
+        ):
+            events.append(event)
+
+    # Display results
+    print_header(f"Question: {question}")
+
+    if show_events:
+        display_sse_events(events)
+
+    display_captured_logs(captured, show_full=True)
+
+    return {
+        "question": question,
+        "captured": {
+            "init_chat_log": captured.init_chat_log,
+            "trace_steps": captured.trace_steps,
+            "complete_chat_log": captured.complete_chat_log,
+        },
+        "events": events,
+    }
+
+
+def run_batch(questions: list[str], label: str = "batch") -> list[dict]:
+    """Run multiple questions, save results to JSON."""
+    results = []
+
+    for i, q in enumerate(questions, 1):
+        print(f"\n\n{'#'*80}")
+        print(f"#  [{i}/{len(questions)}] {q}")
+        print(f"{'#'*80}")
+
+        try:
+            result = run_question(q)
+            results.append(result)
+        except Exception as e:
+            print(f"\n  ERROR: {e}")
+            import traceback
+            traceback.print_exc()
+            results.append({"question": q, "error": str(e)})
+
+    # Save results
+    os.makedirs("agent/tests/results", exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    output_file = f"agent/tests/results/flow_{label}_{timestamp}.json"
+
+    with open(output_file, "w", encoding="utf-8") as f:
+        json.dump(results, f, ensure_ascii=False, indent=2, default=str)
+
+    print(f"\n\n{'='*80}")
+    print(f"Saved {len(results)} results to: {output_file}")
+
+    return results
+
+
+def interactive_mode():
+    """Interactive question testing."""
+    print_header("Interactive Mode")
+    print("Type questions to test. Commands: 'quit', 'exit', 'q'\n")
+
+    while True:
+        try:
+            question = input("\n> ").strip()
+        except (EOFError, KeyboardInterrupt):
+            break
+
+        if not question:
+            continue
+        if question.lower() in ("quit", "exit", "q"):
+            break
+
+        try:
+            run_question(question, show_events=True)
+        except Exception as e:
+            print(f"ERROR: {e}")
+            import traceback
+            traceback.print_exc()
+
+    print("\nBye!")
+
+
+# =============================================================================
+# Test Categories
+# =============================================================================
 
 QUESTIONS_BY_CATEGORY = {
     "list": [
@@ -94,149 +418,46 @@ QUESTIONS_BY_CATEGORY = {
         "что было в день после нового года в 2024",
         "performance around fomc days in 2024",
     ],
+    "quick": [
+        "how many trading days in 2024",
+        "average daily range",
+    ],
 }
 
 
-def run_question(question: str, graph=None) -> dict:
-    """Run question through full graph flow."""
-    if graph is None:
-        graph = build_graph().compile()
-
-    state = {
-        "messages": [HumanMessage(content=question)],
-        "session_id": str(uuid4()),
-        "user_id": "test-user",
-    }
-
-    result = graph.invoke(state)
-
-    return {
-        "question": question,
-        "intent": result.get("intent"),
-        "lang": result.get("lang"),
-        "internal_query": result.get("internal_query"),
-        # Understander
-        "goal": result.get("goal"),
-        "understood": result.get("understood"),
-        "expanded_query": result.get("expanded_query"),
-        "acknowledge": result.get("acknowledge"),
-        "need_clarification": result.get("need_clarification"),
-        # Parser
-        "steps": result.get("parsed_query", []),
-        "parser_raw_output": result.get("parser_raw_output"),
-        "plans": result.get("execution_plan", []),
-        "thoughts": result.get("parser_thoughts"),
-        "data": result.get("data"),
-        # Presenter
-        "response": result.get("response"),
-        "presenter_type": result.get("presenter_type"),
-        "presenter_acknowledge": result.get("presenter_acknowledge"),
-        "usage": result.get("usage"),
-    }
-
-
-def run_batch(questions: list[str], label: str = "batch") -> list[dict]:
-    """Run multiple questions, save results to JSON."""
-    graph = build_graph().compile()
-    results = []
-
-    for i, q in enumerate(questions, 1):
-        print(f"\n[{i}/{len(questions)}] {q}")
-        try:
-            result = run_question(q, graph)
-            results.append(result)
-
-            # Understander
-            understood = result.get("understood")
-            goal = result.get("goal")
-            expanded = result.get("expanded_query")
-            clarification = result.get("need_clarification")
-
-            if understood:
-                print(f"  → Understander: ✓ goal={goal}")
-                if expanded:
-                    print(f"     expanded: {expanded[:80]}...")
-                ack = result.get("acknowledge")
-                if ack:
-                    print(f"     acknowledge: {ack}")
-            else:
-                print(f"  → Understander: ✗ needs clarification")
-                if clarification:
-                    print(f"     question: {clarification.get('question', '?')}")
-
-            steps = result.get("steps", [])
-            if steps:
-                ops = [s.get("operation", "?") for s in steps]
-                print(f"  → Parser: {', '.join(ops)}")
-            elif understood:
-                print(f"  → Parser: no steps")
-
-            plans = result.get("plans", [])
-            if plans:
-                modes = [p.get("mode", "?") for p in plans]
-                print(f"  → Planner: {', '.join(modes)}")
-
-            data = result.get("data", [])
-            if data:
-                for d in data:
-                    summary = d.get("summary", {})
-                    if "error" in summary:
-                        print(f"  → Executor: ERROR {summary['error']}")
-                    else:
-                        print(f"  → Executor: {summary}")
-
-            # Presenter
-            response = result.get("response")
-            if response:
-                ptype = result.get("presenter_type", "?")
-                preview = response[:100].replace("\n", " ")
-                print(f"  → Presenter ({ptype}): {preview}...")
-        except Exception as e:
-            print(f"  → ERROR: {e}")
-            results.append({"question": q, "error": str(e)})
-
-    os.makedirs("agent/tests/results", exist_ok=True)
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_file = f"agent/tests/results/test_{label}_{timestamp}.json"
-
-    with open(output_file, "w", encoding="utf-8") as f:
-        json.dump(results, f, ensure_ascii=False, indent=2)
-
-    print(f"\n{'='*60}")
-    print(f"Saved {len(results)} results to: {output_file}")
-    return results
-
+# =============================================================================
+# Main
+# =============================================================================
 
 if __name__ == "__main__":
     if len(sys.argv) > 1:
         arg = sys.argv[1]
 
-        if arg in QUESTIONS_BY_CATEGORY:
+        if arg == "-i":
+            interactive_mode()
+        elif arg in QUESTIONS_BY_CATEGORY:
             questions = QUESTIONS_BY_CATEGORY[arg]
-            print("="*60)
-            print(f"Running {arg.upper()} ({len(questions)} questions)")
-            print("="*60)
+            print_header(f"Running {arg.upper()} ({len(questions)} questions)")
             run_batch(questions, arg)
         elif arg == "all":
             for category, questions in QUESTIONS_BY_CATEGORY.items():
-                print("\n" + "="*60)
-                print(f"Running {category.upper()} ({len(questions)} questions)")
-                print("="*60)
+                print_header(f"Category: {category.upper()} ({len(questions)} questions)")
                 run_batch(questions, category)
         else:
+            # Single question
             question = " ".join(sys.argv[1:])
-            result = run_question(question)
-            print(json.dumps(result, ensure_ascii=False, indent=2))
+            result = run_question(question, show_events=True)
 
             # Save to file
             os.makedirs("agent/tests/results", exist_ok=True)
-            with open("agent/tests/results/flow_test.json", "w", encoding="utf-8") as f:
-                json.dump(result, f, ensure_ascii=False, indent=2)
-            print(f"\nSaved to: agent/tests/results/flow_test.json")
+            with open("agent/tests/results/flow_single.json", "w", encoding="utf-8") as f:
+                json.dump(result, f, ensure_ascii=False, indent=2, default=str)
+            print(f"\n\nSaved to: agent/tests/results/flow_single.json")
     else:
         print("Usage:")
         print("  python -m agent.tests.full_flow_test <category>   # run category")
         print("  python -m agent.tests.full_flow_test all          # run all")
         print('  python -m agent.tests.full_flow_test "question"   # run single')
+        print("  python -m agent.tests.full_flow_test -i           # interactive")
         print()
         print("Categories:", ", ".join(QUESTIONS_BY_CATEGORY.keys()))

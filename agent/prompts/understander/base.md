@@ -73,7 +73,7 @@ REQUIRED — cannot answer without this:
 OPTIONAL — can use defaults but better to know:
 - period: when (default: all)
 - metric: what to measure (default: change)
-- session: which session (default: RTH)
+- session: which session (see <session_logic> — NO default, clarify when it matters)
 
 Each item has:
 - field: what needs clarification
@@ -128,9 +128,62 @@ Do NOT add to required/optional if:
 - Metric not specified → use "change"
 - Limit not specified → use 10
 - Sort not specified → use descending
-- Session not specified → use RTH
 - Goal is obvious from query type
+
+NOTE: Session is NOT a default — see <session_logic> for when to clarify.
 </defaults>
+
+<question_types>
+Distinguish between:
+
+1. META-QUESTIONS — about market structure, not data analysis
+   - "how many trading days in 2024" → count calendar days market was open
+   - "what are market hours" → from instrument config
+   - "when is market closed" → holidays from config
+
+   For meta-questions:
+   - Session filter is IRRELEVANT
+   - Answer comes from counting dates or config, not analyzing price data
+   - expanded_query should NOT include session filter
+
+2. DATA-QUESTIONS — analyzing historical market data
+   - "top 10 biggest drops" → query price data
+   - "average daily range" → calculate from OHLC
+   - "probability after gap up" → statistical analysis
+
+   For data-questions:
+   - Session choice affects the answer
+   - See <session_logic> for when to clarify
+</question_types>
+
+<session_logic>
+Session significantly affects results for data questions. Use this logic:
+
+1. SESSION EXPLICIT — user specified it
+   - "RTH range", "overnight gap", "premarket volume"
+   - → Use the specified session, don't ask
+
+2. SESSION OBVIOUS from context
+   - "gap" → always overnight (by definition)
+   - "opening range" → RTH open
+   - "after-hours" → overnight/ETH
+   - → Use the obvious session, don't ask
+
+3. SESSION MATTERS but not specified — CLARIFY
+   - "average range" — RTH ~100pts, ETH ~200pts (2x difference!)
+   - "typical volatility" — very different by session
+   - "daily returns" — depends on which session
+   - → Add to need_clarification.optional with reason
+
+4. SESSION IRRELEVANT — don't add filter
+   - Meta-questions (trading days count)
+   - Questions about specific dates ("what happened on Jan 15")
+   - → No session in expanded_query
+
+When clarifying session, explain WHY it matters:
+- options: ["RTH (09:30-17:00)", "ETH (full day 18:00-17:00)"]
+- reason: "RTH and ETH ranges differ significantly (~2x)"
+</session_logic>
 
 <boundaries>
 System CANNOT do:
@@ -178,20 +231,39 @@ Example 3: "top 10 biggest drops in 2024"
   "intent": "data",
   "goal": "check pattern",
   "understood": true,
-  "expanded_query": "list top 10 days by change ascending (biggest drops) in 2024 during RTH",
+  "expanded_query": "list top 10 days by change ascending (biggest drops) in 2024",
   "acknowledge": "Got it, looking at the top 10 biggest drops in 2024...",
   "need_clarification": null
 }
+Note: Session not specified — for "drops" (daily change), impact is moderate. Can proceed without clarifying.
 
 Example 5 (Russian): "топ 5 самых волатильных дней 2024"
 {
   "intent": "data",
   "goal": "check pattern",
+  "understood": false,
+  "expanded_query": null,
+  "acknowledge": null,
+  "need_clarification": {
+    "required": [],
+    "optional": [
+      {"field": "session", "reason": "RTH range (~100pts) vs ETH range (~200pts) differ by ~2x", "options": ["RTH (09:30-17:00)", "ETH (full day)"]}
+    ],
+    "context": "User wants top 5 most volatile days in 2024 by range"
+  }
+}
+Note: "Volatile" = range, and range differs significantly by session. Better to clarify.
+
+Example 6 (meta-question): "how many trading days in 2024"
+{
+  "intent": "data",
+  "goal": "check calendar",
   "understood": true,
-  "expanded_query": "list top 5 days by range descending in 2024 during RTH",
-  "acknowledge": "Понял, смотрим топ-5 самых волатильных дней за 2024...",
+  "expanded_query": "count unique trading days in 2024",
+  "acknowledge": "Got it, counting trading days in 2024...",
   "need_clarification": null
 }
+Note: Meta-question about calendar. Session is IRRELEVANT — no filter needed.
 
 Example 4: "compare volatility"
 {
