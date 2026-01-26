@@ -57,7 +57,6 @@ function AppShellContent() {
     streamingPreview,
     streamingText,
     streamingDataCard,
-    suggestions,
     sendMessage,
     stopGeneration,
     updateFeedback,
@@ -72,10 +71,6 @@ function AppShellContent() {
     sendMessage(inputText)
     setInputText("")
   }, [inputText, sendMessage])
-
-  const handleSuggestionClick = useCallback((suggestion: string) => {
-    sendMessage(suggestion)
-  }, [sendMessage])
 
   const handleNewChat = useCallback(() => {
     createChat()
@@ -118,12 +113,10 @@ function AppShellContent() {
         streamingPreview={streamingPreview}
         streamingText={streamingText}
         streamingDataCard={streamingDataCard}
-        suggestions={suggestions}
         inputText={inputText}
         onInputChange={setInputText}
         onSubmit={handleSubmit}
         onStop={stopGeneration}
-        onSuggestionClick={handleSuggestionClick}
         onFeedback={updateFeedback}
         onOpenContextPanel={handleOpenContextPanel}
       />

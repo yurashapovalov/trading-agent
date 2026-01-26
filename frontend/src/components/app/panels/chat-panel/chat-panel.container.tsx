@@ -23,12 +23,10 @@ type ChatPanelContainerProps = {
   streamingPreview: string
   streamingText: string
   streamingDataCard: DataCard | null
-  suggestions: string[]
   inputText: string
   onInputChange: (text: string) => void
   onSubmit: () => void
   onStop: () => void
-  onSuggestionClick: (suggestion: string) => void
   onFeedback: (requestId: string, type: "positive" | "negative", text: string) => void
   onOpenContextPanel: (data: DataCard) => void
 }

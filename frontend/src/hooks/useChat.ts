@@ -6,13 +6,6 @@ import type { ChatMessage, AgentStep, ToolUsage, Usage, SSEEvent, DataCard } fro
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
 
-const DEFAULT_SUGGESTIONS = [
-  "Покажи статистику по NQ",
-  "Найди лучшие точки входа для лонга",
-  "Какая волатильность по часам?",
-  "Сделай бэктест на 9:30 шорт",
-]
-
 function stripSuggestions(text: string): string {
   return text.replace(/\[SUGGESTIONS\][\s\S]*?\[\/SUGGESTIONS\]/g, "").trim()
 }
@@ -137,15 +130,11 @@ export function useChat({ chatId, onChatCreated, onTitleUpdated }: UseChatOption
   const [streamingPreview, setStreamingPreview] = useState("")
   const [streamingText, setStreamingText] = useState("")
   const [streamingDataCard, setStreamingDataCard] = useState<DataCard | null>(null)
-  const [suggestions, setSuggestions] = useState<string[]>(DEFAULT_SUGGESTIONS)
   const abortControllerRef = useRef<AbortController | null>(null)
 
   // Load messages when chatId changes
   useEffect(() => {
     if (!session?.access_token) return
-
-    // Reset state for new chat
-    setSuggestions(DEFAULT_SUGGESTIONS)
 
     if (!chatId) {
       setMessages([])
@@ -357,10 +346,6 @@ export function useChat({ chatId, onChatCreated, onTitleUpdated }: UseChatOption
                     summaryText += event.content
                     setStreamingText(summaryText)
                   }
-                } else if (event.type === "suggestions") {
-                  if (event.suggestions && event.suggestions.length > 0) {
-                    setSuggestions(event.suggestions)
-                  }
                 } else if (event.type === "data_title") {
                   // Save data title for data card
                   dataCard = { title: event.title, row_count: 0 }
@@ -517,7 +502,6 @@ export function useChat({ chatId, onChatCreated, onTitleUpdated }: UseChatOption
     streamingPreview,
     streamingText,
     streamingDataCard,
-    suggestions,
     sendMessage,
     stopGeneration,
     updateFeedback,

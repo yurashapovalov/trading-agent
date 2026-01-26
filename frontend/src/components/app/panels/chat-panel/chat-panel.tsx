@@ -41,7 +41,6 @@ import {
   PromptInputTools,
   PromptInputSubmit,
 } from "@/components/ai/prompt-input"
-import { Suggestions, Suggestion } from "@/components/ai/suggestion"
 import { Actions, Action } from "@/components/ai/actions"
 import { Processed } from "@/components/app/processed/processed"
 import { DataCard } from "@/components/ai/data-card"
@@ -64,13 +63,11 @@ type ChatPanelProps = {
   streamingPreview: string
   streamingText: string
   streamingDataCard: DataCardType | null
-  suggestions: string[]
   inputText: string
   // Data callbacks
   onInputChange: (text: string) => void
   onSubmit: () => void
   onStop: () => void
-  onSuggestionClick: (suggestion: string) => void
   onFeedback: (requestId: string, type: "positive" | "negative", text: string) => void
   // UI state
   sidebarOpen: boolean
@@ -88,12 +85,10 @@ export function ChatPanel({
   streamingPreview,
   streamingText,
   streamingDataCard,
-  suggestions,
   inputText,
   onInputChange,
   onSubmit,
   onStop,
-  onSuggestionClick,
   onFeedback,
   sidebarOpen,
   onOpenSidebar,
@@ -309,19 +304,6 @@ export function ChatPanel({
         className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-[var(--bg-secondary)] via-[var(--bg-secondary)] to-transparent pt-2 pb-8 md:pb-4 px-4"
       >
         <div className="mx-auto max-w-2xl">
-          {/* Suggestions */}
-          {suggestions.length > 0 && !isLoading && (
-            <Suggestions className="mb-3">
-              {suggestions.map((suggestion) => (
-                <Suggestion
-                  key={suggestion}
-                  suggestion={suggestion}
-                  onClick={onSuggestionClick}
-                />
-              ))}
-            </Suggestions>
-          )}
-
           {/* Input */}
           <PromptInput onSubmit={onSubmit}>
             <PromptInputBody>
