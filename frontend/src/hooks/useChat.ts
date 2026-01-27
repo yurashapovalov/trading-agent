@@ -424,7 +424,8 @@ export function useChat({ chatId, onChatCreated, onTitleUpdated }: UseChatOption
                   }
                 } else if (event.type === "chat_id") {
                   // Backend created or resolved chat - notify parent to update state
-                  if (event.chat_id && onChatCreated) {
+                  // Only call onChatCreated if it's a NEW chat (different from current)
+                  if (event.chat_id && onChatCreated && event.chat_id !== chatId) {
                     // Skip history reload - we already have messages in state
                     skipNextHistoryLoadRef.current = true
                     onChatCreated(event.chat_id)

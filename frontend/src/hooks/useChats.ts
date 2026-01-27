@@ -55,10 +55,38 @@ export function useChats() {
     fetchChats()
   }, [fetchChats])
 
-  // Start new chat (navigates to /, chat created on first message)
-  const createChat = useCallback(() => {
-    router.push("/")
-  }, [router])
+  // Start new chat - creates session immediately and navigates to it
+  const createChat = useCallback(async () => {
+    if (!session?.access_token) {
+      router.push("/")
+      return
+    }
+
+    try {
+      const response = await fetch(`${API_URL}/chats`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({}),
+      })
+
+      if (response.ok) {
+        const newChat: ChatSession = await response.json()
+        // Add to local state immediately
+        setChats((prev) => [newChat, ...prev])
+        // Navigate to new chat
+        router.push(`/chat/${newChat.id}`)
+      } else {
+        // Fallback to old behavior
+        router.push("/")
+      }
+    } catch (e) {
+      console.error("Failed to create chat:", e)
+      router.push("/")
+    }
+  }, [session?.access_token, router])
 
   const deleteChat = useCallback(async (chatId: string) => {
     if (!session?.access_token) return
