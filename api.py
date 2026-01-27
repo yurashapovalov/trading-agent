@@ -602,7 +602,7 @@ def get_recent_chat_history(user_id: str, limit: int = config.CHAT_HISTORY_LIMIT
     try:
         # Load by user_id only (no session filter until we implement multiple chats)
         result = supabase.table("chat_logs") \
-            .select("question, response, session_id, created_at") \
+            .select("question, response, chat_id, created_at") \
             .eq("user_id", user_id) \
             .order("created_at", desc=True) \
             .limit(limit) \
@@ -717,7 +717,7 @@ async def chat_history(user_id: str = Depends(require_auth), limit: int = 50):
     try:
         # Get chat logs
         result = supabase.table("chat_logs") \
-            .select("id, request_id, question, response, route, agents_used, validation_passed, input_tokens, output_tokens, thinking_tokens, cost_usd, created_at, session_id") \
+            .select("id, request_id, question, response, route, agents_used, created_at, chat_id, usage") \
             .eq("user_id", user_id) \
             .order("created_at", desc=True) \
             .limit(limit) \
@@ -726,7 +726,18 @@ async def chat_history(user_id: str = Depends(require_auth), limit: int = 50):
         if not result.data:
             return []
 
-        logs = list(reversed(result.data))
+        # Extract token usage from JSONB 'usage' column
+        logs = []
+        for row in reversed(result.data):
+            usage = row.get("usage") or {}
+            total = usage.get("total", {})
+            logs.append({
+                **row,
+                "input_tokens": total.get("input_tokens", 0),
+                "output_tokens": total.get("output_tokens", 0),
+                "thinking_tokens": total.get("thinking_tokens", 0),
+                "cost_usd": total.get("cost_usd", 0),
+            })
 
         # Get request_ids to fetch traces
         request_ids = [log["request_id"] for log in logs if log.get("request_id")]
