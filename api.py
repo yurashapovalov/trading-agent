@@ -297,7 +297,7 @@ async def get_chat_messages(
 
         # Get messages for this chat
         result = supabase.table("chat_logs") \
-            .select("id, request_id, question, response, route, agents_used, validation_passed, input_tokens, output_tokens, thinking_tokens, cost_usd, feedback, created_at") \
+            .select("id, request_id, question, response, route, agents_used, input_tokens, output_tokens, thinking_tokens, cost_usd, feedback, created_at") \
             .eq("chat_id", chat_id) \
             .order("created_at") \
             .limit(limit) \
