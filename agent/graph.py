@@ -613,9 +613,10 @@ def respond_to_user(state: AgentState) -> dict:
     start_time = time.time()
     question = state.get("internal_query") or get_current_question(state)
     lang = state.get("lang", "en")
+    memory_context = state.get("memory_context")
 
     responder = Responder()
-    result = responder.respond(question=question, lang=lang)
+    result = responder.respond(question=question, lang=lang, memory_context=memory_context)
 
     # Aggregate usage
     prev_usage = state.get("usage") or {}

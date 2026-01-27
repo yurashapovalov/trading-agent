@@ -2,27 +2,7 @@
 
 import pandas as pd
 
-
-# Column display priority (first = most important)
-COLUMN_ORDER = [
-    # 1. Time — always first
-    "date", "timestamp",
-
-    # 2. Key metrics
-    "change", "gap", "range",
-
-    # 3. OHLCV
-    "open", "high", "low", "close", "volume",
-
-    # 4. Flags
-    "is_green", "gap_filled",
-
-    # 5. Time components
-    "weekday", "month", "year",
-
-    # 6. Neighbors
-    "prev_change", "next_change",
-]
+from constants import COLUMN_ORDER
 
 
 def _order_columns(df: pd.DataFrame) -> pd.DataFrame:

@@ -58,9 +58,16 @@ lang: ru, question: какая погода
 
 
 USER_PROMPT = """<language>{lang}</language>
-
+{memory_section}
 <question>
 {question}
 </question>
 
 Respond in {lang}. Stay on domain, be concise."""
+
+
+MEMORY_SECTION = """
+<conversation_history>
+{memory_context}
+</conversation_history>
+"""

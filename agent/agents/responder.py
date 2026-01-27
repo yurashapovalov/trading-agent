@@ -22,7 +22,7 @@ from google.genai import types
 
 import config
 from agent.types import Usage
-from agent.prompts.responder import SYSTEM_PROMPT, USER_PROMPT
+from agent.prompts.responder import SYSTEM_PROMPT, USER_PROMPT, MEMORY_SECTION
 
 
 @dataclass
@@ -54,20 +54,27 @@ class Responder:
         self.model = model or config.GEMINI_LITE_MODEL
         self.symbol = symbol
 
-    def respond(self, question: str, lang: str = "en") -> ResponderResult:
+    def respond(
+        self,
+        question: str,
+        lang: str = "en",
+        memory_context: str | None = None,
+    ) -> ResponderResult:
         """
         Generate response for non-data query.
 
         Args:
             question: User's question
             lang: ISO 639-1 language code (en, ru, es, etc.)
+            memory_context: Conversation history for context
 
         Returns:
             ResponderResult with text and usage
         """
         # Build prompts
         system = SYSTEM_PROMPT.format(symbol=self.symbol)
-        user = USER_PROMPT.format(question=question, lang=lang)
+        memory_section = MEMORY_SECTION.format(memory_context=memory_context) if memory_context else ""
+        user = USER_PROMPT.format(question=question, lang=lang, memory_section=memory_section)
 
         # Call LLM
         response = self.client.models.generate_content(
@@ -87,7 +94,12 @@ class Responder:
 # Simple API
 # =============================================================================
 
-def respond(question: str, lang: str = "en", symbol: str = "NQ") -> ResponderResult:
+def respond(
+    question: str,
+    lang: str = "en",
+    symbol: str = "NQ",
+    memory_context: str | None = None,
+) -> ResponderResult:
     """
     Generate response for non-data query.
 
@@ -97,9 +109,10 @@ def respond(question: str, lang: str = "en", symbol: str = "NQ") -> ResponderRes
         question: User's question
         lang: ISO 639-1 language code (en, ru, es, etc.)
         symbol: Trading symbol
+        memory_context: Conversation history for context
 
     Returns:
         ResponderResult with text and usage
     """
     responder = Responder(symbol=symbol)
-    return responder.respond(question, lang)
+    return responder.respond(question, lang, memory_context)

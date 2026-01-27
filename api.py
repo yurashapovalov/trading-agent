@@ -28,6 +28,17 @@ from supabase import create_client
 
 from data import get_data_info, init_database
 import config
+from constants import COLUMN_ORDER
+
+
+def _order_columns(columns: list[str]) -> list[str]:
+    """Order columns by priority. Unknown columns go last."""
+    def priority(col: str) -> int:
+        try:
+            return COLUMN_ORDER.index(col)
+        except ValueError:
+            return len(COLUMN_ORDER)
+    return sorted(columns, key=priority)
 
 
 def clean_for_json(obj):
@@ -389,9 +400,12 @@ async def get_request_data(
             all_rows = []
             for result in data:
                 all_rows.extend(result.get("rows", []))
+
+            # Order columns by priority (JSONB doesn't preserve key order)
+            columns = _order_columns(list(all_rows[0].keys())) if all_rows else []
             return {
                 "rows": all_rows,
-                "columns": list(all_rows[0].keys()) if all_rows else [],
+                "columns": columns,
                 "row_count": len(all_rows),
                 "title": "",
             }
@@ -647,6 +661,7 @@ async def chat_stream(request: ChatRequest, user_id: str = Depends(require_auth)
 
     # Check if chat needs a title (first message)
     needs_title = check_needs_title(chat_id)
+    print(f"[API] needs_title={needs_title} for chat_id={chat_id}")
 
     # Check if we're awaiting clarification response
     clarification_state = get_clarification_state(chat_id)
@@ -675,11 +690,14 @@ async def chat_stream(request: ChatRequest, user_id: str = Depends(require_auth)
                     output = event.get("output") or {}
                     if event.get("agent") == "understander" and output.get("suggested_title"):
                         suggested_title = output.get("suggested_title")
+                        print(f"[API] Captured suggested_title: {suggested_title}")
 
                 elif event_type == "done":
                     # Save suggested title from Understander (first message only)
                     if suggested_title:
+                        print(f"[API] Saving title '{suggested_title}' for chat_id={chat_id}")
                         new_title = await save_chat_title(chat_id, suggested_title)
+                        print(f"[API] save_chat_title returned: {new_title}")
                         if new_title:
                             yield f"data: {json.dumps({'type': 'chat_title', 'chat_id': chat_id, 'title': new_title})}\n\n"
 
