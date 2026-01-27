@@ -377,8 +377,17 @@ export function useChat({ chatId, onChatCreated, onTitleUpdated }: UseChatOption
                     summaryText += event.content
                     setStreamingText(summaryText)
                   }
+                } else if (event.type === "acknowledge") {
+                  // Quick preview from understander
+                  previewText = event.content
+                  setStreamingPreview(event.content)
+                } else if (event.type === "data_card") {
+                  // Data card from presenter
+                  dataCard = { title: event.title, row_count: event.row_count }
+                  setStreamingDataCard({ title: event.title, row_count: event.row_count })
+                  isAfterDataReady = true
                 } else if (event.type === "data_title") {
-                  // Save data title for data card
+                  // Legacy: Save data title for data card
                   dataCard = { title: event.title, row_count: 0 }
                   setStreamingDataCard({ title: event.title, row_count: 0 })
                 } else if (event.type === "data_ready") {

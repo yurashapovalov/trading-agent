@@ -229,6 +229,26 @@ class TradingGraph:
                     "request_id": ctx.request_id,
                 }
 
+                # Send acknowledge from understander (preview while loading)
+                if isinstance(output, dict) and node_name == "understander":
+                    acknowledge = output.get("acknowledge")
+                    if acknowledge:
+                        yield {
+                            "type": "acknowledge",
+                            "content": acknowledge,
+                        }
+
+                # Send data_card from presenter
+                if isinstance(output, dict) and node_name == "presenter":
+                    title = output.get("presenter_title")
+                    row_count = output.get("presenter_row_count", 0)
+                    if title:
+                        yield {
+                            "type": "data_card",
+                            "title": title,
+                            "row_count": row_count,
+                        }
+
                 # Stream text_delta for response
                 if isinstance(output, dict):
                     response = output.get("response")

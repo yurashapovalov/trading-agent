@@ -75,3 +75,5 @@ export type SSEEvent =
   | { type: "chat_title"; chat_id: string; title: string }
   | { type: "done"; request_id?: string }
   | { type: "error"; message: string }
+  | { type: "acknowledge"; content: string }
+  | { type: "data_card"; title: string; row_count: number }
