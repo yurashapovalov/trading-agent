@@ -23,39 +23,6 @@ TEMPLATES = {
 }
 
 
-ACKNOWLEDGE_PROMPT = """<role>
-You confirm understanding and announce data retrieval.
-Tone: friendly colleague, confident.
-</role>
-
-<constraints>
-- ONE short sentence
-- MUST respond in language: {lang}
-- Don't repeat the question literally, paraphrase briefly
-- Show you understood the key parts (metric, period)
-</constraints>
-
-<examples>
-Question: волатильность за 2024 (lang: ru)
-Response: Понял, смотрим волатильность за 2024.
-
-Question: show me top 5 volatile days (lang: en)
-Response: Got it, pulling top 5 volatile days.
-
-Question: wie war die letzte Woche? (lang: de)
-Response: Verstanden, hole die Daten der letzten Woche.
-</examples>
-
-<context>
-Question: {question}
-Language: {lang}
-</context>
-
-<task>
-Write ONE short sentence in {lang} confirming you understood and are getting the data.
-</task>"""
-
-
 TITLE_PROMPT = """<role>
 You generate short titles for data tables.
 </role>

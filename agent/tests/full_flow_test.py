@@ -42,40 +42,64 @@ class CapturedLog:
 def create_logging_mocks(captured: CapturedLog):
     """Create mock functions that capture logging data."""
 
-    async def mock_init_chat_log(request_id, user_id, chat_id, session_id, question):
+    def mock_init_chat_log_sync(
+        request_id: str,
+        user_id: str,
+        chat_id: str | None,
+        question: str,
+    ):
         captured.init_chat_log = {
             "request_id": request_id,
             "user_id": user_id,
             "chat_id": chat_id,
-            "session_id": session_id,
             "question": question,
         }
 
-    def mock_log_trace_step_sync(request_id, user_id, step_number, agent_name, **kwargs):
+    def mock_log_trace_step_sync(
+        request_id: str,
+        user_id: str,
+        step_number: int,
+        agent_name: str,
+        input_data: dict | None = None,
+        output_data: dict | None = None,
+        usage: dict | None = None,
+        duration_ms: int = 0,
+    ):
         captured.trace_steps.append({
             "request_id": request_id,
             "user_id": user_id,
             "step_number": step_number,
             "agent_name": agent_name,
-            "input_data": kwargs.get("input_data"),
-            "output_data": kwargs.get("output_data"),
-            "usage": kwargs.get("usage"),
-            "duration_ms": kwargs.get("duration_ms", 0),
+            "input_data": input_data,
+            "output_data": output_data,
+            "usage": usage,
+            "duration_ms": duration_ms,
         })
 
-    async def mock_complete_chat_log(request_id, chat_id=None, response="", route=None,
-                                      agents_used=None, duration_ms=0, usage=None):
+    def mock_complete_chat_log_sync(
+        request_id: str,
+        chat_id: str | None = None,
+        response: str = "",
+        route: str = "",
+        agents_used: list[str] | None = None,
+        duration_ms: int = 0,
+        usage: dict | None = None,
+        title: str | None = None,
+    ):
+        if response and len(response) > 500:
+            response = response[:500] + "..."
         captured.complete_chat_log = {
             "request_id": request_id,
             "chat_id": chat_id,
-            "response": response[:500] + "..." if response and len(response) > 500 else response,
+            "response": response,
             "route": route,
-            "agents_used": agents_used,
+            "agents_used": agents_used or [],
             "duration_ms": duration_ms,
             "usage": usage,
+            "title": title,
         }
 
-    return mock_init_chat_log, mock_log_trace_step_sync, mock_complete_chat_log
+    return mock_init_chat_log_sync, mock_log_trace_step_sync, mock_complete_chat_log_sync
 
 
 # =============================================================================
@@ -117,11 +141,11 @@ def display_captured_logs(captured: CapturedLog, show_full: bool = False):
     print_section("chat_logs (INIT)")
     if captured.init_chat_log:
         init = captured.init_chat_log
-        print(f"  request_id: {init['request_id']}")
-        print(f"  user_id:    {init['user_id']}")
-        print(f"  chat_id:    {init['chat_id']}")
-        print(f"  session_id: {init['session_id']}")
-        print(f"  question:   {init['question'][:100]}{'...' if len(init['question']) > 100 else ''}")
+        print(f"  request_id: {init.get('request_id', '—')}")
+        print(f"  user_id:    {init.get('user_id', '—')}")
+        print(f"  chat_id:    {init.get('chat_id', '—')}")
+        question = init.get('question', '')
+        print(f"  question:   {question[:100]}{'...' if len(question) > 100 else ''}")
     else:
         print("  (not captured)")
 
@@ -161,11 +185,11 @@ def display_captured_logs(captured: CapturedLog, show_full: bool = False):
     print_section("chat_logs (COMPLETE)")
     if captured.complete_chat_log:
         comp = captured.complete_chat_log
-        print(f"  request_id:  {comp['request_id']}")
-        print(f"  chat_id:     {comp['chat_id']}")
-        print(f"  route:       {comp['route']}")
-        print(f"  agents_used: {comp['agents_used']}")
-        print(f"  duration_ms: {comp['duration_ms']}")
+        print(f"  request_id:  {comp.get('request_id', '—')}")
+        print(f"  chat_id:     {comp.get('chat_id', '—')}")
+        print(f"  route:       {comp.get('route', '—')}")
+        print(f"  agents_used: {comp.get('agents_used', [])}")
+        print(f"  duration_ms: {comp.get('duration_ms', 0)}")
 
         # Usage by agent
         usage = comp.get("usage") or {}
@@ -230,7 +254,14 @@ def display_sse_events(events: list[dict]):
 # Test Runner
 # =============================================================================
 
-def run_question(question: str, user_id: str = "test-user", show_events: bool = False) -> dict:
+def run_question(
+    question: str,
+    user_id: str = "test-user",
+    show_events: bool = False,
+    awaiting_clarification: bool = False,
+    original_question: str | None = None,
+    clarification_history: list[dict] | None = None,
+) -> dict:
     """
     Run question through real TradingGraph with Supabase logging capture.
 
@@ -251,8 +282,8 @@ def run_question(question: str, user_id: str = "test-user", show_events: bool = 
     session_id = str(uuid4())
     chat_id = str(uuid4())
 
-    with patch("agent.trading_graph.init_chat_log", mock_init), \
-         patch("agent.trading_graph.complete_chat_log", mock_complete), \
+    with patch("agent.trading_graph.init_chat_log_sync", mock_init), \
+         patch("agent.trading_graph.complete_chat_log_sync", mock_complete), \
          patch("agent.graph.log_trace_step_sync", mock_trace):
 
         for event in graph.stream_sse(
@@ -261,11 +292,17 @@ def run_question(question: str, user_id: str = "test-user", show_events: bool = 
             session_id=session_id,
             chat_id=chat_id,
             needs_title=True,
+            awaiting_clarification=awaiting_clarification,
+            original_question=original_question,
+            clarification_history=clarification_history,
         ):
             events.append(event)
 
     # Display results
-    print_header(f"Question: {question}")
+    header = f"Question: {question}"
+    if awaiting_clarification:
+        header += f" (continuing from: {original_question})"
+    print_header(header)
 
     if show_events:
         display_sse_events(events)
@@ -274,6 +311,9 @@ def run_question(question: str, user_id: str = "test-user", show_events: bool = 
 
     return {
         "question": question,
+        "awaiting_clarification": awaiting_clarification,
+        "original_question": original_question,
+        "clarification_history": clarification_history,
         "captured": {
             "init_chat_log": captured.init_chat_log,
             "trace_steps": captured.trace_steps,
@@ -311,6 +351,96 @@ def run_batch(questions: list[str], label: str = "batch") -> list[dict]:
 
     print(f"\n\n{'='*80}")
     print(f"Saved {len(results)} results to: {output_file}")
+
+    return results
+
+
+def run_clarification_scenarios() -> list[dict]:
+    """Run all clarification flow scenarios and save to JSON."""
+    results = []
+
+    # Common history for clarification tests
+    history = [{"role": "assistant", "content": "Смысл — это про вероятность или доходность?"}]
+    original = "есть смысл держать позицию в RTH?"
+
+    scenarios = [
+        # 1. First question triggers clarification
+        {
+            "name": "1_initial_unclear",
+            "question": "есть смысл держать позицию в RTH?",
+        },
+        # 2. User answers clarification
+        {
+            "name": "2_clarification_answered",
+            "question": "вероятность",
+            "awaiting_clarification": True,
+            "original_question": original,
+            "clarification_history": history,
+        },
+        # 3. User changes topic to clear question
+        {
+            "name": "3_topic_change_clear",
+            "question": "покажи топ 5 дней по объёму",
+            "awaiting_clarification": True,
+            "original_question": original,
+            "clarification_history": history,
+        },
+        # 4. User changes topic to unclear question
+        {
+            "name": "4_topic_change_unclear",
+            "question": "покажи топ 5 волатильных дней",
+            "awaiting_clarification": True,
+            "original_question": original,
+            "clarification_history": history,
+        },
+        # 5. User cancels
+        {
+            "name": "5_cancel",
+            "question": "забей",
+            "awaiting_clarification": True,
+            "original_question": original,
+            "clarification_history": history,
+        },
+        # 6. Chitchat without clarification
+        {
+            "name": "6_chitchat",
+            "question": "привет",
+        },
+        # 7. Clear question from start
+        {
+            "name": "7_clear_from_start",
+            "question": "топ 10 самых больших падений в 2024",
+        },
+    ]
+
+    for i, scenario in enumerate(scenarios, 1):
+        name = scenario.pop("name")
+        question = scenario["question"]
+
+        print(f"\n\n{'#'*80}")
+        print(f"#  [{i}/{len(scenarios)}] {name}: {question}")
+        print(f"{'#'*80}")
+
+        try:
+            result = run_question(**scenario)
+            result["scenario_name"] = name
+            results.append(result)
+        except Exception as e:
+            print(f"\n  ERROR: {e}")
+            import traceback
+            traceback.print_exc()
+            results.append({"scenario_name": name, "question": question, "error": str(e)})
+
+    # Save results
+    os.makedirs("agent/tests/results", exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    output_file = f"agent/tests/results/clarification_{timestamp}.json"
+
+    with open(output_file, "w", encoding="utf-8") as f:
+        json.dump(results, f, ensure_ascii=False, indent=2, default=str)
+
+    print(f"\n\n{'='*80}")
+    print(f"Saved {len(results)} clarification scenarios to: {output_file}")
 
     return results
 
@@ -435,6 +565,9 @@ if __name__ == "__main__":
 
         if arg == "-i":
             interactive_mode()
+        elif arg == "clarification":
+            print_header("Running CLARIFICATION scenarios (7 tests)")
+            run_clarification_scenarios()
         elif arg in QUESTIONS_BY_CATEGORY:
             questions = QUESTIONS_BY_CATEGORY[arg]
             print_header(f"Running {arg.upper()} ({len(questions)} questions)")
@@ -455,9 +588,10 @@ if __name__ == "__main__":
             print(f"\n\nSaved to: agent/tests/results/flow_single.json")
     else:
         print("Usage:")
-        print("  python -m agent.tests.full_flow_test <category>   # run category")
-        print("  python -m agent.tests.full_flow_test all          # run all")
-        print('  python -m agent.tests.full_flow_test "question"   # run single')
-        print("  python -m agent.tests.full_flow_test -i           # interactive")
+        print("  python -m agent.tests.full_flow_test <category>     # run category")
+        print("  python -m agent.tests.full_flow_test clarification  # run clarification scenarios")
+        print("  python -m agent.tests.full_flow_test all            # run all")
+        print('  python -m agent.tests.full_flow_test "question"     # run single')
+        print("  python -m agent.tests.full_flow_test -i             # interactive")
         print()
         print("Categories:", ", ".join(QUESTIONS_BY_CATEGORY.keys()))
