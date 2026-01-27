@@ -272,6 +272,7 @@ def init_chat_log_sync(
         return
 
     try:
+        print(f"[SUPABASE] init_chat_log: chat_id={chat_id}, request_id={request_id}")
         supabase.table("chat_logs").insert({
             "request_id": request_id,
             "user_id": user_id,

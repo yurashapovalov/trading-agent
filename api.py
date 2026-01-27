@@ -303,6 +303,8 @@ async def get_chat_messages(
             .limit(limit) \
             .execute()
 
+        print(f"[API] get_chat_messages: chat_id={chat_id}, found={len(result.data) if result.data else 0} messages")
+
         if not result.data:
             return []
 
@@ -649,6 +651,7 @@ async def chat_stream(request: ChatRequest, user_id: str = Depends(require_auth)
 
     # Get or create chat session
     chat_id = get_or_create_chat_session(user_id, request.chat_id)
+    print(f"[API] chat_stream: request.chat_id={request.chat_id}, resolved chat_id={chat_id}")
 
     # Check if chat needs a title (first message)
     needs_title = check_needs_title(chat_id)
