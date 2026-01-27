@@ -342,7 +342,7 @@ async def get_request_data(
     request_id: str,
     user_id: str = Depends(require_auth),
 ):
-    """Get full data for a specific request from data_fetcher trace."""
+    """Get full data for a specific request from executor trace."""
     if not supabase:
         raise HTTPException(status_code=500, detail="Database not available")
 
@@ -357,25 +357,40 @@ async def get_request_data(
         if not log_result.data:
             raise HTTPException(status_code=404, detail="Request not found")
 
-        # Get data_fetcher trace with full_data
+        # Try executor (current) or data_fetcher (legacy)
         trace_result = supabase.table("request_traces") \
-            .select("output_data") \
+            .select("output_data, agent_name") \
             .eq("request_id", request_id) \
-            .eq("agent_name", "data_fetcher") \
+            .in_("agent_name", ["executor", "data_fetcher"]) \
             .execute()
 
         if not trace_result.data:
             return {"rows": [], "columns": [], "row_count": 0}
 
         output_data = trace_result.data[0].get("output_data") or {}
-        full_data = output_data.get("full_data") or {}
+        agent_name = trace_result.data[0].get("agent_name")
 
-        return {
-            "rows": full_data.get("rows", []),
-            "columns": full_data.get("columns", []),
-            "row_count": full_data.get("row_count", 0),
-            "title": full_data.get("title", ""),
-        }
+        if agent_name == "executor":
+            # Current architecture: data is array of results
+            data = output_data.get("data", [])
+            all_rows = []
+            for result in data:
+                all_rows.extend(result.get("rows", []))
+            return {
+                "rows": all_rows,
+                "columns": list(all_rows[0].keys()) if all_rows else [],
+                "row_count": len(all_rows),
+                "title": "",
+            }
+        else:
+            # Legacy: data_fetcher with full_data
+            full_data = output_data.get("full_data") or {}
+            return {
+                "rows": full_data.get("rows", []),
+                "columns": full_data.get("columns", []),
+                "row_count": full_data.get("row_count", 0),
+                "title": full_data.get("title", ""),
+            }
     except HTTPException:
         raise
     except Exception as e:

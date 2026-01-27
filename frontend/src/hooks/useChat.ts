@@ -89,17 +89,41 @@ function extractDataFromTraces(traces: any[], requestId?: string): { dataCard?: 
 
     if (!outputData) continue
 
-    // Find responder trace with data_title (this is the preview)
+    // Find understander trace with acknowledge (this is the preview)
+    if (trace.agent_name === "understander" && outputData.acknowledge) {
+      preview = outputData.acknowledge
+    }
+
+    // Find presenter trace with title and row_count
+    if (trace.agent_name === "presenter") {
+      if (outputData.title) {
+        dataTitle = outputData.title
+      }
+      if (outputData.row_count !== undefined) {
+        rowCount = outputData.row_count
+      }
+    }
+
+    // Legacy: Find responder trace with data_title
     if (trace.agent_name === "responder" && outputData.data_title) {
       dataTitle = outputData.data_title
       preview = outputData.response
     }
 
-    // Find data_fetcher trace with full_data
+    // Legacy: Find data_fetcher trace with full_data
     if (trace.agent_name === "data_fetcher" && outputData.full_data) {
       const fullData = outputData.full_data
       dataTitle = fullData.title || dataTitle
       rowCount = fullData.row_count || 0
+    }
+
+    // Find executor trace with data (for row count)
+    if (trace.agent_name === "executor" && outputData.data) {
+      const data = outputData.data
+      if (Array.isArray(data) && data.length > 0) {
+        // Sum row counts from all results
+        rowCount = data.reduce((sum: number, r: any) => sum + (r.rows?.length || r.row_count || 0), 0)
+      }
     }
   }
 
