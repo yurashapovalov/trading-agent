@@ -178,17 +178,21 @@ export function useChat({ chatId, onChatCreated, onTitleUpdated }: UseChatOption
 
     const loadChatMessages = async () => {
       try {
+        console.log("[useChat] Loading messages for chatId:", chatId)
         const response = await fetch(`${API_URL}/chats/${chatId}/messages`, {
           headers: { Authorization: `Bearer ${session.access_token}` },
         })
+        console.log("[useChat] Response status:", response.status)
         if (response.ok) {
           const data = await response.json()
+          console.log("[useChat] API returned:", data?.length, "messages")
           // API returns array directly, not {messages: [...]}
           const messages = Array.isArray(data) ? data : []
           const loadedMessages: ChatMessage[] = messages
             .map((item: any) => {
               const traces = item.traces || []
               const { dataCard, preview } = extractDataFromTraces(traces, item.request_id)
+              console.log("[useChat] Message:", { question: item.question?.slice(0, 30), response: item.response?.slice(0, 30), tracesCount: traces.length, dataCard, preview: preview?.slice(0, 30) })
 
               return [
                 { role: "user" as const, content: item.question },
