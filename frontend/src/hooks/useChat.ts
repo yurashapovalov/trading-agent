@@ -183,6 +183,12 @@ export function useChat({ chatId, onChatCreated, onTitleUpdated }: UseChatOption
           headers: { Authorization: `Bearer ${session.access_token}` },
         })
         console.log("[useChat] Response status:", response.status)
+        if (response.status === 404) {
+          // Chat not found - redirect to home
+          console.log("[useChat] Chat not found, redirecting to /")
+          window.location.href = "/"
+          return
+        }
         if (response.ok) {
           const data = await response.json()
           console.log("[useChat] API returned:", data?.length, "messages")
