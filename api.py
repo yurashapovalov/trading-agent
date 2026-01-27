@@ -297,7 +297,7 @@ async def get_chat_messages(
 
         # Get messages for this chat
         result = supabase.table("chat_logs") \
-            .select("id, request_id, question, response, route, agents_used, input_tokens, output_tokens, thinking_tokens, cost_usd, feedback, created_at") \
+            .select("id, request_id, question, response, route, agents_used, feedback, created_at, usage, duration_ms") \
             .eq("chat_id", chat_id) \
             .order("created_at") \
             .limit(limit) \
@@ -308,7 +308,18 @@ async def get_chat_messages(
         if not result.data:
             return []
 
-        logs = result.data
+        # Extract token usage from JSONB 'usage' column for frontend compatibility
+        logs = []
+        for row in result.data:
+            usage = row.get("usage") or {}
+            total = usage.get("total", {})
+            logs.append({
+                **row,
+                "input_tokens": total.get("input_tokens", 0),
+                "output_tokens": total.get("output_tokens", 0),
+                "thinking_tokens": total.get("thinking_tokens", 0),
+                "cost_usd": total.get("cost_usd", 0),
+            })
 
         # Get traces for all messages
         request_ids = [log["request_id"] for log in logs if log.get("request_id")]
