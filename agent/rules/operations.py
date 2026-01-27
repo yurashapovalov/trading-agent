@@ -38,7 +38,7 @@ OPERATIONS: dict[str, OperationDef] = {
         "description": "Show top N records sorted by metric",
         "atoms": {"min": 1, "max": 1},
         "params": {
-            "n": {"type": "int", "default": 10, "description": "Number of records"},
+            "n": {"type": "int", "description": "Number of records (omit for all)"},
             "sort": {"type": "asc|desc", "default": "desc", "description": "Sort order"},
         },
         "requires_full_data": False,

@@ -132,10 +132,10 @@ class TestOpList:
         assert "error" in result["summary"]
 
     def test_default_params(self, sample_df):
-        """Test default parameters (n=10, sort=desc)."""
+        """Test default parameters (n=None means all, sort=desc)."""
         result = op_list(sample_df, "change", {})
 
-        assert len(result["rows"]) == 10
+        assert len(result["rows"]) == 20  # All rows when n not specified
         assert result["summary"]["sort"] == "desc"
 
 

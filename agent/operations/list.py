@@ -24,7 +24,7 @@ def op_list(df: pd.DataFrame, what: str, params: dict) -> dict:
         logger.warning("op_list: empty dataframe")
         return {"rows": [], "summary": {"count": 0}}
 
-    n = params.get("n", 10)
+    n = params.get("n")  # None = all records
     sort = params.get("sort", "desc")
     ascending = sort == "asc"
 
@@ -33,8 +33,10 @@ def op_list(df: pd.DataFrame, what: str, params: dict) -> dict:
         logger.warning(f"op_list: column {col} not found")
         return {"rows": [], "summary": {"error": f"Column {col} not found"}}
 
-    # Sort and limit
-    df_sorted = df.sort_values(col, ascending=ascending).head(n)
+    # Sort and optionally limit
+    df_sorted = df.sort_values(col, ascending=ascending)
+    if n is not None:
+        df_sorted = df_sorted.head(n)
 
     return {
         "rows": df_to_rows(df_sorted),
