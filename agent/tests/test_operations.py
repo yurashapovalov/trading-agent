@@ -442,3 +442,45 @@ class TestOperationsRegistry:
             # Either has rows/summary or error
             has_structure = "rows" in result or "summary" in result or "error" in result
             assert has_structure, f"{name} missing expected keys"
+
+
+# =============================================================================
+# df_to_rows Column Ordering Tests
+# =============================================================================
+
+class TestColumnOrdering:
+    """Test column ordering in df_to_rows."""
+
+    def test_date_first(self, sample_df):
+        """Date column should always be first."""
+        result = op_list(sample_df, "change", {"n": 1})
+        row = result["rows"][0]
+        keys = list(row.keys())
+        assert keys[0] == "date", f"First column should be 'date', got '{keys[0]}'"
+
+    def test_key_metrics_before_ohlcv(self, sample_df):
+        """Change/gap/range should come before OHLCV."""
+        result = op_list(sample_df, "change", {"n": 1})
+        row = result["rows"][0]
+        keys = list(row.keys())
+
+        change_idx = keys.index("change")
+        open_idx = keys.index("open")
+        assert change_idx < open_idx, "change should come before open"
+
+    def test_unknown_columns_last(self):
+        """Unknown columns should be ordered after known ones."""
+        from agent.operations._utils import df_to_rows
+
+        df = pd.DataFrame({
+            "custom_col": [1],
+            "date": ["2024-01-01"],
+            "change": [0.5],
+        })
+        rows = df_to_rows(df)
+        keys = list(rows[0].keys())
+
+        # date first, change second, custom last
+        assert keys[0] == "date"
+        assert keys[1] == "change"
+        assert keys[2] == "custom_col"

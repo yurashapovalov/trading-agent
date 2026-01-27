@@ -3,6 +3,42 @@
 import pandas as pd
 
 
+# Column display priority (first = most important)
+COLUMN_ORDER = [
+    # 1. Time — always first
+    "date", "timestamp",
+
+    # 2. Key metrics
+    "change", "gap", "range",
+
+    # 3. OHLCV
+    "open", "high", "low", "close", "volume",
+
+    # 4. Flags
+    "is_green", "gap_filled",
+
+    # 5. Time components
+    "weekday", "month", "year",
+
+    # 6. Neighbors
+    "prev_change", "next_change",
+]
+
+
+def _order_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Reorder DataFrame columns by priority."""
+    cols = list(df.columns)
+
+    def priority(col: str) -> int:
+        try:
+            return COLUMN_ORDER.index(col)
+        except ValueError:
+            return len(COLUMN_ORDER)  # Unknown columns last
+
+    ordered = sorted(cols, key=priority)
+    return df[ordered]
+
+
 def df_to_rows(df: pd.DataFrame) -> list[dict]:
     """
     Convert DataFrame to list of dicts for JSON serialization.
@@ -21,6 +57,9 @@ def df_to_rows(df: pd.DataFrame) -> list[dict]:
     """
     if df.empty:
         return []
+
+    # Order columns by priority
+    df = _order_columns(df)
 
     rows = []
     for _, row in df.iterrows():
