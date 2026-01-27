@@ -22,6 +22,22 @@ from agent.agents.responder import Responder
 from agent.logging.supabase import log_trace_step_sync
 
 
+def build_clarification_context(
+    original: str,
+    history: list[dict],
+    current_answer: str,
+) -> str:
+    """Build context string for Understander when continuing clarification."""
+    parts = [f"Original question: {original}"]
+    for turn in history:
+        if turn["role"] == "assistant":
+            parts.append(f"Assistant asked: {turn['content']}")
+        else:
+            parts.append(f"User answered: {turn['content']}")
+    parts.append(f"User answered: {current_answer}")
+    return "\n".join(parts)
+
+
 def classify_intent(state: AgentState) -> dict:
     """Classify intent and detect language."""
     start_time = time.time()
@@ -64,23 +80,48 @@ def classify_intent(state: AgentState) -> dict:
     return output
 
 
-def route_after_intent(state: AgentState) -> Literal["understander", "clarify_continue", "responder"]:
-    """Route: awaiting_clarification → continue clarification, data → understander, else → responder."""
-    # If awaiting clarification, route to continue flow
+def route_after_intent(state: AgentState) -> Literal["understander", "responder"]:
+    """Route: data or awaiting_clarification → understander, else → responder."""
+    # If awaiting clarification, always go to understander (it has context)
     if state.get("awaiting_clarification"):
-        return "clarify_continue"
-
+        return "understander"
     intent = state.get("intent", "data")
     return "understander" if intent == "data" else "responder"
 
 
 def understand_question(state: AgentState) -> dict:
-    """Understand what user wants."""
+    """Understand what user wants. Handles both fresh questions and clarification continuations."""
     start_time = time.time()
-    question = state.get("internal_query", get_current_question(state))
     lang = state.get("lang", "en")
     needs_title = state.get("needs_title", False)
     memory_context = state.get("memory_context")
+    awaiting_clarification = state.get("awaiting_clarification", False)
+    history = state.get("clarification_history") or []
+
+    # Safety net: max 3 rounds (6 messages = 3 questions + 3 answers)
+    if awaiting_clarification and len(history) >= 6:
+        msg = "Не получается понять. Попробуй сформулировать вопрос по-другому?" if lang == "ru" \
+              else "Having trouble understanding. Could you rephrase your question?"
+        step_number = (state.get("step_number") or 0) + 1
+        return {
+            "response": msg,
+            "awaiting_clarification": False,
+            "clarification_history": None,
+            "original_question": None,
+            "topic_changed": True,
+            "step_number": step_number,
+        }
+
+    # Build question: with context if continuing clarification, otherwise fresh
+    if awaiting_clarification:
+        original = state.get("original_question", "")
+        current_answer = get_current_question(state)
+        question = f"{original}\n\nContext:\n{build_clarification_context(original, history, current_answer)}"
+        # Add user answer to history for next round if needed
+        updated_history = history + [{"role": "user", "content": current_answer}]
+    else:
+        question = state.get("internal_query", get_current_question(state))
+        updated_history = None
 
     understander = Understander()
     result = understander.understand(question, lang=lang, needs_title=needs_title)
@@ -94,12 +135,32 @@ def understand_question(state: AgentState) -> dict:
     output = {
         "goal": result.goal,
         "understood": result.understood,
+        "topic_changed": result.topic_changed,
         "expanded_query": result.expanded_query,
         "acknowledge": result.acknowledge,
         "need_clarification": result.need_clarification.model_dump() if result.need_clarification else None,
         "suggested_title": result.suggested_title,
         "usage": total.model_dump(),
     }
+
+    # Handle clarification state
+    if result.topic_changed:
+        # Topic changed — clear old clarification state, start fresh
+        output["awaiting_clarification"] = False
+        output["clarification_history"] = None
+        output["original_question"] = None
+    elif result.understood:
+        # Understood — clear clarification state
+        output["awaiting_clarification"] = False
+        output["clarification_history"] = updated_history  # Keep for logging
+    else:
+        # Still need clarification — keep history
+        output["clarification_history"] = updated_history
+
+    # Special case: cancellation (not understood, no need_clarification, but has acknowledge)
+    # This means Understander recognized it as cancel/chitchat
+    if not result.understood and not result.need_clarification and result.acknowledge:
+        output["response"] = result.acknowledge
 
     # Log trace step
     step_number = (state.get("step_number") or 0) + 1
@@ -118,11 +179,12 @@ def understand_question(state: AgentState) -> dict:
                 "lang": lang,
                 "needs_title": needs_title,
                 "memory_context": memory_context,
+                "awaiting_clarification": awaiting_clarification,
             },
             output_data={
                 "goal": result.goal,
                 "understood": result.understood,
-                "topic_changed": getattr(result, "topic_changed", False),
+                "topic_changed": result.topic_changed,
                 "expanded_query": result.expanded_query,
                 "acknowledge": result.acknowledge,
                 "suggested_title": result.suggested_title,
@@ -136,10 +198,20 @@ def understand_question(state: AgentState) -> dict:
     return output
 
 
-def route_after_understander(state: AgentState) -> Literal["parser", "clarify"]:
-    """Route: understood → parser, else → clarify."""
-    understood = state.get("understood", False)
-    return "parser" if understood else "clarify"
+def route_after_understander(state: AgentState) -> Literal["parser", "clarify", "end"]:
+    """Route based on understander result.
+
+    Simple logic:
+    - response already set (safety net) → end
+    - understood → parser
+    - not understood → clarify
+    """
+    # Safety net: response already set by understander
+    if state.get("response"):
+        return "end"
+    if state.get("understood"):
+        return "parser"
+    return "clarify"
 
 
 def handle_clarification(state: AgentState) -> dict:
@@ -207,162 +279,6 @@ def handle_clarification(state: AgentState) -> dict:
             },
             output_data={
                 "response": result.question,
-            },
-            usage=result.usage.model_dump(),
-            duration_ms=duration_ms,
-        )
-
-    output["step_number"] = step_number
-    return output
-
-
-def continue_clarification(state: AgentState) -> dict:
-    """Continue clarification: send user's answer back to Understander with context."""
-    start_time = time.time()
-    user_answer = get_current_question(state)
-    original = state.get("original_question", "")
-    lang = state.get("lang", "en")
-
-    # Add user answer to history
-    history = state.get("clarification_history") or []
-    history.append({"role": "user", "content": user_answer})
-
-    # Safety net: max 3 rounds (6 messages = 3 questions + 3 answers)
-    if len(history) >= 6:
-        msg = "Не получается понять. Попробуй сформулировать вопрос по-другому?" if lang == "ru" \
-              else "Having trouble understanding. Could you rephrase your question?"
-        output = {
-            "response": msg,
-            "awaiting_clarification": False,
-            "topic_changed": True,  # Treat as topic change to end flow
-        }
-        # Log safety net exit
-        step_number = (state.get("step_number") or 0) + 1
-        request_id = state.get("request_id")
-        user_id = state.get("user_id")
-        if request_id and user_id:
-            duration_ms = int((time.time() - start_time) * 1000)
-            log_trace_step_sync(
-                request_id=request_id,
-                user_id=user_id,
-                step_number=step_number,
-                agent_name="clarify_continue",
-                input_data={
-                    "original_question": original,
-                    "user_answer": user_answer,
-                    "clarification_history": history,
-                    "lang": lang,
-                },
-                output_data={"response": msg, "reason": "max_rounds_exceeded"},
-                duration_ms=duration_ms,
-            )
-        output["step_number"] = step_number
-        return output
-
-    # Build context for Understander
-    context_parts = [f"Original question: {original}"]
-    for turn in history:
-        if turn["role"] == "assistant":
-            context_parts.append(f"Assistant asked: {turn['content']}")
-        else:
-            context_parts.append(f"User answered: {turn['content']}")
-    context = "\n".join(context_parts)
-
-    # Call Understander with context
-    understander = Understander()
-    result = understander.understand(
-        question=f"{original}\n\nContext:\n{context}",
-        lang=lang,
-    )
-
-    # Aggregate usage
-    prev_usage = state.get("usage") or {}
-    prev = Usage.model_validate(prev_usage) if prev_usage else Usage()
-    total = prev + result.usage
-
-    # Determine output based on case
-    output: dict
-
-    # Case 1: Topic changed + understood = NEW data request
-    # User ignored clarification and asked something else
-    if result.topic_changed and result.understood:
-        output = {
-            "goal": result.goal,
-            "understood": True,
-            "topic_changed": True,
-            "expanded_query": result.expanded_query,
-            "acknowledge": result.acknowledge,
-            "need_clarification": None,
-            "usage": total.model_dump(),
-            "awaiting_clarification": False,
-            "clarification_history": None,  # Clear history - new topic
-            "original_question": None,
-        }
-
-    # Case 2: Topic changed + not understood = cancellation/chitchat
-    # User said "забей", "привет", etc. → route to responder
-    elif result.topic_changed and not result.understood:
-        output = {
-            "intent": result.intent,  # Pass intent so responder can handle
-            "topic_changed": True,
-            "understood": False,
-            "awaiting_clarification": False,
-            "clarification_history": None,
-            "original_question": None,
-            "usage": total.model_dump(),
-        }
-
-    # Case 3: Understood the original question with clarification
-    elif result.understood:
-        output = {
-            "goal": result.goal,
-            "understood": True,
-            "topic_changed": False,
-            "expanded_query": result.expanded_query,
-            "acknowledge": result.acknowledge,
-            "need_clarification": None,
-            "usage": total.model_dump(),
-            "awaiting_clarification": False,
-            "clarification_history": history,
-        }
-
-    # Case 4: Still need clarification
-    else:
-        output = {
-            "goal": result.goal,
-            "understood": False,
-            "topic_changed": False,
-            "expanded_query": result.expanded_query,
-            "need_clarification": result.need_clarification.model_dump() if result.need_clarification else None,
-            "usage": total.model_dump(),
-            "clarification_history": history,
-        }
-
-    # Log trace step
-    step_number = (state.get("step_number") or 0) + 1
-    request_id = state.get("request_id")
-    user_id = state.get("user_id")
-
-    if request_id and user_id:
-        duration_ms = int((time.time() - start_time) * 1000)
-        log_trace_step_sync(
-            request_id=request_id,
-            user_id=user_id,
-            step_number=step_number,
-            agent_name="clarify_continue",
-            input_data={
-                "original_question": original,
-                "user_answer": user_answer,
-                "clarification_history": history,
-                "lang": lang,
-            },
-            output_data={
-                "goal": result.goal,
-                "understood": result.understood,
-                "topic_changed": result.topic_changed,
-                "expanded_query": result.expanded_query,
-                "acknowledge": result.acknowledge,
-                "need_clarification": result.need_clarification.model_dump() if result.need_clarification else None,
             },
             usage=result.usage.model_dump(),
             duration_ms=duration_ms,
@@ -713,52 +629,26 @@ def respond_to_user(state: AgentState) -> dict:
 
 
 def handle_end(state: AgentState) -> dict:
-    """Handle topic_changed cancellations when response is already set.
+    """Pass-through node for ending flow when response is already set.
 
-    This node is reached when:
-    - clarify_continue returns topic_changed + response (cancellation/chitchat)
-    - Response is already generated, just pass through
+    Used when safety net triggered (max clarification rounds).
     """
-    # Response already set (topic_changed cancellation), nothing to do
     return {}
 
 
-def route_after_clarify_continue(state: AgentState) -> Literal["parser", "clarify", "responder"]:
-    """Route after continue_clarification.
-
-    Cases:
-    - topic_changed + chitchat/concept → responder
-    - understood → parser (got answer, process query)
-    - else → clarify (need more clarification)
-    """
-    # Case: topic changed to chitchat/concept → responder handles it
-    if state.get("topic_changed") and not state.get("understood"):
-        return "responder"
-
-    # Case: understood (either original or new topic)
-    if state.get("understood"):
-        return "parser"
-
-    # Case: still need clarification
-    return "clarify"
-
-
 def build_graph() -> StateGraph:
-    """Build graph with multi-turn clarification support.
+    """Build graph with simple clarification handling.
 
     Flow:
-        Data: Intent → Understander → Parser → Planner → Executor → Presenter → END
+        Data understood: Intent → Understander → Parser → Planner → Executor → Presenter → END
+        Data unclear: Intent → Understander → Clarify → END
         Chitchat/Concept: Intent → Responder → END
-        Clarification: Intent → clarify_continue → ...
-            - understood → Parser → ... → END
-            - topic_changed (chitchat/concept) → Responder → END
-            - else → clarify → END (ask again)
+        Safety net: Intent → Understander → End → END
     """
     graph = StateGraph(AgentState)
 
     graph.add_node("intent", classify_intent)
     graph.add_node("understander", understand_question)
-    graph.add_node("clarify_continue", continue_clarification)
     graph.add_node("parser", parse_question)
     graph.add_node("planner", plan_execution)
     graph.add_node("executor", execute_query)
@@ -771,17 +661,12 @@ def build_graph() -> StateGraph:
     graph.add_conditional_edges(
         "intent",
         route_after_intent,
-        {"understander": "understander", "clarify_continue": "clarify_continue", "responder": "responder"}
+        {"understander": "understander", "responder": "responder"},
     )
     graph.add_conditional_edges(
         "understander",
         route_after_understander,
-        {"parser": "parser", "clarify": "clarify"}
-    )
-    graph.add_conditional_edges(
-        "clarify_continue",
-        route_after_clarify_continue,
-        {"parser": "parser", "clarify": "clarify", "responder": "responder"}
+        {"parser": "parser", "clarify": "clarify", "end": "end"},
     )
     graph.add_edge("parser", "planner")
     graph.add_edge("planner", "executor")

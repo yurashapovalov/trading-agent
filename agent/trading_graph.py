@@ -310,20 +310,15 @@ class TradingGraph:
             return {
                 "internal_query": state.get("internal_query"),
                 "lang": state.get("lang"),
+                "awaiting_clarification": state.get("awaiting_clarification"),
+                "original_question": state.get("original_question"),
+                "clarification_history": state.get("clarification_history"),
             }
 
         elif agent_name == "clarifier":
             return {
                 "need_clarification": state.get("need_clarification"),
                 "question": state.get("original_question"),
-                "lang": state.get("lang"),
-                "memory_context": state.get("memory_context"),
-            }
-
-        elif agent_name == "clarify_continue":
-            return {
-                "question": state.get("original_question"),
-                "clarification_history": state.get("clarification_history"),
                 "lang": state.get("lang"),
                 "memory_context": state.get("memory_context"),
             }
