@@ -22,6 +22,33 @@ from agent.agents.responder import Responder
 from agent.logging.supabase import log_trace_step_sync
 
 
+def _strip_pattern_columns(results: list[dict]) -> list[dict]:
+    """
+    Remove is_* pattern columns from rows before logging to trace.
+
+    Pattern columns are used internally for:
+    - Filtering (e.g., "show all doji")
+    - Presenter context (counts patterns for summary text)
+
+    But they shouldn't be in the output sent to frontend:
+    - Pollutes table with 30+ columns of mostly zeros
+    - If user filtered by pattern, all rows match anyway (redundant)
+    """
+    stripped = []
+    for result in results:
+        rows = result.get("rows", [])
+        if not rows:
+            stripped.append(result)
+            continue
+
+        clean_rows = [
+            {k: v for k, v in row.items() if not k.startswith("is_")}
+            for row in rows
+        ]
+        stripped.append({**result, "rows": clean_rows})
+    return stripped
+
+
 def build_clarification_context(
     original: str,
     history: list[dict],
@@ -459,7 +486,7 @@ def execute_query(state: AgentState) -> dict:
             step_number=step_number,
             agent_name="executor",
             input_data={"execution_plan": plans_dict},
-            output_data={"data": results},
+            output_data={"data": _strip_pattern_columns(results)},
             usage=None,  # No LLM usage
             duration_ms=duration_ms,
         )
